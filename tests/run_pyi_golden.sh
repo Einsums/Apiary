@@ -5,7 +5,7 @@
 # ----------------------------------------------------------------------------------------------
 #
 # .pyi golden-output runner. Drives each fixture under tests/fixtures/
-# through einsums-pybind with --stub-output and diffs the produced stub
+# through apiary with --stub-output and diffs the produced stub
 # against a committed .pyi.golden file. Catches drift in the per-
 # instantiation type resolution, docstring extraction, property merge,
 # and dtype-/template-kwargs-dispatcher emission.
@@ -14,12 +14,12 @@
 #     REGEN=1 run_pyi_golden.sh <tool> <annotations-include-dir>
 #
 # Invocation:
-#     run_pyi_golden.sh <einsums-pybind-binary> <annotations-include-dir>
+#     run_pyi_golden.sh <apiary-binary> <annotations-include-dir>
 
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
-    echo "usage: $0 <einsums-pybind-binary> <annotations-include-dir>" >&2
+    echo "usage: $0 <apiary-binary> <annotations-include-dir>" >&2
     exit 64
 fi
 

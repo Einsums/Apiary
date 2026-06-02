@@ -199,7 +199,7 @@ match_groups_to_template_params(clang::Decl const *decl, clang::ASTContext const
         clang::SourceManager const &sm  = ctx.getSourceManager();
         clang::SourceLocation const loc = decl->getLocation();
         llvm::errs() << sm.getFilename(loc) << ":" << sm.getSpellingLineNumber(loc) << ":" << sm.getSpellingColumnNumber(loc)
-                     << ": error: einsums-pybind: @" << directive_name << " on " << actual_class_name << ": " << msg << "\n";
+                     << ": error: apiary: @" << directive_name << " on " << actual_class_name << ": " << msg << "\n";
     };
 
     bool ok = true;
@@ -475,7 +475,7 @@ void Visitor::fill_common(BoundEntityCommon &entity, clang::NamedDecl const *dec
 }
 
 bool Visitor::TraverseNamespaceDecl(clang::NamespaceDecl *decl) {
-    // Look for an EINSUMS_PYBIND_MODULE directive on this namespace
+    // Look for an APIARY_MODULE directive on this namespace
     // declaration. Anonymous namespaces and re-opened blocks without the
     // directive don't push anything; the previous innermost value remains
     // in effect for nested entities.
@@ -605,7 +605,7 @@ bool Visitor::VisitCXXMethodDecl(clang::CXXMethodDecl *decl) {
         }
     }
 
-    // Honor EINSUMS_PYBIND_VARIADIC_FROM: record the named template
+    // Honor APIARY_VARIADIC_FROM: record the named template
     // parameter and the per-element type so the emitter can expand the
     // pack at per-instantiation time. The directive only makes sense
     // inside a templated class.
@@ -646,7 +646,7 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
     fn.return_py_type        = translate_python_type(decl->getReturnType(), _context);
     fn.params                = build_params(decl, _context);
     fn.is_template           = decl->getDescribedFunctionTemplate() != nullptr;
-    // Resolve EINSUMS_PYBIND_INSTANTIATE_AS directives on a templated free
+    // Resolve APIARY_INSTANTIATE_AS directives on a templated free
     // function into per-instantiation BoundInstantiation entries. Each
     // directive specifies an explicit Python name and the C++ type
     // arguments; the emitter writes one m.def(py_name, &qualified<args>)
@@ -666,7 +666,7 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
                 }
             }
         }
-        // Collect EINSUMS_PYBIND_TEMPLATE_KWARGS first so it's available
+        // Collect APIARY_TEMPLATE_KWARGS first so it's available
         // when expanding INSTANTIATE_BOOLS below. The directive carries a
         // single free-form arg holding the stringified macro arguments,
         // e.g. ``"trans_a", "trans_b"`` — quoted, comma-separated.
@@ -696,8 +696,8 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
                     clang::SourceManager const &sm  = _context.getSourceManager();
                     clang::SourceLocation const loc = decl->getLocation();
                     llvm::errs() << sm.getFilename(loc) << ":" << sm.getSpellingLineNumber(loc) << ":" << sm.getSpellingColumnNumber(loc)
-                                 << ": error: einsums-pybind: @instantiate_bools on " << fn.qualified_name
-                                 << ": requires EINSUMS_PYBIND_TEMPLATE_KWARGS to declare bool kwarg names\n";
+                                 << ": error: apiary: @instantiate_bools on " << fn.qualified_name
+                                 << ": requires APIARY_TEMPLATE_KWARGS to declare bool kwarg names\n";
                     ++_error_count;
                     continue;
                 }

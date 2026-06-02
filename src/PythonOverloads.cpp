@@ -190,7 +190,7 @@ void compute_python_overloads(BoundFunction &f) {
     for (auto const &py_name : py_names_in_order) {
         auto const &group = by_name[py_name];
 
-        // Bool fan-out path (EINSUMS_PYBIND_TEMPLATE_KWARGS). Sub-group
+        // Bool fan-out path (APIARY_TEMPLATE_KWARGS). Sub-group
         // by the non-bool template-arg tail; each sub-group of 2^N
         // entries collapses into a TemplateKwargsDispatcher.
         if (!f.template_kwargs.empty()) {

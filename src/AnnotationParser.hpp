@@ -13,7 +13,7 @@
 namespace einsums::pybind {
 
 // Parses an annotation payload of the form
-// "einsums_pybind:<name>[:<arg>[:<arg>...]]" into a Directive. Returns
+// "apiary:<name>[:<arg>[:<arg>...]]" into a Directive. Returns
 // nullopt if the prefix doesn't match.
 //
 // Special cases:
@@ -25,7 +25,7 @@ namespace einsums::pybind {
 //     and parentheses that the codegen tool will parse later.
 std::optional<Directive> parse_annotation(llvm::StringRef payload);
 
-// Project-wide annotation prefix laid down by EINSUMS_PYBIND_DETAIL_ANNOTATE.
-inline constexpr llvm::StringLiteral k_annotation_prefix = "einsums_pybind:";
+// Project-wide annotation prefix laid down by APIARY_DETAIL_ANNOTATE.
+inline constexpr llvm::StringLiteral k_annotation_prefix = "apiary:";
 
 } // namespace einsums::pybind

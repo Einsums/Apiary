@@ -13,29 +13,29 @@
 
 namespace einsums::fixture {
 
-class EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_RENAME("PyShape") EINSUMS_PYBIND_NOCOPY Shape {
+class APIARY_EXPOSE APIARY_RENAME("PyShape") APIARY_NOCOPY Shape {
   public:
     /// Default-construct an empty shape.
-    EINSUMS_PYBIND_EXPOSE Shape();
+    APIARY_EXPOSE Shape();
 
     /// Build a shape from a single dimension.
-    EINSUMS_PYBIND_EXPOSE explicit Shape(int dim);
+    APIARY_EXPOSE explicit Shape(int dim);
 
     /// Number of dimensions.
-    EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_RVP(reference_internal) int rank() const;
+    APIARY_EXPOSE APIARY_RVP(reference_internal) int rank() const;
 
     /// Equality across two shapes.
-    EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_OPERATOR("__eq__") bool operator==(Shape const &other) const;
+    APIARY_EXPOSE APIARY_OPERATOR("__eq__") bool operator==(Shape const &other) const;
 
     /// Read-only access to the contained dim, exposed as a Python property.
-    EINSUMS_PYBIND_GETTER("dim") int get_dim() const;
+    APIARY_GETTER("dim") int get_dim() const;
 
     /// Mutator paired with the getter above.
-    EINSUMS_PYBIND_SETTER("dim") void set_dim(int value);
+    APIARY_SETTER("dim") void set_dim(int value);
 
-    EINSUMS_PYBIND_EXPOSE int public_field;
+    APIARY_EXPOSE int public_field;
 
-    EINSUMS_PYBIND_HIDE void internal_helper();
+    APIARY_HIDE void internal_helper();
 };
 
 } // namespace einsums::fixture

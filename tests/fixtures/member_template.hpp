@@ -17,9 +17,9 @@ namespace einsums::fixture {
 /// Holder class with a member-template method. Each
 /// INSTANTIATE_MEMBER_AS line on the method emits one Python binding
 /// with the named template arg pinned to a concrete type.
-class EINSUMS_PYBIND_EXPOSE Workspace {
+class APIARY_EXPOSE Workspace {
   public:
-    EINSUMS_PYBIND_EXPOSE Workspace();
+    APIARY_EXPOSE Workspace();
 
     /// Allocate a slot keyed by an integer id, returning the new
     /// slot's value. Two INSTANTIATE_MEMBER_AS lines share an argument
@@ -27,8 +27,8 @@ class EINSUMS_PYBIND_EXPOSE Workspace {
     /// dispatcher rules apply: collapse into one Python def taking
     /// ``dtype="..."``.
     template <typename U>
-    EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_INSTANTIATE_MEMBER_AS("allocate", U = float)
-        EINSUMS_PYBIND_INSTANTIATE_MEMBER_AS("allocate", U = double) U allocate(int slot_id);
+    APIARY_EXPOSE APIARY_INSTANTIATE_MEMBER_AS("allocate", U = float)
+        APIARY_INSTANTIATE_MEMBER_AS("allocate", U = double) U allocate(int slot_id);
 };
 
 } // namespace einsums::fixture

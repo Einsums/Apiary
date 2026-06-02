@@ -12,7 +12,7 @@
 //   * @instantiate_as overloads sharing a Python name AND argument
 //     signature (only the return type varies) collapse into one
 //     dispatcher taking a ``dtype="..."`` kwarg.
-//   * 2^N instantiations from EINSUMS_PYBIND_INSTANTIATE_BOOLS collapse
+//   * 2^N instantiations from APIARY_INSTANTIATE_BOOLS collapse
 //     into one dispatcher with N bool kwargs (kw_only).
 //   * Otherwise each instantiation is its own pybind11 overload (or the
 //     sole entry, in the non-template case).

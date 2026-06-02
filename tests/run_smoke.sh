@@ -5,17 +5,17 @@
 # ----------------------------------------------------------------------------------------------
 #
 # Phase-2 smoke runner. Drives each fixture under tests/fixtures/ through
-# einsums-pybind and checks the IR dump for a hand-written set of
+# apiary and checks the IR dump for a hand-written set of
 # substring assertions. Phase 3 will replace this with golden-output diffs
 # once the emitter output stabilizes.
 #
 # Invocation:
-#     run_smoke.sh <einsums-pybind-binary> <annotations-include-dir>
+#     run_smoke.sh <apiary-binary> <annotations-include-dir>
 
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
-    echo "usage: $0 <einsums-pybind-binary> <annotations-include-dir>" >&2
+    echo "usage: $0 <apiary-binary> <annotations-include-dir>" >&2
     exit 64
 fi
 

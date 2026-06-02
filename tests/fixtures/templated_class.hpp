@@ -16,24 +16,24 @@
 namespace einsums::fixture {
 
 template <typename T, int N>
-class EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_INSTANTIATE(Tensor, T(float, double), N(1, 2)) Tensor {
+class APIARY_EXPOSE APIARY_INSTANTIATE(Tensor, T(float, double), N(1, 2)) Tensor {
   public:
     /// Default-construct an empty tensor.
-    EINSUMS_PYBIND_EXPOSE Tensor();
+    APIARY_EXPOSE Tensor();
 
     /// Total element count.
-    EINSUMS_PYBIND_EXPOSE int size() const;
+    APIARY_EXPOSE int size() const;
 
     /// Read-only rank accessor.
-    EINSUMS_PYBIND_EXPOSE int rank() const;
+    APIARY_EXPOSE int rank() const;
 };
 
 template <typename T, int N>
-class EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_INSTANTIATE_AS("View2d", View<double, 2>) View {
+class APIARY_EXPOSE APIARY_INSTANTIATE_AS("View2d", View<double, 2>) View {
   public:
-    EINSUMS_PYBIND_EXPOSE View();
+    APIARY_EXPOSE View();
 
-    EINSUMS_PYBIND_EXPOSE int stride(int dim) const;
+    APIARY_EXPOSE int stride(int dim) const;
 };
 
 // Phase-8b: cross-product with INSTANTIATE_TEMPLATE — placeholders use
@@ -42,14 +42,14 @@ class EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_INSTANTIATE_AS("View2d", View<double,
 // Phase-8c: VARIADIC_FROM expands the pack ctor per instantiation; each
 // Block_<E>_<R> gets a ctor with R typed slots.
 template <typename Element, int Rank>
-class EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_INSTANTIATE_TEMPLATE("Block_{Element}_{Rank}", Block, Element(float, double), Rank(1, 2)) Block {
+class APIARY_EXPOSE APIARY_INSTANTIATE_TEMPLATE("Block_{Element}_{Rank}", Block, Element(float, double), Rank(1, 2)) Block {
   public:
-    EINSUMS_PYBIND_EXPOSE Block();
+    APIARY_EXPOSE Block();
 
     template <typename... Dims>
-    EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_VARIADIC_FROM(Rank, int) Block(Dims... dims);
+    APIARY_EXPOSE APIARY_VARIADIC_FROM(Rank, int) Block(Dims... dims);
 
-    EINSUMS_PYBIND_EXPOSE int size() const;
+    APIARY_EXPOSE int size() const;
 };
 
 } // namespace einsums::fixture

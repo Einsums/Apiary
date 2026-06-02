@@ -27,7 +27,7 @@ struct SourceLocation {
 };
 
 // One parsed annotation directive. The AnnotationParser splits the raw
-// "einsums_pybind:<name>[:<arg>[:<arg>...]]" payload into this form so the
+// "apiary:<name>[:<arg>[:<arg>...]]" payload into this form so the
 // emitter can switch on `name` cleanly.
 struct Directive {
     std::string              name;
@@ -46,7 +46,7 @@ struct BoundEntityCommon {
     std::string    doc; // raw doxygen text or empty
     SourceLocation location;
     /// Resolved Python submodule path (from a per-entity or inherited
-    /// EINSUMS_PYBIND_MODULE directive on an enclosing namespace). Empty
+    /// APIARY_MODULE directive on an enclosing namespace). Empty
     /// when the entity belongs to the top-level module. The .pyi
     /// emitter uses this to decide which `<module>.pyi` file an
     /// entity belongs to (e.g. einsums.linalg, einsums.graph).
@@ -99,7 +99,7 @@ struct BoundMethod : BoundEntityCommon {
     bool                     is_operator     = false;
     bool                     is_deleted      = false;
 
-    // Set by EINSUMS_PYBIND_VARIADIC_FROM: the last parameter is a pack
+    // Set by APIARY_VARIADIC_FROM: the last parameter is a pack
     // expansion whose arity comes from the named template parameter, and
     // each expanded slot has type ``variadic_element_type``. When emitting
     // a per-instantiation binding, the pack slot is replaced with N copies
@@ -142,7 +142,7 @@ struct BoundInstantiation {
 //                            return type varies; collapse into one m.def
 //                            taking ``dtype="..."`` kwarg
 //   * TemplateKwargsDispatcher
-//                          — 2^N instantiations from EINSUMS_PYBIND_INSTANTIATE_BOOLS
+//                          — 2^N instantiations from APIARY_INSTANTIATE_BOOLS
 //                            collapse into one m.def with N bool kwargs
 //   * OverloadSet          — multiple instantiations with the same py_name
 //                            that DON'T merge into a dispatcher; pybind11
@@ -233,11 +233,11 @@ struct BoundFunction : BoundEntityCommon {
     /// to disambiguate overloads.
     std::vector<std::string> template_param_names;
     /// Python kwarg names for the leading bool template parameters,
-    /// from ``EINSUMS_PYBIND_TEMPLATE_KWARGS``. Empty for functions
+    /// from ``APIARY_TEMPLATE_KWARGS``. Empty for functions
     /// without that directive. The emitter generates a runtime
     /// dispatcher with these as keyword-only arguments when non-empty.
     std::vector<std::string> template_kwargs;
-    /// One per ``EINSUMS_PYBIND_INSTANTIATE_AS`` directive on a templated
+    /// One per ``APIARY_INSTANTIATE_AS`` directive on a templated
     /// free function. Empty for non-templated functions and for templated
     /// functions without explicit instantiation directives (those skip
     /// emission with a TODO comment).

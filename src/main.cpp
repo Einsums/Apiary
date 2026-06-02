@@ -3,7 +3,7 @@
 // Licensed under the MIT License. See LICENSE.txt in the project root for license information.
 //----------------------------------------------------------------------------------------------
 
-// einsums-pybind — Phase 3 driver.
+// apiary — Phase 3 driver.
 //
 // Walks the headers given on the command line, builds a Module IR, and
 // emits a pybind11 binding TU. The output is post-clang-format using the
@@ -11,8 +11,8 @@
 // LLVM style.
 //
 // Invocation:
-//     einsums-pybind --module <name> --output <path> <header>... [-- <args>]
-//     einsums-pybind --module <name> --output <path> -p <build-dir> <header>...
+//     apiary --module <name> --output <path> <header>... [-- <args>]
+//     apiary --module <name> --output <path> -p <build-dir> <header>...
 //
 // Without --output, the formatted source is written to stdout. Without
 // --module, "einsums" is used.
@@ -44,7 +44,7 @@ namespace {
 // CommonOptionsParser owns -p and the trailing-arg conventions; we add
 // tool-specific flags here. Static init is the libtooling pattern.
 // NOLINTBEGIN(cert-err58-cpp,bugprone-throwing-static-initialization)
-llvm::cl::OptionCategory g_tool_category("einsums-pybind options");
+llvm::cl::OptionCategory g_tool_category("apiary options");
 
 llvm::cl::opt<std::string> g_module_name("module", llvm::cl::desc("Python module name (PYBIND11_MODULE arg)"),
                                          llvm::cl::cat(g_tool_category), llvm::cl::init("einsums"));
@@ -214,7 +214,7 @@ int write_output(std::string const &content) {
     std::error_code      ec;
     llvm::raw_fd_ostream out(g_output_path, ec);
     if (ec) {
-        llvm::errs() << "einsums-pybind: cannot open output '" << g_output_path << "': " << ec.message() << "\n";
+        llvm::errs() << "apiary: cannot open output '" << g_output_path << "': " << ec.message() << "\n";
         return 1;
     }
     out << content;
@@ -272,19 +272,19 @@ int main(int argc, char const **argv) {
         std::error_code      ec;
         llvm::raw_fd_ostream out(g_stub_output, ec);
         if (ec) {
-            llvm::errs() << "einsums-pybind: cannot open stub output '" << g_stub_output << "': " << ec.message() << "\n";
+            llvm::errs() << "apiary: cannot open stub output '" << g_stub_output << "': " << ec.message() << "\n";
             return 1;
         }
         out << stub;
     }
 
     if (g_report_undocumented) {
-        llvm::errs() << "einsums-pybind: " << g_undocumented_count << " undocumented public entit"
+        llvm::errs() << "apiary: " << g_undocumented_count << " undocumented public entit"
                      << (g_undocumented_count == 1 ? "y" : "ies") << ".\n";
     }
 
     if (g_error_count > 0) {
-        llvm::errs() << "einsums-pybind: " << g_error_count << " error(s) — bindings may be incomplete.\n";
+        llvm::errs() << "apiary: " << g_error_count << " error(s) — bindings may be incomplete.\n";
         return 1;
     }
     return rc != 0 ? rc : write_rc;

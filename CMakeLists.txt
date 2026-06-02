@@ -5,7 +5,7 @@
 
 # apiary — libtooling-based codegen for Python bindings.
 #
-# Walks Einsums headers, finds declarations marked with EINSUMS_PYBIND_*
+# Walks Einsums headers, finds declarations marked with APIARY_*
 # macros (see libs/Einsums/Python/include/Einsums/Python/Annotations.hpp),
 # and emits a pybind11 binding TU per module. Designed to be invoked by
 # einsums_add_module() so that adding a new C++ feature requires no manual
@@ -102,12 +102,12 @@ install(TARGETS apiary
 # golden-output diffs once the emitter output stabilizes.
 if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
-    add_test(NAME einsums_pybind_phase2_smoke
+    add_test(NAME apiary_phase2_smoke
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_smoke.sh"
                 "$<TARGET_FILE:apiary>"
                 "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
-    add_test(NAME einsums_pybind_phase3_golden
+    add_test(NAME apiary_phase3_golden
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_golden.sh"
                 "$<TARGET_FILE:apiary>"
                 "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -115,7 +115,7 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # .pyi golden suite — diffs the generated stub for each fixture
     # against a committed golden. Catches drift in per-instantiation
     # type resolution, docstring extraction, property merge, etc.
-    add_test(NAME einsums_pybind_pyi_golden
+    add_test(NAME apiary_pyi_golden
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_pyi_golden.sh"
                 "$<TARGET_FILE:apiary>"
                 "${CMAKE_CURRENT_SOURCE_DIR}/include"

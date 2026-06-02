@@ -1,0 +1,32 @@
+{
+    "configurations": [
+        {
+            "cwd": "${projectDir}",
+            "debugAdapter": "lldb-dap",
+            "name": "Run (current target)",
+            "program": "${buildDir}/bin/${target}"
+        },
+        {
+            "args": [
+                "--test-dir",
+                "${buildDir}",
+                "--output-on-failure"
+            ],
+            "cwd": "${projectDir}",
+            "name": "Run Tests (ctest)",
+            "program": "ctest"
+        },
+        {
+            "cwd": "${projectDir}",
+            "debugAdapter": "lldb-dap",
+            "name": "Debug (current target)",
+            "program": "${buildDir}/bin/${target}"
+        },
+        {
+            "cwd": "${projectDir}",
+            "debugAdapter": "debugpy",
+            "name": "Debug current Python file",
+            "program": "${file}"
+        }
+    ]
+}

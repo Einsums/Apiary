@@ -15,7 +15,7 @@
 namespace einsums::pybind {
 
 // Walks a translation unit and builds a Module IR populated only with
-// declarations carrying at least one EINSUMS_PYBIND_* annotation. Other
+// declarations carrying at least one APIARY_* annotation. Other
 // declarations are ignored entirely.
 //
 // Class scope is tracked via a stack so that methods, fields, and nested
@@ -34,7 +34,7 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     /// duplicate bindings (the owning module's codegen run handles them).
     void set_module_header_filter(std::vector<std::string> const &headers) { _module_headers = headers; }
 
-    /// Enable "docs mode": instead of binding only EINSUMS_PYBIND_*-annotated
+    /// Enable "docs mode": instead of binding only APIARY_*-annotated
     /// declarations, capture the full *public, documented* surface of the
     /// module headers for C++ API documentation (Option 2 — replacing
     /// Doxygen+Breathe with our own libclang extraction). The filter is
@@ -69,7 +69,7 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
     bool TraverseClassTemplateDecl(clang::ClassTemplateDecl *decl);
     // Namespace traversal pushes/pops the inherited submodule directive
-    // stack so entities inside a ``namespace EINSUMS_PYBIND_MODULE("foo")
+    // stack so entities inside a ``namespace APIARY_MODULE("foo")
     // bar { ... }`` block inherit ``module:foo`` unless they declare their
     // own override.
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
@@ -98,7 +98,7 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
 
     [[nodiscard]] BoundClass *current_class() const { return _class_stack.empty() ? nullptr : _class_stack.back(); }
 
-    // Returns false if the decl carries no einsums_pybind annotation, in
+    // Returns false if the decl carries no apiary annotation, in
     // which case visitors should leave it alone.
     [[nodiscard]] bool has_any_pybind_annotation(clang::Decl const *decl) const;
 
@@ -130,7 +130,7 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     std::vector<std::string> _module_headers;
 
     // Stack of inherited submodule paths from enclosing
-    // EINSUMS_PYBIND_MODULE-annotated namespaces. The innermost value is at
+    // APIARY_MODULE-annotated namespaces. The innermost value is at
     // the back; empty when no enclosing namespace carries a directive.
     // ``fill_common`` injects the back of this stack as a synthetic
     // ``module`` directive on entities that don't have one of their own.

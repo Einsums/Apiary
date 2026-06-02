@@ -8,7 +8,7 @@
 // DocsJson — serialize the binding IR to a documentation-oriented JSON
 // document.
 //
-// This is the `--emit-docs-json` mode of einsums-pybind. Where the C++
+// This is the `--emit-docs-json` mode of apiary. Where the C++
 // emitter (Emitter.hpp) turns the IR into pybind11 and the .pyi emitter
 // (PyiEmitter.hpp) turns it into type stubs, this turns it into a stable,
 // tool-agnostic JSON description of the Python-facing surface — the input

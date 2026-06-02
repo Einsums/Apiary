@@ -3,3 +3,6 @@ build-*/
 *.o
 __pycache__/
 .DS_Store
+
+# Einsums Studio: managed clangd compile-commands config
+.clangd

@@ -14,13 +14,13 @@
 namespace einsums::fixture {
 
 /// Sum of two integers.
-EINSUMS_PYBIND_EXPOSE int add(int a, int b);
+APIARY_EXPOSE int add(int a, int b);
 
 /// Sum with default scale factor.
-EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_RVP(move) int scaled_add(int a, int b, int scale = 1);
+APIARY_EXPOSE APIARY_RVP(move) int scaled_add(int a, int b, int scale = 1);
 
 /// A computation that should release the GIL while running.
-EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_RELEASE_GIL double heavy_compute(double seed);
+APIARY_EXPOSE APIARY_RELEASE_GIL double heavy_compute(double seed);
 
 // Unannotated — must NOT appear in the IR.
 double should_not_appear();

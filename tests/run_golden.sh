@@ -5,7 +5,7 @@
 # ----------------------------------------------------------------------------------------------
 #
 # Phase-3 golden-output runner. Drives each fixture under tests/fixtures/
-# through einsums-pybind in emitter mode and diffs the result against a
+# through apiary in emitter mode and diffs the result against a
 # committed .golden file. Differences are reported with `diff -u` so the
 # test driver shows exactly which lines moved.
 #
@@ -15,12 +15,12 @@
 # Or run with REGEN=1 to overwrite goldens in place.
 #
 # Invocation:
-#     run_golden.sh <einsums-pybind-binary> <annotations-include-dir>
+#     run_golden.sh <apiary-binary> <annotations-include-dir>
 
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
-    echo "usage: $0 <einsums-pybind-binary> <annotations-include-dir>" >&2
+    echo "usage: $0 <apiary-binary> <annotations-include-dir>" >&2
     exit 64
 fi
 

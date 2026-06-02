@@ -7,7 +7,7 @@
 // + recognized scalar dtypes auto-collapse into a single Python def
 // taking ``dtype="..."``. The codegen detects the pattern from the
 // INSTANTIATE_AS directives below and emits one runtime if-chain
-// (no manual ``EINSUMS_PYBIND_TEMPLATE_KWARGS`` needed for this case
+// (no manual ``APIARY_TEMPLATE_KWARGS`` needed for this case
 // since there are no bool template parameters).
 
 #pragma once
@@ -21,7 +21,7 @@ namespace einsums::fixture {
 /// signature and differ only in the return type, so the codegen
 /// auto-detects the dtype-dispatcher pattern.
 template <typename T>
-EINSUMS_PYBIND_EXPOSE EINSUMS_PYBIND_INSTANTIATE_AS("zero_value", float) EINSUMS_PYBIND_INSTANTIATE_AS("zero_value", double) T
+APIARY_EXPOSE APIARY_INSTANTIATE_AS("zero_value", float) APIARY_INSTANTIATE_AS("zero_value", double) T
     zero_value(int seed);
 
 } // namespace einsums::fixture

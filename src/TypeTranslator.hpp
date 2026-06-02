@@ -15,7 +15,7 @@ namespace einsums::pybind {
 // Phase-2 stub: returns a pretty-printed C++ form of `type` suitable for
 // emission in pybind11 binding code. Currently relies on Clang's own
 // PrintingPolicy; Phase 3 will extend this to handle holder rewrites
-// (e.g. unique_ptr<T> -> shared_ptr<T> when an EINSUMS_PYBIND_HOLDER
+// (e.g. unique_ptr<T> -> shared_ptr<T> when an APIARY_HOLDER
 // directive is in effect) and pybind11-specific type substitutions.
 std::string translate_type(clang::QualType type, clang::ASTContext const &ctx);
 

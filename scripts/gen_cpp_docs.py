@@ -48,7 +48,7 @@ def universal_flags(build_dir: Path, source_dir: Path) -> list[str]:
     doesn't depend on (ComputeGraph, Comm, GPU, ...) wouldn't resolve their
     own includes and would parse to nothing."""
     ninja = (build_dir / "build.ninja").read_text()
-    m = re.search(r"apiary --register-function einsums_pybind_register_Tensor [^\n]*", ninja)
+    m = re.search(r"apiary --register-function apiary_register_Tensor [^\n]*", ninja)
     if not m:
         raise SystemExit("gen_cpp_docs: no Tensor pybind command in build.ninja (need EINSUMS_BUILD_PYTHON)")
     toks = shlex.split(m.group(0))
