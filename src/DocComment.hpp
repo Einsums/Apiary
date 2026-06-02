@@ -30,32 +30,47 @@
 
 namespace apiary {
 
-// A named doc entry: @param / @tparam / @throws. `name` is the parameter or
-// exception-type name; `description` is reST-ready text (inline commands
-// already converted).
+/// @brief A named doc entry: @param / @tparam / @throws.
+///
+/// `name` is the parameter or exception-type name; `description` is reST-ready
+/// text (inline commands already converted).
 struct DocEntry {
+    /// The parameter or exception-type name.
     std::string name;
+    /// reST-ready description text (inline commands already converted).
     std::string description;
 };
 
-// Structured form of a doc comment. Every text field is reST-ready: inline
-// Doxygen commands (`@c`, `@p`, `@ref`, `@f$math@f$`, ...) are converted and
-// block constructs (`@code`, `@versionadded`, `@note`, ...) are rendered as
-// reST directives inside `detail`.
+/// @brief Structured form of a doc comment.
+///
+/// Every text field is reST-ready: inline Doxygen commands (`@c`, `@p`, `@ref`,
+/// `@f$math@f$`, ...) are converted and block constructs (`@code`,
+/// `@versionadded`, `@note`, ...) are rendered as reST directives inside
+/// `detail`.
 struct DocComment {
-    std::string           brief;   // one-line summary (from @brief or leading paragraph)
-    std::string           detail;  // remaining prose + converted block directives
-    std::vector<DocEntry> params;  // @param
-    std::vector<DocEntry> tparams; // @tparam (C++ template params; usually omitted from Python pages)
-    std::string           returns; // @return / @returns
-    std::vector<DocEntry> throws_; // @throws / @throw / @exception  (name = exception type)
+    /// One-line summary (from @brief or leading paragraph).
+    std::string           brief;
+    /// Remaining prose + converted block directives.
+    std::string           detail;
+    /// @param entries.
+    std::vector<DocEntry> params;
+    /// @tparam entries (C++ template params; usually omitted from Python pages).
+    std::vector<DocEntry> tparams;
+    /// @return / @returns text.
+    std::string           returns;
+    /// @throws / @throw / @exception entries (name = exception type).
+    std::vector<DocEntry> throws_;
 
+    /// @brief Whether every field is empty.
+    /// @return `true` if brief, detail, params, tparams, returns, and throws are all empty.
     [[nodiscard]] bool empty() const {
         return brief.empty() && detail.empty() && params.empty() && tparams.empty() && returns.empty() && throws_.empty();
     }
 };
 
-// Parse `raw` (a marker-stripped Doxygen comment body) into structured form.
+/// @brief Parse a marker-stripped Doxygen comment body into structured form.
+/// @param raw The marker-stripped Doxygen comment body.
+/// @return The structured DocComment.
 DocComment parse_doc_comment(std::string const &raw);
 
 } // namespace apiary

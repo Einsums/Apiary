@@ -10,3 +10,8 @@ __pycache__/
 
 # Einsums Studio: managed clangd compile-commands config
 .clangd
+
+# Generated docs (dogfood site)
+docs/_build/
+docs/api/
+docs/cmake.rst

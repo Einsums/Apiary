@@ -37,15 +37,20 @@
 
 namespace apiary {
 
-// Current docs-JSON schema version. Bump on any incompatible change to the
-// emitted shape so downstream renderers can guard.
-// v2 adds a per-entity `doc_structured` object (brief/detail/params/
-// tparams/returns/throws), reST-ready, parsed from the raw Doxygen `doc`.
+/// @brief Current docs-JSON schema version.
+///
+/// Bump on any incompatible change to the emitted shape so downstream
+/// renderers can guard. v2 adds a per-entity `doc_structured` object
+/// (brief/detail/params/tparams/returns/throws), reST-ready, parsed from the
+/// raw Doxygen `doc`.
 inline constexpr int k_docs_json_schema_version = 2;
 
-// Serialize `module_` to a pretty-printed JSON string per the schema above.
-// `module_name` is recorded as the document's "module" field (the Python
-// import name, e.g. "einsums").
+/// @brief Serialize `module_` to a pretty-printed JSON string per the schema above.
+///
+/// @param module_ The binding IR module to serialize.
+/// @param module_name Recorded as the document's "module" field (the Python
+///        import name, e.g. "einsums").
+/// @return The pretty-printed docs-JSON document as a string.
 std::string emit_docs_json(Module const &module_, std::string const &module_name);
 
 } // namespace apiary

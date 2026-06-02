@@ -28,29 +28,33 @@
 
 namespace apiary {
 
-// Compute and assign `f.python_overloads`. Idempotent — calling twice
-// on the same function clears the previous result first. Calls to this
-// must happen after the Visitor has finished populating instantiations.
+/// @brief Compute and assign `f.python_overloads`.
+/// @param f The bound function whose `python_overloads` are computed and assigned.
+/// @note Idempotent — calling twice on the same function clears the previous result first.
+/// @warning Calls to this must happen after the Visitor has finished populating instantiations.
 void compute_python_overloads(BoundFunction &f);
 
-// Convenience: walk every function in `module_` and run
-// compute_python_overloads on it.
+/// @brief Walk every function in `module_` and run compute_python_overloads on it.
+/// @param module_ The module whose functions are processed.
 void compute_python_overloads(Module &module_);
 
 // ── Helpers exposed for reuse by the emitter ──────────────────────────
 
-// Split a per-instantiation comma-joined string into individual values,
-// respecting `<>` nesting. e.g. ``"float, 2"`` -> ``{"float", "2"}``.
+/// @brief Split a per-instantiation comma-joined string into individual values, respecting `<>` nesting.
+/// @param combo The comma-joined instantiation string, e.g. ``"float, 2"``.
+/// @return The individual values, e.g. ``{"float", "2"}``.
 std::vector<std::string> split_instantiation_args(std::string const &combo);
 
-// Map a C++ scalar type to its accepted dtype-string aliases. Returns
-// empty when the type isn't a recognized dtype (the dispatcher path
-// only triggers for known dtypes).
+/// @brief Map a C++ scalar type to its accepted dtype-string aliases.
+/// @param cpp_type The C++ scalar type to map.
+/// @return The accepted dtype-string aliases, or empty when the type isn't a recognized dtype.
+/// @note The dispatcher path only triggers for known dtypes.
 std::vector<std::string> dtype_aliases_for(std::string const &cpp_type);
 
-// Pick the default dtype string for a dispatcher group. Numpy
-// convention favors ``float64`` (``double``) when present; otherwise
-// the first instance's first alias.
+/// @brief Pick the default dtype string for a dispatcher group.
+/// @param dtype_values_in_order The dtype values in instantiation order.
+/// @return The default dtype string.
+/// @note Numpy convention favors ``float64`` (``double``) when present; otherwise the first instance's first alias.
 std::string pick_default_dtype(std::vector<std::string> const &dtype_values_in_order);
 
 } // namespace apiary

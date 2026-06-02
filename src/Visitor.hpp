@@ -14,80 +14,122 @@
 
 namespace apiary {
 
-// Walks a translation unit and builds a Module IR populated only with
-// declarations carrying at least one APIARY_* annotation. Other
-// declarations are ignored entirely.
-//
-// Class scope is tracked via a stack so that methods, fields, and nested
-// types attach to the right BoundClass. Templates are detected and the
-// is_template flag is set, but full instantiation handling is deferred to
-// Phase 4.
+/// @brief Walks a translation unit and builds a Module IR populated only with
+/// declarations carrying at least one APIARY_* annotation. Other
+/// declarations are ignored entirely.
+///
+/// @note Class scope is tracked via a stack so that methods, fields, and nested
+/// types attach to the right BoundClass. Templates are detected and the
+/// is_template flag is set, but full instantiation handling is deferred to
+/// Phase 4.
 class Visitor : public clang::RecursiveASTVisitor<Visitor> {
   public:
+    /// @brief Construct a Visitor bound to the given AST context.
+    /// @param ctx The Clang AST context to walk.
     explicit Visitor(clang::ASTContext &ctx) : _context(ctx) {}
 
-    /// Set the list of source-include header paths (as passed via
-    /// ``--source-include`` on the codegen command line). When non-empty,
-    /// the visitor only binds declarations whose source location resolves
-    /// to a file ending in one of these relative paths — transitive
-    /// includes from other modules' headers are skipped to avoid
+    /// @brief Set the list of source-include header paths (as passed via
+    /// ``--source-include`` on the codegen command line).
+    ///
+    /// When non-empty, the visitor only binds declarations whose source
+    /// location resolves to a file ending in one of these relative paths —
+    /// transitive includes from other modules' headers are skipped to avoid
     /// duplicate bindings (the owning module's codegen run handles them).
+    /// @param headers The relative header paths to filter declarations by.
     void set_module_header_filter(std::vector<std::string> const &headers) { _module_headers = headers; }
 
-    /// Enable "docs mode": instead of binding only APIARY_*-annotated
+    /// @brief Enable "docs mode": instead of binding only APIARY_*-annotated
     /// declarations, capture the full *public, documented* surface of the
     /// module headers for C++ API documentation (Option 2 — replacing
-    /// Doxygen+Breathe with our own libclang extraction). The filter is
-    /// applied by ``passes_docs_filter``: in a module header, not in a
-    /// ``detail``/``impl``/anonymous namespace, not ``@internal``, and
+    /// Doxygen+Breathe with our own libclang extraction).
+    ///
+    /// The filter is applied by ``passes_docs_filter``: in a module header, not
+    /// in a ``detail``/``impl``/anonymous namespace, not ``@internal``, and
     /// (for class members) public access. Documents only entities carrying
     /// a doc comment.
+    /// @param on Whether to enable docs mode.
     void set_docs_mode(bool on) { _docs_mode = on; }
 
-    /// Enable "report undocumented" mode (docs mode only). When on, every
-    /// declaration that ``passes_docs_filter`` rejects *solely* because it
-    /// lacks a doc comment — i.e. a public, in-module-header, non-``detail``/
-    /// ``impl``/anonymous, non-``@internal`` entity that SHOULD be documented —
-    /// is printed to stderr as ``file:line:col: undocumented <kind> <name>``.
-    /// What gets emitted to the JSON is unchanged; this only surfaces a
-    /// punch-list of missing Doxygen blocks. Each entity is reported once
-    /// per process (deduplicated by location+name).
+    /// @brief Enable "report undocumented" mode (docs mode only).
+    ///
+    /// When on, every declaration that ``passes_docs_filter`` rejects *solely*
+    /// because it lacks a doc comment — i.e. a public, in-module-header,
+    /// non-``detail``/``impl``/anonymous, non-``@internal`` entity that SHOULD
+    /// be documented — is printed to stderr as
+    /// ``file:line:col: undocumented <kind> <name>``. What gets emitted to the
+    /// JSON is unchanged; this only surfaces a punch-list of missing Doxygen
+    /// blocks. Each entity is reported once per process (deduplicated by
+    /// location+name).
+    /// @param on Whether to enable report-undocumented mode.
     void set_report_undocumented(bool on) { _report_undocumented = on; }
 
+    /// @brief Move the built Module IR out of the visitor.
+    /// @return The accumulated Module IR.
     Module take() && { return std::move(_module); }
 
+    /// @brief Number of errors encountered during traversal.
+    /// @return The error count.
     [[nodiscard]] int error_count() const { return _error_count; }
 
-    /// Number of distinct undocumented public entities seen this run (only
-    /// meaningful when ``set_report_undocumented(true)``).
+    /// @brief Number of distinct undocumented public entities seen this run
+    /// (only meaningful when ``set_report_undocumented(true)``).
+    /// @return The count of distinct undocumented public entities.
     [[nodiscard]] int undocumented_count() const { return static_cast<int>(_undocumented_seen.size()); }
 
     // Override the *Traverse* hooks for class-like records so we can push
     // and pop the scope stack around the recursive descent into members.
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Traverse a class-like record, pushing/popping the scope stack
+    /// around the recursive descent into its members.
+    /// @param decl The record declaration being traversed.
+    /// @return True to continue traversal.
     bool TraverseCXXRecordDecl(clang::CXXRecordDecl *decl);
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Traverse a class template, pushing/popping the scope stack
+    /// around the recursive descent into its members.
+    /// @param decl The class template declaration being traversed.
+    /// @return True to continue traversal.
     bool TraverseClassTemplateDecl(clang::ClassTemplateDecl *decl);
-    // Namespace traversal pushes/pops the inherited submodule directive
-    // stack so entities inside a ``namespace APIARY_MODULE("foo")
-    // bar { ... }`` block inherit ``module:foo`` unless they declare their
-    // own override.
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Traverse a namespace, pushing/popping the inherited submodule
+    /// directive stack.
+    ///
+    /// Entities inside a ``namespace APIARY_MODULE("foo") bar { ... }`` block
+    /// inherit ``module:foo`` unless they declare their own override.
+    /// @param decl The namespace declaration being traversed.
+    /// @return True to continue traversal.
     bool TraverseNamespaceDecl(clang::NamespaceDecl *decl);
 
     // *Visit* hooks fire on the way down and produce IR records.
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Visit a C++ method declaration and produce an IR record.
+    /// @param decl The method declaration being visited.
+    /// @return True to continue traversal.
     bool VisitCXXMethodDecl(clang::CXXMethodDecl *decl);
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Visit a free function declaration and produce an IR record.
+    /// @param decl The function declaration being visited.
+    /// @return True to continue traversal.
     bool VisitFunctionDecl(clang::FunctionDecl *decl);
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Visit a field declaration and produce an IR record.
+    /// @param decl The field declaration being visited.
+    /// @return True to continue traversal.
     bool VisitFieldDecl(clang::FieldDecl *decl);
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Visit an enum declaration and produce an IR record.
+    /// @param decl The enum declaration being visited.
+    /// @return True to continue traversal.
     bool VisitEnumDecl(clang::EnumDecl *decl);
-    // Docs-mode only: typedefs/using-aliases and C++20 concepts.
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Visit a typedef/using-alias declaration (docs mode only).
+    /// @param decl The typedef-name declaration being visited.
+    /// @return True to continue traversal.
     bool VisitTypedefNameDecl(clang::TypedefNameDecl *decl);
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Visit a C++20 concept declaration (docs mode only).
+    /// @param decl The concept declaration being visited.
+    /// @return True to continue traversal.
     bool VisitConceptDecl(clang::ConceptDecl *decl);
 
   private:

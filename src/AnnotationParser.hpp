@@ -12,20 +12,22 @@
 
 namespace apiary {
 
-// Parses an annotation payload of the form
-// "apiary:<name>[:<arg>[:<arg>...]]" into a Directive. Returns
-// nullopt if the prefix doesn't match.
-//
-// Special cases:
-//   - "doc:<text>" — the text contains arbitrary characters including ':',
-//     so the directive name is split off and the remainder is one args[0].
-//   - "instantiate:<list>" / "instantiate_as:<py>:<type>" — same: the rest
-//     after the directive name (or the first ':' for instantiate_as) is
-//     left intact as a single arg, since the inner payload contains commas
-//     and parentheses that the codegen tool will parse later.
+/// @brief Parses an annotation payload of the form
+/// "apiary:<name>[:<arg>[:<arg>...]]" into a Directive.
+///
+/// Special cases:
+///   - "doc:<text>" — the text contains arbitrary characters including ':',
+///     so the directive name is split off and the remainder is one args[0].
+///   - "instantiate:<list>" / "instantiate_as:<py>:<type>" — same: the rest
+///     after the directive name (or the first ':' for instantiate_as) is
+///     left intact as a single arg, since the inner payload contains commas
+///     and parentheses that the codegen tool will parse later.
+///
+/// @param payload The annotation payload to parse.
+/// @return The parsed Directive, or nullopt if the prefix doesn't match.
 std::optional<Directive> parse_annotation(llvm::StringRef payload);
 
-// Project-wide annotation prefix laid down by APIARY_DETAIL_ANNOTATE.
+/// @brief Project-wide annotation prefix laid down by APIARY_DETAIL_ANNOTATE.
 inline constexpr llvm::StringLiteral k_annotation_prefix = "apiary:";
 
 } // namespace apiary

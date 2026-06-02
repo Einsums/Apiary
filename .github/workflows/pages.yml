@@ -1,0 +1,74 @@
+name: Docs (GitHub Pages)
+
+# Dogfood: build apiary, then point apiary at its own headers to generate the
+# site. If apiary can't document itself cleanly, the docs build fails — so this
+# is also a regression test for the docs-mode surface.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight deploy at a time; let a newer push cancel an older run.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same toolchain as CI (libTooling needs clangdev/llvmdev), plus the
+      # Python + Sphinx the doc generators and HTML build need.
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: apiary-dev
+          create-args: >-
+            cmake
+            ninja
+            clangdev
+            llvmdev
+            cxx-compiler
+            zlib
+            python
+            sphinx
+
+      - name: Build apiary
+        run: |
+          cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
+          cmake --build build --target apiary
+
+      - name: Generate docs (apiary documents itself)
+        run: |
+          python docs/gen_self_docs.py --tool ./build/apiary
+          python docs/extract_cmake_docs.py docs/cmake.rst
+
+      - name: Build HTML
+        run: sphinx-build -b html -W docs docs/_build/html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_build/html
+
+  deploy:
+    needs: build
+    # Only publish from main; PRs build-and-verify but don't deploy.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

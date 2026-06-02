@@ -27,13 +27,17 @@
 
 namespace apiary {
 
+/// @brief Options controlling Python stub (.pyi) emission.
 struct PyiOptions {
-    /// Optional comment header inserted at the top (e.g. "// generated
+    /// @brief Optional comment header inserted at the top (e.g. "// generated
     /// from XYZ.hpp"). Empty by default.
     std::string banner;
 };
 
-/// Render the module IR as a Python stub file.
+/// @brief Render the module IR as a Python stub file.
+/// @param module_ The module IR to emit.
+/// @param opts Emission options; defaults to an empty PyiOptions.
+/// @return The rendered .pyi stub file contents.
 std::string emit_pyi(Module const &module_, PyiOptions const &opts = {});
 
 } // namespace apiary

@@ -24,7 +24,12 @@
 
 namespace apiary {
 
+/// @brief Collapse @getter / @setter directive pairs on a class's methods into BoundProperty entries, recursing into nested classes.
+/// @param cls The bound class whose methods are scanned for property directives.
 void compute_properties(BoundClass &cls);
+
+/// @brief Compute properties for every class in a module.
+/// @param module_ The module whose classes are processed.
 void compute_properties(Module &module_);
 
 } // namespace apiary
