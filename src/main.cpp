@@ -92,11 +92,11 @@ llvm::cl::list<std::string> g_source_includes("source-include",
                                                              "name the C++ types they bind."),
                                               llvm::cl::cat(g_tool_category));
 
-llvm::cl::opt<einsums::pybind::Target>
+llvm::cl::opt<apiary::Target>
     g_target("target", llvm::cl::desc("Binding library to emit code against"),
-             llvm::cl::values(clEnumValN(einsums::pybind::Target::Pybind11, "pybind11", "pybind11 (default)"),
-                              clEnumValN(einsums::pybind::Target::Nanobind, "nanobind", "nanobind")),
-             llvm::cl::cat(g_tool_category), llvm::cl::init(einsums::pybind::Target::Pybind11));
+             llvm::cl::values(clEnumValN(apiary::Target::Pybind11, "pybind11", "pybind11 (default)"),
+                              clEnumValN(apiary::Target::Nanobind, "nanobind", "nanobind")),
+             llvm::cl::cat(g_tool_category), llvm::cl::init(apiary::Target::Pybind11));
 
 llvm::cl::opt<std::string> g_register_fn("register-function",
                                          llvm::cl::desc("Emit a free function with this name that takes "
@@ -113,7 +113,7 @@ llvm::cl::opt<std::string> g_register_fn("register-function",
 // TensorForward.hpp + ...) cause the same annotated declaration to be
 // visited once per TU. Dedupe by qualified_name so the emitter sees
 // each declaration once.
-einsums::pybind::Module         g_module;
+apiary::Module         g_module;
 std::unordered_set<std::string> g_seen_classes;
 std::unordered_set<std::string> g_seen_functions;
 std::unordered_set<std::string> g_seen_enums;
@@ -126,7 +126,7 @@ int                             g_undocumented_count = 0;
 class IrConsumer : public ASTConsumer {
   public:
     void HandleTranslationUnit(ASTContext &ctx) override {
-        einsums::pybind::Visitor visitor(ctx);
+        apiary::Visitor visitor(ctx);
         // Constrain the visitor to only emit bindings for declarations that
         // live in this module's own headers. Without this, transitively
         // included headers from other modules (e.g. RuntimeTensor.hpp
@@ -140,7 +140,7 @@ class IrConsumer : public ASTConsumer {
         visitor.set_docs_mode(g_emit_cpp_docs_json);
         visitor.set_report_undocumented(g_report_undocumented);
         visitor.TraverseDecl(ctx.getTranslationUnitDecl());
-        einsums::pybind::Module local = std::move(visitor).take();
+        apiary::Module local = std::move(visitor).take();
         g_error_count += visitor.error_count();
         g_undocumented_count += visitor.undocumented_count();
         for (auto &c : local.classes) {
@@ -190,7 +190,7 @@ class IrConsumer : public ASTConsumer {
         if (g_emit_cpp_docs_json) {
             clang::SourceManager const &sm  = ctx.getSourceManager();
             llvm::StringRef const       buf = sm.getBufferData(sm.getMainFileID());
-            for (auto &m : einsums::pybind::scan_macros(buf)) {
+            for (auto &m : apiary::scan_macros(buf)) {
                 if (g_seen_macros.insert(m.qualified_name).second) {
                     g_module.macros.push_back(std::move(m));
                 }
@@ -236,21 +236,21 @@ int main(int argc, char const **argv) {
     // Resolve the dispatcher-grouping decisions for every templated free
     // function. Both the C++ emitter and the (future) .pyi emitter
     // consume the precomputed view via BoundFunction.python_overloads.
-    einsums::pybind::compute_python_overloads(g_module);
+    apiary::compute_python_overloads(g_module);
 
     // Collapse @getter/@setter pairs into BoundClass.properties so
     // the .pyi emitter can render Python @property entries directly.
-    einsums::pybind::compute_properties(g_module);
+    apiary::compute_properties(g_module);
 
     if (g_dump_ir) {
-        return write_output(einsums::pybind::dump(g_module));
+        return write_output(apiary::dump(g_module));
     }
 
     if (g_emit_docs_json || g_emit_cpp_docs_json) {
-        return write_output(einsums::pybind::emit_docs_json(g_module, g_module_name));
+        return write_output(apiary::emit_docs_json(g_module, g_module_name));
     }
 
-    einsums::pybind::EmitOptions opts;
+    apiary::EmitOptions opts;
     opts.module_name            = g_module_name;
     opts.register_function_name = g_register_fn;
     opts.source_path_for_format = g_output_path.empty() ? std::string("generated.cpp") : g_output_path;
@@ -258,7 +258,7 @@ int main(int argc, char const **argv) {
     for (std::string const &p : g_source_includes) {
         opts.source_includes.push_back(p);
     }
-    std::string const generated = einsums::pybind::emit(g_module, opts);
+    std::string const generated = apiary::emit(g_module, opts);
     int const         write_rc  = write_output(generated);
 
     // Optionally also emit a Python stub (.pyi) file for pyright. The
@@ -266,9 +266,9 @@ int main(int argc, char const **argv) {
     // same submodule routing — so adding the flag to a build just adds
     // a sibling .pyi alongside the .cpp.
     if (!g_stub_output.empty()) {
-        einsums::pybind::PyiOptions stub_opts;
+        apiary::PyiOptions stub_opts;
         stub_opts.banner          = "module: " + std::string{g_module_name};
-        std::string const    stub = einsums::pybind::emit_pyi(g_module, stub_opts);
+        std::string const    stub = apiary::emit_pyi(g_module, stub_opts);
         std::error_code      ec;
         llvm::raw_fd_ostream out(g_stub_output, ec);
         if (ec) {

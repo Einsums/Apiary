@@ -7,7 +7,7 @@
 
 #include "llvm/ADT/StringSwitch.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -74,4 +74,4 @@ std::optional<Directive> parse_annotation(llvm::StringRef payload) {
     return result;
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

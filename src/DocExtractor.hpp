@@ -11,7 +11,7 @@
 #include "clang/AST/Decl.h"
 #include "llvm/ADT/StringRef.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 // Cleans a raw comment block (``/** ... */`` or ``/// ...``) into doxygen
 // body text: strips comment markers, leading ``*``, and banner lines. Shared
@@ -25,4 +25,4 @@ std::string clean_raw_comment(llvm::StringRef text);
 // (Phase 3 polish handles ``\param`` / ``\return`` reflow).
 std::string extract_doc(clang::Decl const *decl, clang::ASTContext &ctx);
 
-} // namespace einsums::pybind
+} // namespace apiary

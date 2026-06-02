@@ -12,7 +12,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 // Walks a translation unit and builds a Module IR populated only with
 // declarations carrying at least one APIARY_* annotation. Other
@@ -141,4 +141,4 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     void fill_common(BoundEntityCommon &entity, clang::NamedDecl const *decl);
 };
 
-} // namespace einsums::pybind
+} // namespace apiary

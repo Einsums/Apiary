@@ -22,9 +22,9 @@
 
 #include "IR.hpp"
 
-namespace einsums::pybind {
+namespace apiary {
 
 void compute_properties(BoundClass &cls);
 void compute_properties(Module &module_);
 
-} // namespace einsums::pybind
+} // namespace apiary

@@ -35,7 +35,7 @@
 
 #include "IR.hpp"
 
-namespace einsums::pybind {
+namespace apiary {
 
 // Current docs-JSON schema version. Bump on any incompatible change to the
 // emitted shape so downstream renderers can guard.
@@ -48,4 +48,4 @@ inline constexpr int k_docs_json_schema_version = 2;
 // import name, e.g. "einsums").
 std::string emit_docs_json(Module const &module_, std::string const &module_name);
 
-} // namespace einsums::pybind
+} // namespace apiary

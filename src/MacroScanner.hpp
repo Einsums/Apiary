@@ -10,7 +10,7 @@
 #include "IR.hpp"
 #include "llvm/ADT/StringRef.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 // Scan raw header source text for *documented* preprocessor macros: a doc
 // comment (``/** ... */`` / ``/*! ... */`` or a run of ``///``) immediately
@@ -24,4 +24,4 @@ namespace einsums::pybind {
 // to recover their documentation.
 std::vector<BoundMacro> scan_macros(llvm::StringRef source);
 
-} // namespace einsums::pybind
+} // namespace apiary

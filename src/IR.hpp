@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-namespace einsums::pybind {
+namespace apiary {
 
 struct SourceLocation {
     std::string file;
@@ -288,4 +288,4 @@ struct Module {
 // function exists so Phase 2 has something testable.
 std::string dump(Module const &module_);
 
-} // namespace einsums::pybind
+} // namespace apiary

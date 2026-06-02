@@ -17,7 +17,7 @@
 #include "clang/Tooling/Core/Replacement.h"
 #include "llvm/Support/raw_ostream.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -1663,4 +1663,4 @@ std::string emit(Module const &module_, EmitOptions const &opts) {
     return format_cpp(buffer, opts.source_path_for_format);
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

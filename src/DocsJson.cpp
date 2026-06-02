@@ -12,7 +12,7 @@
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -498,4 +498,4 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
     return buffer;
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

@@ -14,7 +14,7 @@
 #include "clang/AST/RawCommentList.h"
 #include "llvm/ADT/StringRef.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -106,4 +106,4 @@ std::string clean_raw_comment(llvm::StringRef text) {
     return out;
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

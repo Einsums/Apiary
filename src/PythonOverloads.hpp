@@ -26,7 +26,7 @@
 
 #include "IR.hpp"
 
-namespace einsums::pybind {
+namespace apiary {
 
 // Compute and assign `f.python_overloads`. Idempotent — calling twice
 // on the same function clears the previous result first. Calls to this
@@ -53,4 +53,4 @@ std::vector<std::string> dtype_aliases_for(std::string const &cpp_type);
 // the first instance's first alias.
 std::string pick_default_dtype(std::vector<std::string> const &dtype_values_in_order);
 
-} // namespace einsums::pybind
+} // namespace apiary

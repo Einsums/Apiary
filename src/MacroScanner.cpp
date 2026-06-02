@@ -11,7 +11,7 @@
 
 #include "DocExtractor.hpp" // clean_raw_comment
 
-namespace einsums::pybind {
+namespace apiary {
 namespace {
 
 std::vector<llvm::StringRef> split_lines(llvm::StringRef s) {
@@ -178,4 +178,4 @@ std::vector<BoundMacro> scan_macros(llvm::StringRef source) {
     return out;
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

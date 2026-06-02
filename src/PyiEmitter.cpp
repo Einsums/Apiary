@@ -17,7 +17,7 @@
 #include "PythonOverloads.hpp"
 #include "TypeTranslator.hpp"
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -1843,4 +1843,4 @@ std::string emit_pyi(Module const &module_, PyiOptions const &opts) {
     return os.str();
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

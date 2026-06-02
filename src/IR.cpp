@@ -9,7 +9,7 @@
 
 #include "llvm/Support/raw_ostream.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -241,4 +241,4 @@ std::string dump(Module const &module_) {
     return buffer;
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

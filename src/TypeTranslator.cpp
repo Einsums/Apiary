@@ -13,7 +13,7 @@
 
 #include "clang/AST/PrettyPrinter.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 std::string translate_type(clang::QualType type, clang::ASTContext const &ctx) {
     clang::PrintingPolicy policy(ctx.getLangOpts());
@@ -603,4 +603,4 @@ std::string translate_python_default(std::string const &cpp_default) {
     return s;
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

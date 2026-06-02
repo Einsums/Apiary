@@ -7,7 +7,7 @@
 
 #include <cctype>
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -152,4 +152,4 @@ std::string sanitize_python_name(std::string const &base, std::string const &typ
     return out;
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

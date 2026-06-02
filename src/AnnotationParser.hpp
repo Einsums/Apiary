@@ -10,7 +10,7 @@
 #include "IR.hpp"
 #include "llvm/ADT/StringRef.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 // Parses an annotation payload of the form
 // "apiary:<name>[:<arg>[:<arg>...]]" into a Directive. Returns
@@ -28,4 +28,4 @@ std::optional<Directive> parse_annotation(llvm::StringRef payload);
 // Project-wide annotation prefix laid down by APIARY_DETAIL_ANNOTATE.
 inline constexpr llvm::StringLiteral k_annotation_prefix = "apiary:";
 
-} // namespace einsums::pybind
+} // namespace apiary

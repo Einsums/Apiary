@@ -9,7 +9,7 @@
 #include <optional>
 #include <string>
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -75,4 +75,4 @@ void compute_properties(Module &module_) {
     }
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-namespace einsums::pybind {
+namespace apiary {
 
 // A named doc entry: @param / @tparam / @throws. `name` is the parameter or
 // exception-type name; `description` is reST-ready text (inline commands
@@ -58,4 +58,4 @@ struct DocComment {
 // Parse `raw` (a marker-stripped Doxygen comment body) into structured form.
 DocComment parse_doc_comment(std::string const &raw);
 
-} // namespace einsums::pybind
+} // namespace apiary

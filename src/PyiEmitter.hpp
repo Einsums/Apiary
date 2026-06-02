@@ -25,7 +25,7 @@
 
 #include "IR.hpp"
 
-namespace einsums::pybind {
+namespace apiary {
 
 struct PyiOptions {
     /// Optional comment header inserted at the top (e.g. "// generated
@@ -36,4 +36,4 @@ struct PyiOptions {
 /// Render the module IR as a Python stub file.
 std::string emit_pyi(Module const &module_, PyiOptions const &opts = {});
 
-} // namespace einsums::pybind
+} // namespace apiary

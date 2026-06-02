@@ -19,7 +19,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "llvm/Support/raw_ostream.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -864,4 +864,4 @@ bool Visitor::VisitConceptDecl(clang::ConceptDecl *decl) {
     return true;
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

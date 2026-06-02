@@ -12,7 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace einsums::pybind {
+namespace apiary {
 
 namespace {
 
@@ -646,4 +646,4 @@ DocComment parse_doc_comment(std::string const &raw) {
     return doc;
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

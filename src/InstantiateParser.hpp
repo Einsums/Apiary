@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace einsums::pybind {
+namespace apiary {
 
 // Parses the payload of an @instantiate directive. The raw text after the
 // macro expands (and after AnnotationParser strips the prefix) looks like:
@@ -65,4 +65,4 @@ std::vector<std::string> cross_product(std::vector<std::vector<std::string>> con
 // ``Tensor`` + ``std::complex<float>, 2`` -> ``Tensor_std_complex_float_2``.
 std::string sanitize_python_name(std::string const &base, std::string const &type_args);
 
-} // namespace einsums::pybind
+} // namespace apiary

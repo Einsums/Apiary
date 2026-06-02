@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace einsums::pybind {
+namespace apiary {
 
 std::vector<std::string> split_instantiation_args(std::string const &combo) {
     std::vector<std::string> parts;
@@ -301,4 +301,4 @@ void compute_python_overloads(Module &module_) {
     }
 }
 
-} // namespace einsums::pybind
+} // namespace apiary

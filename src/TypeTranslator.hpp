@@ -10,7 +10,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Type.h"
 
-namespace einsums::pybind {
+namespace apiary {
 
 // Phase-2 stub: returns a pretty-printed C++ form of `type` suitable for
 // emission in pybind11 binding code. Currently relies on Clang's own
@@ -39,4 +39,4 @@ std::string translate_python_default(std::string const &cpp_default);
 // `list[T_py]`, `std::pair<A,B>` → `tuple[A_py, B_py]`, etc.
 std::string translate_python_type_string(std::string const &cpp_type);
 
-} // namespace einsums::pybind
+} // namespace apiary

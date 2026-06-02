@@ -11,7 +11,7 @@
 
 #include "IR.hpp"
 
-namespace einsums::pybind {
+namespace apiary {
 
 // Selects which Python-binding library the emitter writes against.
 //   * Pybind11 — the default, battle-tested target.
@@ -46,4 +46,4 @@ struct EmitOptions {
 // via `opts.source_path_for_format`; otherwise LLVM style is used.
 std::string emit(Module const &module_, EmitOptions const &opts);
 
-} // namespace einsums::pybind
+} // namespace apiary
