@@ -4,5 +4,9 @@ build-*/
 __pycache__/
 .DS_Store
 
+# Editor / tooling caches (machine-local, never versioned)
+.cache/
+.einsums-studio/
+
 # Einsums Studio: managed clangd compile-commands config
 .clangd
