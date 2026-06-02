@@ -34,11 +34,15 @@ requirements:
     # find_package(Clang/LLVM CONFIG) + libTooling static libs.
     - llvmdev {{ llvm_major }}.*
     - clangdev {{ llvm_major }}.*
-    # LLVM transitive link deps that find_package surfaces.
+    # apiary's binary directly links libz/libzstd (compression support pulled
+    # in by the static LLVM libs); their run_exports carry them into run.
     - zlib
     - zstd
-    - libxml2
   run:
+    # apiary dynamically links the shared libLLVM (@rpath/libLLVM.<major>.dylib),
+    # which lives in the major-suffixed package libllvm{{ llvm_major }}. llvmdev's
+    # transitive run_export does not cover it, so depend on it explicitly.
+    - libllvm{{ llvm_major }}
     # The bundled doc/stub render scripts (share/apiary/scripts/*.py) are
     # invoked by the apiary_* CMake helpers at a consumer's build time.
     - python >=3.9
