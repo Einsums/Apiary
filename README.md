@@ -5,30 +5,16 @@ a Clang frontend and, from a single AST walk, emits pybind11/nanobind binding
 TUs, `.pyi` type stubs, Sphinx C++ API documentation (cpp/c-domain directives,
 including macros — no Doxygen), and a structured public-API JSON IR.
 
-Apiary began as `apiary`, the binding generator for the
-[Einsums](https://github.com/Einsums/Einsums) tensor library, and is being
-generalized into a standalone tool. The annotation contract still uses the
-`APIARY_*` macro names (shipped in `include/apiary/Annotations.hpp`);
-these will be renamed to neutral `APIARY_*` names in a later pass.
+Apiary began as `einsums-pybind`, the binding generator for the
+[Einsums](https://github.com/Einsums/Einsums) tensor library, and is now a
+standalone tool. The annotation contract lives in
+`include/apiary/Annotations.hpp` (the `APIARY_*` macros).
 
-## Origins (Einsums binding generator)
-
-Walking Einsums headers, it finds declarations marked with `APIARY_*`
-macros and emits two artifacts per annotated module:
-
-1. **A pybind11 binding TU** that gets linked into a single `einsums`
-   Python extension, so users get one `import einsums` instead of one
-   import per module.
-2. **A `.pyi` type-stub fragment** for that module. After every module
-   has been processed, a small Python aggregator merges fragments into
-   per-submodule stubs (`einsums/_core.pyi`, `einsums/linalg.pyi`,
-   `einsums/graph.pyi`, …) that pyright / mypy consume.
-
-In Einsums this is wired through its own `einsums_add_module(... PYBIND)`
-helper (gated on `EINSUMS_BUILD_PYTHON`), which is a thin wrapper over the
-generic `apiary_add_bindings` / `apiary_aggregate_extension` CMake functions
-documented in [Quick start](#quick-start). New consumers use those functions
-directly — there is no Einsums coupling.
+Einsums remains the **reference consumer**: its `einsums_add_module(... PYBIND)`
+helper is a thin wrapper over the generic `apiary_add_bindings` /
+`apiary_aggregate_extension` functions ([Quick start](#quick-start)), driving
+them to aggregate its modules under a single `import einsums`. New consumers
+call those functions directly — there is no Einsums coupling.
 
 ## Quick start
 
@@ -105,9 +91,10 @@ cmake -S . -B build && cmake --build build
 PYTHONPATH=build python3 -c "import _core; print(_core.Greeter('hi').say('world'))"
 ```
 
-The [Einsums](https://github.com/Einsums/Einsums) tensor library is the
-reference consumer: its `einsums_add_module(... PYBIND)` wrapper drives these
-same helpers to aggregate ~12 modules under one `import einsums`.
+That's the whole consumer surface — `apiary_detect_toolchain`,
+`apiary_add_bindings`, `apiary_aggregate_extension`. Call `apiary_add_bindings`
+once per module and pass them all to a single `apiary_aggregate_extension` to
+aggregate many modules under one extension.
 
 ## Annotation reference
 
@@ -180,11 +167,11 @@ are auto-derived from the values.
 ```cpp
 template <typename T, int rank>
 class APIARY_EXPOSE
-    APIARY_INSTANTIATE(Tensor,
+    APIARY_INSTANTIATE(Matrix,
         T(float, double),
         rank(1, 2))
-Tensor { ... };
-// Produces: Tensor_float_1, Tensor_float_2, Tensor_double_1, Tensor_double_2
+Matrix { ... };
+// Produces: Matrix_float_1, Matrix_float_2, Matrix_double_1, Matrix_double_2
 ```
 
 **Single instantiation** (`APIARY_INSTANTIATE_AS`): pin one
@@ -193,8 +180,8 @@ parameter depends on another (e.g. `Alloc = std::allocator<T>`), which
 a flat cross-product can't express.
 
 ```cpp
-APIARY_INSTANTIATE_AS("Tensor2d_double",
-                              GeneralTensor<double, 2, std::allocator<double>>)
+APIARY_INSTANTIATE_AS("Matrix2d_double",
+                              Matrix<double, 2, std::allocator<double>>)
 ```
 
 **Cross-product with name template** (`APIARY_INSTANTIATE_TEMPLATE`):
@@ -225,8 +212,8 @@ right one at call site via Python's argument types.
 ```cpp
 template <typename T>
 APIARY_EXPOSE
-APIARY_INSTANTIATE_AS("scale", einsums::RuntimeTensor<float>)
-APIARY_INSTANTIATE_AS("scale", einsums::RuntimeTensor<double>)
+APIARY_INSTANTIATE_AS("scale", mylib::Array<float>)
+APIARY_INSTANTIATE_AS("scale", mylib::Array<double>)
 void scale(typename T::ValueType factor, T *A);
 ```
 
@@ -240,12 +227,12 @@ entry that takes a `dtype="..."` kwarg and dispatches at runtime:
 ```cpp
 template <typename T>
 APIARY_EXPOSE
-APIARY_INSTANTIATE_AS("create_zero_tensor", float)
-APIARY_INSTANTIATE_AS("create_zero_tensor", double)
-APIARY_INSTANTIATE_AS("create_zero_tensor", std::complex<float>)
-APIARY_INSTANTIATE_AS("create_zero_tensor", std::complex<double>)
-RuntimeTensor<T> create_zero_tensor(std::string name, std::vector<size_t> dims);
-// Python: create_zero_tensor("X", [4, 4], dtype="float64")
+APIARY_INSTANTIATE_AS("zeros", float)
+APIARY_INSTANTIATE_AS("zeros", double)
+APIARY_INSTANTIATE_AS("zeros", std::complex<float>)
+APIARY_INSTANTIATE_AS("zeros", std::complex<double>)
+Array<T> zeros(std::string name, std::vector<size_t> dims);
+// Python: zeros("X", [4, 4], dtype="float64")
 ```
 
 Recognized dtype aliases (numpy convention): `float32`/`f4`/`f`/`single`
@@ -266,8 +253,8 @@ entry per dtype taking each bool as a kw-only argument:
 template <bool TransA, bool TransB, typename T>
 APIARY_EXPOSE
 APIARY_TEMPLATE_KWARGS("trans_a", "trans_b")
-APIARY_INSTANTIATE_BOOLS("gemm", einsums::RuntimeTensor<float>, float)
-APIARY_INSTANTIATE_BOOLS("gemm", einsums::RuntimeTensor<double>, double)
+APIARY_INSTANTIATE_BOOLS("gemm", mylib::Array<float>, float)
+APIARY_INSTANTIATE_BOOLS("gemm", mylib::Array<double>, double)
 void gemm(U alpha, T const &A, T const &B, U beta, T *C);
 // Python: gemm(1.0, A, B, 0.0, C, trans_a=True, trans_b=False)
 ```
@@ -293,11 +280,11 @@ class APIARY_EXPOSE Workspace { ... };
 class Workspace {
     template <typename U>
     APIARY_EXPOSE
-    APIARY_INSTANTIATE_MEMBER_AS("declare_runtime_tensor",
-                                          U=einsums::RuntimeTensor<float>)
-    APIARY_INSTANTIATE_MEMBER_AS("declare_runtime_tensor",
-                                          U=einsums::RuntimeTensor<double>)
-    U &declare_runtime_tensor(std::string name, std::vector<size_t> dims);
+    APIARY_INSTANTIATE_MEMBER_AS("declare_array",
+                                          U=mylib::Array<float>)
+    APIARY_INSTANTIATE_MEMBER_AS("declare_array",
+                                          U=mylib::Array<double>)
+    U &declare_array(std::string name, std::vector<size_t> dims);
 };
 ```
 
@@ -314,18 +301,18 @@ arguments to bind per instantiation.
 ```cpp
 template <typename T, size_t rank>
 struct APIARY_EXPOSE
-    APIARY_INSTANTIATE_AS("Tensor_double_2",
-                                  GeneralTensor<double, 2, std::allocator<double>>)
-GeneralTensor {
+    APIARY_INSTANTIATE_AS("Matrix_double_2",
+                                  Matrix<double, 2, std::allocator<double>>)
+Matrix {
     template <typename... Dims>
     APIARY_EXPOSE
     APIARY_VARIADIC_FROM(rank, size_t)   // pack -> rank-many size_t args
-    GeneralTensor(std::string name, Dims... dims);
+    Matrix(std::string name, Dims... dims);
 };
 ```
 
-For `Tensor_double_2`, this binds a ctor with signature
-`(std::string, size_t, size_t)`. For `Tensor_double_3` it would be
+For `Matrix_double_2`, this binds a ctor with signature
+`(std::string, size_t, size_t)`. For `Matrix_double_3` it would be
 `(std::string, size_t, size_t, size_t)`.
 
 The first arg names the template parameter that gives the count; the
@@ -378,8 +365,8 @@ Touching an annotated header re-fires only that unit's codegen edge (via the
   (`Alloc = std::allocator<T>`). Fall back to one
   `APIARY_INSTANTIATE_AS` per concrete type.
 - **System header detection** assumes Clang's `-print-resource-dir` is
-  available and (on macOS) `xcrun --show-sdk-path`. The conda
-  `einsums-dev` env satisfies both. Other setups may need to set
+  available and (on macOS) `xcrun --show-sdk-path`. A conda env with
+  `clangdev` + `llvmdev` satisfies both. Other setups may need to set
   `APIARY_CLANG_RESOURCE_DIR` / `APIARY_SYSROOT`
   manually before the first configure.
 - **`requires requires { … }` clauses block doxygen attachment** —
@@ -427,8 +414,8 @@ Every codegen invocation also produces a Python type-stub fragment,
 emitted alongside the generated `.cpp`:
 
 ```
-build/generated/pybind/Einsums_LinearAlgebra_pybind.cpp   # bindings
-build/generated/pybind/Einsums_LinearAlgebra.pyi          # stub fragment
+build/gen/mylib_core_pybind.cpp   # bindings
+build/gen/mylib_core.pyi          # stub fragment
 ```
 
 A finalize step (`scripts/aggregate_stubs.py`, located at `APIARY_SCRIPTS_DIR`)
@@ -439,7 +426,7 @@ emitter inserts and merges them into per-submodule files in the
 package directory:
 
 ```
-build/lib/einsums/
+build/lib/mylib/
 ├── _core.cpython-…so      # the C extension
 ├── _core.pyi              # top-level entities
 ├── linalg.pyi             # entities tagged @module("linalg")
@@ -455,25 +442,25 @@ Type translation runs per-instantiation:
 ```python
 # scale (free function with INSTANTIATE_AS for four dtypes)
 @overload
-def scale(factor: float, A: RuntimeTensorF) -> None: ...
+def scale(factor: float, A: ArrayF) -> None: ...
 @overload
-def scale(factor: float, A: RuntimeTensorD) -> None: ...
+def scale(factor: float, A: ArrayD) -> None: ...
 @overload
-def scale(factor: complex, A: RuntimeTensorC) -> None: ...
+def scale(factor: complex, A: ArrayC) -> None: ...
 @overload
-def scale(factor: complex, A: RuntimeTensorZ) -> None: ...
+def scale(factor: complex, A: ArrayZ) -> None: ...
 
-# create_zero_tensor (auto-detected dtype dispatcher)
-def create_zero_tensor(name: str, dims: list[int], dtype: str = "float64") \
-    -> RuntimeTensorF | RuntimeTensorD | RuntimeTensorC | RuntimeTensorZ: ...
+# zeros (auto-detected dtype dispatcher)
+def zeros(name: str, dims: list[int], dtype: str = "float64") \
+    -> ArrayF | ArrayD | ArrayC | ArrayZ: ...
 
 # gemm (TEMPLATE_KWARGS bool fan-out)
 @overload
-def gemm(alpha: float, A: RuntimeTensorF, B: RuntimeTensorF, beta: float,
-         C: RuntimeTensorF, *, trans_a: bool = False, trans_b: bool = False) -> None: ...
+def gemm(alpha: float, A: ArrayF, B: ArrayF, beta: float,
+         C: ArrayF, *, trans_a: bool = False, trans_b: bool = False) -> None: ...
 @overload
-def gemm(alpha: complex, A: RuntimeTensorC, B: RuntimeTensorC, beta: complex,
-         C: RuntimeTensorC, *, trans_a: bool = False, trans_b: bool = False) -> None: ...
+def gemm(alpha: complex, A: ArrayC, B: ArrayC, beta: complex,
+         C: ArrayC, *, trans_a: bool = False, trans_b: bool = False) -> None: ...
 ```
 
 Doxygen comments above an exposed declaration become Python docstrings.
@@ -484,13 +471,13 @@ would otherwise trip pyright's `reportIncompatibleMethodOverride`.
 
 ### Cross-module name resolution
 
-When a function in one module takes a tensor from another module
-(`cg::scale` taking `RuntimeTensor<T>` defined in the Tensor module),
+When a function in one module takes a type from another module (e.g. a
+function taking an `Array<T>` whose binding lives in a different module),
 the visitor records the external annotated class with `is_external=true`
 purely for name resolution. The C++ emitter ignores externals (their
 binding lives in the owning module's TU); the `.pyi` emitter uses
-them to map `GeneralRuntimeTensor<float, std::allocator<float>>` →
-`RuntimeTensorF` so cross-module signatures resolve without needing a
+them to map `Array<float, std::allocator<float>>` →
+`ArrayF` so cross-module signatures resolve without needing a
 shared registry across codegen invocations.
 
 ### Type-resolution pipeline
@@ -501,13 +488,13 @@ For each per-instantiation parameter / return type, the `.pyi` emitter:
    like `typename T::ValueType` for re-resolution).
 2. Tries the canonical (typedef-expanded) form via clang's
    `getCanonicalType()` if the as-written form fails — catches
-   alias templates like `RuntimeTensor<T>` ↔
-   `GeneralRuntimeTensor<T, std::allocator<T>>`.
+   alias templates like `Array<T>` ↔
+   `BasicArray<T, std::allocator<T>>`.
 3. Inlines `typename Class<args>::ValueType` references with
-   `args.first` (Einsums tensor convention).
+   the class's first type argument.
 4. Substitutes any known cpp_to_py-mapped class instantiation in
-   nested types (so `std::tuple<RuntimeTensor<float>, ...>` reduces
-   to `tuple[RuntimeTensorF, ...]`).
+   nested types (so `std::tuple<Array<float>, ...>` reduces
+   to `tuple[ArrayF, ...]`).
 5. Falls back to `Any` when none of the above produces a Python-valid
    identifier — pyright will surface the gap rather than the stub
    silently mistyping.
@@ -519,13 +506,13 @@ recommended pattern uses PEP 562 `__getattr__` so the C extension
 isn't loaded until first attribute access:
 
 ```python
-# einsums/graph.py
+# mylib/graph.py
 import importlib as _importlib
 
 def __getattr__(name):
     if name.startswith("_"):
         raise AttributeError(name)
-    core = _importlib.import_module("._core.graph", "einsums")
+    core = _importlib.import_module("._core.graph", "mylib")
     attr = getattr(core, name)
     globals()[name] = attr  # cache for subsequent lookups
     return attr
@@ -538,26 +525,26 @@ is just a runtime trampoline.
 
 Annotated headers can use `#if`/`#else`/`#endif` against any
 configure-time define, including everything that
-`einsums_add_config_define()` writes into `<Einsums/Config.hpp>`. The
+your project's config-define generator writes into `<mylib/Config.hpp>`. The
 codegen tool runs Clang's full preprocessor and only sees the active
 branch:
 
 ```cpp
-#include <Einsums/Config.hpp>
-#include <Einsums/GPU/DeviceVector.hpp>
+#include <mylib/Config.hpp>
+#include <mylib/cuda/DeviceAllocator.hpp>
 
 template <typename T, size_t rank, typename Alloc>
 struct APIARY_EXPOSE
-    APIARY_INSTANTIATE_AS("Tensor_double_2",
-                                  GeneralTensor<double, 2, std::allocator<double>>)
-#if defined(EINSUMS_HAVE_GPU)
-    APIARY_INSTANTIATE_AS("Tensor_double_2_gpu",
-                                  GeneralTensor<double, 2, gpu::DeviceAllocator<double>>)
+    APIARY_INSTANTIATE_AS("Matrix_double_2",
+                                  Matrix<double, 2, std::allocator<double>>)
+#if defined(MYLIB_HAVE_CUDA)
+    APIARY_INSTANTIATE_AS("Matrix_double_2_cuda",
+                                  Matrix<double, 2, cuda::DeviceAllocator<double>>)
 #endif
-GeneralTensor { ... };
+Matrix { ... };
 ```
 
-When `EINSUMS_WITH_GPU=ON`, the GPU instantiation is added; toggling it
+When `MYLIB_WITH_CUDA=ON`, the GPU instantiation is added; toggling it
 off and reconfiguring drops it. The generated `Defines.hpp` files are
 in every codegen edge's `DEPENDS`, so re-configure → re-fire codegen
 automatically. Also forwarded: every `INTERFACE_COMPILE_DEFINITIONS`
@@ -656,9 +643,8 @@ tests/
    in `Emitter.cpp`'s class-body / method-emission helpers).
 4. Add a fixture under `tests/fixtures/` and regenerate goldens
    (`REGEN=1 tests/run_golden.sh ...`).
-5. Exercise it end-to-end in
-   `libs/Einsums/PythonDemo/CMakeLists.txt`'s `apiary_python_smoke`
-   ctest entry so the Python side is verified.
+5. Exercise it end-to-end with a Python smoke test (build an extension that
+   uses the directive, then assert on the result).
 
 ## Examples
 
@@ -723,27 +709,27 @@ void execute(Graph &g);
 } // namespace cg
 ```
 
-Both `Graph` and `execute` end up in `einsums.graph`. The aggregator
-writes them into `build/lib/einsums/graph.pyi`. Anything outside the
+Both `Graph` and `execute` end up in `mylib.graph`. The aggregator
+writes them into `build/lib/mylib/graph.pyi`. Anything outside the
 namespace block (or any entity tagged with its own
 `APIARY_MODULE("…")`) routes to the chosen submodule.
 
 ### Conditional binding gated on a config define
 
 ```cpp
-#include <Einsums/Config.hpp>
+#include <mylib/Config.hpp>
 
 APIARY_EXPOSE
-APIARY_INSTANTIATE_AS("Tensor_double_2",
-                              GeneralTensor<double, 2, std::allocator<double>>)
-#if defined(EINSUMS_HAVE_GPU)
-APIARY_INSTANTIATE_AS("Tensor_double_2_gpu",
-                              GeneralTensor<double, 2, gpu::DeviceAllocator<double>>)
+APIARY_INSTANTIATE_AS("Matrix_double_2",
+                              Matrix<double, 2, std::allocator<double>>)
+#if defined(MYLIB_HAVE_CUDA)
+APIARY_INSTANTIATE_AS("Matrix_double_2_cuda",
+                              Matrix<double, 2, cuda::DeviceAllocator<double>>)
 #endif
 template <typename T, size_t rank, typename Alloc>
-class GeneralTensor { ... };
+class Matrix { ... };
 ```
 
-Toggle `EINSUMS_WITH_GPU` and reconfigure — the codegen picks up the
-`Defines.hpp` mtime change and re-fires automatically; the GPU
+Toggle `MYLIB_WITH_CUDA` and reconfigure — the codegen picks up the
+`Defines.hpp` mtime change and re-fires automatically; the CUDA
 instantiation appears (or disappears) in the generated bindings + stubs.
