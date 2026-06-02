@@ -24,65 +24,90 @@ macros and emits two artifacts per annotated module:
    per-submodule stubs (`einsums/_core.pyi`, `einsums/linalg.pyi`,
    `einsums/graph.pyi`, …) that pyright / mypy consume.
 
-The tool is gated on the `EINSUMS_BUILD_PYTHON` CMake option (default
-`OFF`). When the option is `ON`, modules opt in by passing `PYBIND` to
-`einsums_add_module()`, and the rest — bindings + stubs — happens
-automatically.
+In Einsums this is wired through its own `einsums_add_module(... PYBIND)`
+helper (gated on `EINSUMS_BUILD_PYTHON`), which is a thin wrapper over the
+generic `apiary_add_bindings` / `apiary_aggregate_extension` CMake functions
+documented in [Quick start](#quick-start). New consumers use those functions
+directly — there is no Einsums coupling.
 
 ## Quick start
 
-Annotate the C++ class you want to bind:
+Annotate the C++ you want to bind:
 
 ```cpp
-// libs/Einsums/MyModule/include/Einsums/MyModule/Greeter.hpp
-#include <Einsums/Python/Annotations.hpp>
+// mylib/include/mylib/Greeter.hpp
+#include <apiary/Annotations.hpp>
 
-namespace einsums::mymodule {
+namespace mylib {
 
 class APIARY_EXPOSE Greeter {
 public:
-    APIARY_EXPOSE
-    Greeter();
-
-    APIARY_EXPOSE
-    explicit Greeter(std::string greeting);
-
-    APIARY_EXPOSE
-    std::string say(std::string const &name) const;
+    APIARY_EXPOSE Greeter();
+    APIARY_EXPOSE explicit Greeter(std::string greeting);
+    APIARY_EXPOSE std::string say(std::string const &name) const;
 };
 
-} // namespace einsums::mymodule
+} // namespace mylib
 ```
 
-Opt the module into autogen:
+Wire it up with Apiary's CMake helpers — the same ones whether Apiary is
+installed (`find_package`) or vendored (`add_subdirectory`):
 
 ```cmake
-# libs/Einsums/MyModule/CMakeLists.txt
-einsums_add_module(
-  Einsums MyModule
-  PYBIND                              # <-- this line
-  SOURCES Greeter.cpp
-  HEADERS Einsums/MyModule/Greeter.hpp
-  MODULE_DEPENDENCIES Einsums_Config
+find_package(Apiary REQUIRED)          # or: add_subdirectory(external/apiary)
+
+target_link_libraries(mylib PUBLIC apiary::annotations)   # the APIARY_* header
+
+# Probe the build compiler once for the system/stdlib include paths libtooling
+# needs (sets APIARY_SYSTEM_FLAGS).
+apiary_detect_toolchain(CXX_STANDARD 20)
+
+# Generate the binding TU (+ .pyi + docs JSON). DEPENDS_TARGETS supplies the
+# transitive -I/-D from your library's usage requirements.
+apiary_add_bindings(
+    BINDING DOCS_JSON
+    HEADERS           ${CMAKE_SOURCE_DIR}/mylib/include/mylib/Greeter.hpp
+    SOURCE_INCLUDES   mylib/Greeter.hpp
+    REGISTER_FUNCTION apiary_register_mylib
+    DEPENDS_TARGETS   mylib
+    OUTPUT_NAME       mylib
+    CXX_STANDARD      20
+    OUT_BINDING _tu  OUT_STUB _stub  OUT_DOCS_JSON _docs
 )
+
+# Assemble one or more modules into a single Python extension. You supply MAIN
+# (the PYBIND11_MODULE body); the helper generates the register header it
+# includes and creates the pybind11 target.
+apiary_aggregate_extension(
+    NAME _core
+    MAIN     ${CMAKE_SOURCE_DIR}/mylib/src/main.cpp
+    BINDINGS ${_tu}
+    MODULES  mylib
+    MODULES_HEADER      ${CMAKE_BINARY_DIR}/gen/include/mylib/Modules.hpp
+    MODULES_INCLUDE_DIR ${CMAKE_BINARY_DIR}/gen/include
+    STUBS ${_stub}  STUBS_TARGET mylib_stubs
+    FRAG_DIR ${CMAKE_BINARY_DIR}/gen  PKG_DIR ${CMAKE_BINARY_DIR}/mylib
+)
+target_link_libraries(_core PRIVATE mylib)
 ```
 
-Configure with Python enabled, build, import:
+`main.cpp` includes the generated header and calls the aggregator:
+
+```cpp
+#include <mylib/Modules.hpp>           // generated: declares apiary_register_all()
+PYBIND11_MODULE(_core, m) { apiary_register_all(m); }
+```
+
+Build and import — the codegen runs as a build edge (re-fires on header changes):
 
 ```bash
-cmake -S . -B build -DEINSUMS_BUILD_PYTHON=ON
-cmake --build build --target PyEinsums
-
-PYTHONPATH=build/lib python3 -c "
-import einsums
-g = einsums.Greeter('hi')
-print(g.say('world'))
-"
+cmake -S . -B build && cmake --build build
+PYTHONPATH=build python3 -c "import _core; print(_core.Greeter('hi').say('world'))"
 ```
 
-That's it. The codegen runs as a build edge (re-fires on header
-changes), and the resulting bindings end up alongside every other
-annotated module under one `import einsums`.
+The [Einsums](https://github.com/Einsums/Einsums) tensor library is the
+reference consumer: its `einsums_add_module(... PYBIND)` wrapper drives these
+same helpers to aggregate ~12 modules under one `import einsums`.
 
 ## Annotation reference
 
@@ -328,25 +353,21 @@ diagnostic instead of producing wrong bindings.
 
 ## How it builds
 
-1. **Configure** — `einsums_finalize_pybind()` runs at the end of root
-   configure. It writes the aggregator main (`PyEinsumsMain.cpp`,
-   prototypes + `PYBIND11_MODULE(einsums, m)` calling each module's
-   register function), creates the `PyEinsums` `pybind11_add_module`
-   target, and emits one `add_custom_command` per opted-in module.
+1. **Configure** — `apiary_add_bindings()` emits an `add_custom_command` per
+   set of headers, and `apiary_aggregate_extension()` writes the register
+   header (`<prefix>all()`) and creates the `pybind11_add_module` target. (In
+   Einsums, `einsums_finalize_pybind()` calls these once per opted-in module.)
 
 2. **Build** — ninja resolves the dependency chain:
-   - `apiary` tool builds first.
-   - Each `Einsums_<Module>` library builds.
-   - For every annotated module, `apiary` runs over its headers
-     and emits `${BUILD}/generated/pybind/Einsums_<Module>_pybind.cpp`,
-     which contains a `void apiary_register_<Module>(py::module_ &m)`
-     function.
-   - The aggregator main and every generated TU compile.
-   - `PyEinsums` links them all into `${BUILD}/lib/einsums.cpython-*.so`.
+   - the `apiary` tool builds first;
+   - your C++ library/targets build;
+   - for each unit, `apiary` runs over its headers and emits
+     `<name>_pybind.cpp`, containing a `void <register-function>(py::module_ &m)`;
+   - the consumer's `MAIN` and every generated TU compile;
+   - the extension links them into one Python module.
 
-Touching an annotated header re-fires only that module's codegen edge
-(via the `add_custom_command`'s `DEPENDS ${headers}`) and re-links the
-single shared library.
+Touching an annotated header re-fires only that unit's codegen edge (via the
+`add_custom_command`'s `DEPENDS ${HEADERS}`) and re-links the extension.
 
 ## Known limitations
 
@@ -394,8 +415,8 @@ The output differs in:
   protocol instead). `APIARY_BUFFER_FROM` directives are
   silently dropped under the nanobind target.
 
-The `einsums_finalize_pybind` CMake integration uses pybind11 today.
-Switching the autogen pipeline to nanobind requires also swapping
+The `apiary_aggregate_extension` helper uses pybind11 today.
+Switching the pipeline to nanobind requires also swapping
 `pybind11_add_module` for `nanobind_add_module` and the matching
 `find_package(nanobind)`. The `--target` flag is what makes the rest of
 that switch a one-line change in the cmake hook.
@@ -410,8 +431,9 @@ build/generated/pybind/Einsums_LinearAlgebra_pybind.cpp   # bindings
 build/generated/pybind/Einsums_LinearAlgebra.pyi          # stub fragment
 ```
 
-A finalize step (`tools/apiary/scripts/aggregate_stubs.py`)
-runs as a `PyEinsumsStubs` custom target after `PyEinsums` is linked.
+A finalize step (`scripts/aggregate_stubs.py`, located at `APIARY_SCRIPTS_DIR`)
+runs as the `STUBS_TARGET` custom target `apiary_aggregate_extension` wires up,
+after the extension is linked.
 It splits each fragment by the `# %%submodule: <name>` sentinels the
 emitter inserts and merges them into per-submodule files in the
 package directory:
@@ -541,8 +563,8 @@ in every codegen edge's `DEPENDS`, so re-configure → re-fire codegen
 automatically. Also forwarded: every `INTERFACE_COMPILE_DEFINITIONS`
 reachable from the module's MODULE_DEPENDENCIES (gets `-D` flags on the
 codegen invocation).
-- **Visibility warnings** when linking PyEinsums (weak symbols across
-  the per-module library and the generated TU) are cosmetic on macOS;
+- **Visibility warnings** when linking the extension (weak symbols across
+  the consumer's library and the generated TU) are cosmetic on macOS;
   symbols still resolve correctly.
 
 ## Tool architecture (for contributors)
@@ -627,7 +649,7 @@ tests/
 
 ## Adding a new directive
 
-1. Define the macro in `libs/Einsums/Python/include/Einsums/Python/Annotations.hpp`.
+1. Define the macro in `include/apiary/Annotations.hpp`.
 2. If its tail can contain `:`, add it to `directive_takes_free_form_tail`
    in `AnnotationParser.cpp`.
 3. Handle it in the emitter (most directives are read via `DirectiveView`
