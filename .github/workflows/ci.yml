@@ -26,9 +26,10 @@ jobs:
             clangdev
             llvmdev
             cxx-compiler
+            zlib
 
       - name: Configure
-        run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
 
       - name: Build
         run: cmake --build build
