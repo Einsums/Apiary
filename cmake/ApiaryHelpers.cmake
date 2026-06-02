@@ -131,3 +131,215 @@ function(apiary_detect_toolchain)
     endforeach()
     set(APIARY_SYSTEM_FLAGS "${_flags}" CACHE INTERNAL "Assembled -resource-dir/-isystem flags for apiary")
 endfunction()
+
+# Recursively collect BUILD_INTERFACE include directories AND
+# INTERFACE_COMPILE_DEFINITIONS reachable from <target> via
+# INTERFACE_LINK_LIBRARIES. CMake has no built-in for this; the walk is
+# reliable since usage requirements are set explicitly via
+# target_link_libraries / target_include_directories.
+#
+#   apiary_collect_usage_requirements(<target> INCLUDES_OUT <v> DEFINES_OUT <v>)
+#
+# Genex-wrapped entries are unwrapped for BUILD_INTERFACE and dropped
+# otherwise (config-conditional values can't be evaluated at configure time).
+function(apiary_collect_usage_requirements _target)
+    cmake_parse_arguments(_A "" "INCLUDES_OUT;DEFINES_OUT" "" ${ARGN})
+    set(_inc "")
+    set(_def "")
+    set(_visited "")
+    _apiary_collect_impl("${_target}" _inc _def _visited)
+    if(_inc)
+        list(REMOVE_DUPLICATES _inc)
+    endif()
+    if(_def)
+        list(REMOVE_DUPLICATES _def)
+    endif()
+    if(_A_INCLUDES_OUT)
+        set(${_A_INCLUDES_OUT} "${_inc}" PARENT_SCOPE)
+    endif()
+    if(_A_DEFINES_OUT)
+        set(${_A_DEFINES_OUT} "${_def}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Internal recursive worker. (Mirrors the parent-scope/local-copy dance the
+# CMake function-scope model forces: PARENT_SCOPE updates the caller's var
+# but not our inherited local, so we keep both in sync for recursion.)
+function(_apiary_collect_impl _target inc_out def_out visited_var)
+    if(NOT TARGET ${_target})
+        return()
+    endif()
+    set(_local_inc     "${${inc_out}}")
+    set(_local_def     "${${def_out}}")
+    set(_local_visited "${${visited_var}}")
+    if("${_target}" IN_LIST _local_visited)
+        return()
+    endif()
+    list(APPEND _local_visited "${_target}")
+
+    get_target_property(_i ${_target} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_i)
+        foreach(_d IN LISTS _i)
+            string(REGEX REPLACE "^\\$<BUILD_INTERFACE:(.+)>$" "\\1" _p "${_d}")
+            if(NOT _p STREQUAL "${_d}")
+                list(APPEND _local_inc "${_p}")
+            elseif(NOT _d MATCHES "^\\$<")
+                list(APPEND _local_inc "${_d}")
+            endif()
+        endforeach()
+    endif()
+    get_target_property(_c ${_target} INTERFACE_COMPILE_DEFINITIONS)
+    if(_c)
+        foreach(_d IN LISTS _c)
+            string(REGEX REPLACE "^\\$<BUILD_INTERFACE:(.+)>$" "\\1" _p "${_d}")
+            if(NOT _p STREQUAL "${_d}")
+                list(APPEND _local_def "${_p}")
+            elseif(NOT _d MATCHES "^\\$<")
+                list(APPEND _local_def "${_d}")
+            endif()
+        endforeach()
+    endif()
+    set(${inc_out}     "${_local_inc}")
+    set(${def_out}     "${_local_def}")
+    set(${visited_var} "${_local_visited}")
+
+    get_target_property(_link ${_target} INTERFACE_LINK_LIBRARIES)
+    if(_link)
+        foreach(_dep IN LISTS _link)
+            if(TARGET ${_dep})
+                _apiary_collect_impl("${_dep}" ${inc_out} ${def_out} ${visited_var})
+                set(_local_inc     "${${inc_out}}")
+                set(_local_def     "${${def_out}}")
+                set(_local_visited "${${visited_var}}")
+            endif()
+        endforeach()
+    endif()
+    set(${inc_out}     "${_local_inc}"     PARENT_SCOPE)
+    set(${def_out}     "${_local_def}"     PARENT_SCOPE)
+    set(${visited_var} "${_local_visited}" PARENT_SCOPE)
+endfunction()
+
+# Emit the codegen custom command(s) that run apiary on one set of headers.
+#
+#   apiary_add_bindings(
+#       HEADERS         <abs header...>      # parsed by apiary (positional)
+#       SOURCE_INCLUDES <relative name...>   # --source-include each
+#       REGISTER_FUNCTION <name>             # --register-function (binding TU)
+#       MODULE          <name>               # --module (docs json; default "module")
+#       DEPENDS_TARGETS <target...>          # usage requirements -> -I / -D
+#       OUTPUT_DIR      <dir>                # where generated files land
+#       OUTPUT_NAME     <stem>               # base filename for outputs
+#       CXX_STANDARD    <n>                  # default 17
+#       EXTRA_FLAGS     <flag...>            # extra -I/-D/... after --
+#       EXTRA_DEPENDS   <file...>            # extra DEPENDS (e.g. Defines.hpp)
+#       BINDING                              # emit the pybind TU (+ stub)
+#       DOCS_JSON                            # emit the docs-json
+#       OUT_BINDING <v>  OUT_STUB <v>  OUT_DOCS_JSON <v>
+#   )
+#
+# Computes flags = APIARY_SYSTEM_FLAGS + usage-requirements(DEPENDS_TARGETS) +
+# EXTRA_FLAGS + -std, and sets the requested OUT_* variables in the caller's
+# scope. Requires apiary_detect_toolchain() to have run.
+function(apiary_add_bindings)
+    cmake_parse_arguments(_A "BINDING;DOCS_JSON"
+        "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON"
+        "HEADERS;SOURCE_INCLUDES;DEPENDS_TARGETS;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
+
+    if(NOT _A_HEADERS)
+        message(FATAL_ERROR "apiary_add_bindings: HEADERS is required")
+    endif()
+    if(NOT _A_OUTPUT_DIR)
+        set(_A_OUTPUT_DIR "${CMAKE_BINARY_DIR}/generated/apiary")
+    endif()
+    if(NOT _A_OUTPUT_NAME)
+        message(FATAL_ERROR "apiary_add_bindings: OUTPUT_NAME is required")
+    endif()
+    if(NOT _A_CXX_STANDARD)
+        set(_A_CXX_STANDARD 17)
+    endif()
+    if(NOT _A_MODULE)
+        set(_A_MODULE "module")
+    endif()
+
+    # -I from each dependency's transitive usage requirements; -D from their
+    # compile definitions (so headers can gate INSTANTIATE choices on options).
+    set(_inc_flags "")
+    set(_def_flags "")
+    foreach(_t IN LISTS _A_DEPENDS_TARGETS)
+        apiary_collect_usage_requirements("${_t}" INCLUDES_OUT _i DEFINES_OUT _d)
+        foreach(_dir IN LISTS _i)
+            list(APPEND _inc_flags "-I${_dir}")
+        endforeach()
+        foreach(_def IN LISTS _d)
+            list(APPEND _def_flags "-D${_def}")
+        endforeach()
+    endforeach()
+    if(_inc_flags)
+        list(REMOVE_DUPLICATES _inc_flags)
+    endif()
+    if(_def_flags)
+        list(REMOVE_DUPLICATES _def_flags)
+    endif()
+
+    set(_source_includes "")
+    foreach(_h IN LISTS _A_SOURCE_INCLUDES)
+        list(APPEND _source_includes --source-include "${_h}")
+    endforeach()
+
+    # EXTRA_FLAGS before the dependency-derived -I so the consumer's explicit
+    # include roots (e.g. the unit's own source dir) take search precedence
+    # over those collected from its dependencies.
+    set(_compile_flags
+        -std=c++${_A_CXX_STANDARD}
+        ${APIARY_SYSTEM_FLAGS}
+        ${_def_flags}
+        ${_A_EXTRA_FLAGS}
+        ${_inc_flags}
+    )
+
+    if(_A_BINDING)
+        set(_binding "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}_pybind.cpp")
+        set(_stub    "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}.pyi")
+        add_custom_command(
+            OUTPUT ${_binding} ${_stub}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_OUTPUT_DIR}"
+            COMMAND $<TARGET_FILE:apiary::apiary>
+                    --register-function ${_A_REGISTER_FUNCTION}
+                    --output ${_binding}
+                    --stub-output ${_stub}
+                    ${_source_includes}
+                    ${_A_HEADERS}
+                    -- ${_compile_flags}
+            DEPENDS ${_A_HEADERS} apiary::apiary ${_A_EXTRA_DEPENDS}
+            VERBATIM
+            COMMENT "apiary: generating ${_A_OUTPUT_NAME}_pybind.cpp + .pyi"
+        )
+        if(_A_OUT_BINDING)
+            set(${_A_OUT_BINDING} "${_binding}" PARENT_SCOPE)
+        endif()
+        if(_A_OUT_STUB)
+            set(${_A_OUT_STUB} "${_stub}" PARENT_SCOPE)
+        endif()
+    endif()
+
+    if(_A_DOCS_JSON)
+        set(_docs "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}.docs.json")
+        add_custom_command(
+            OUTPUT ${_docs}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_OUTPUT_DIR}"
+            COMMAND $<TARGET_FILE:apiary::apiary>
+                    --emit-docs-json
+                    --module ${_A_MODULE}
+                    --output ${_docs}
+                    ${_source_includes}
+                    ${_A_HEADERS}
+                    -- ${_compile_flags}
+            DEPENDS ${_A_HEADERS} apiary::apiary ${_A_EXTRA_DEPENDS}
+            VERBATIM
+            COMMENT "apiary: emitting docs JSON for ${_A_OUTPUT_NAME}"
+        )
+        if(_A_OUT_DOCS_JSON)
+            set(${_A_OUT_DOCS_JSON} "${_docs}" PARENT_SCOPE)
+        endif()
+    endif()
+endfunction()
