@@ -26,6 +26,14 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(apiary LANGUAGES CXX)
 endif()
 
+set(APIARY_VERSION 0.1.0)
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+# Consumer-facing helper functions (apiary_detect_toolchain, ...). Available
+# in both add_subdirectory and find_package(Apiary) modes.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ApiaryHelpers.cmake)
+
 # --- Locate Clang/LLVM development packages -------------------------------
 # find_package(Clang) brings in the AST, ASTMatchers, Frontend, Tooling,
 # and the imported targets we link against. The conda einsums-dev env ships
@@ -90,10 +98,57 @@ set_target_properties(apiary PROPERTIES
 
 target_compile_options(apiary PRIVATE -fno-rtti)
 
-# Conventional install location next to the rest of Einsums' CLI tools.
-install(TARGETS apiary
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT einsums_runtime
+# Namespaced alias so add_subdirectory consumers use the same apiary::apiary
+# they would get from find_package(Apiary).
+add_executable(apiary::apiary ALIAS apiary)
+
+# --- Annotation contract (consumer-facing header) -------------------------
+# The APIARY_* binding-annotation macros. Consumers link this INTERFACE
+# target instead of hardcoding the include path.
+add_library(apiary_annotations INTERFACE)
+target_include_directories(apiary_annotations INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+set_target_properties(apiary_annotations PROPERTIES EXPORT_NAME annotations)
+add_library(apiary::annotations ALIAS apiary_annotations)
+
+# --- Install / export (find_package(Apiary)) ------------------------------
+set(_apiary_cmakedir "${CMAKE_INSTALL_LIBDIR}/cmake/Apiary")
+
+install(TARGETS apiary apiary_annotations
+    EXPORT ApiaryTargets
+    RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(DIRECTORY include/apiary DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT ApiaryTargets
+    NAMESPACE apiary::
+    DESTINATION ${_apiary_cmakedir}
+    FILE ApiaryTargets.cmake
+)
+
+# Bundled Python scripts (stub aggregation + doc rendering) the helper
+# functions invoke; consumers locate them via APIARY_SCRIPTS_DIR.
+install(DIRECTORY scripts/ DESTINATION ${CMAKE_INSTALL_DATADIR}/apiary/scripts)
+install(FILES cmake/ApiaryHelpers.cmake DESTINATION ${_apiary_cmakedir})
+
+set(APIARY_SCRIPTS_DIR "${CMAKE_INSTALL_DATADIR}/apiary/scripts")
+configure_package_config_file(
+    cmake/ApiaryConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/ApiaryConfig.cmake"
+    INSTALL_DESTINATION ${_apiary_cmakedir}
+    PATH_VARS APIARY_SCRIPTS_DIR
+)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/ApiaryConfigVersion.cmake"
+    VERSION ${APIARY_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/ApiaryConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/ApiaryConfigVersion.cmake"
+    DESTINATION ${_apiary_cmakedir}
 )
 
 # --- Smoke tests ----------------------------------------------------------

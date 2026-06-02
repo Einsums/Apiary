@@ -1,0 +1,22 @@
+#----------------------------------------------------------------------------------------------
+# Copyright (c) The Einsums Developers. All rights reserved.
+# Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+#----------------------------------------------------------------------------------------------
+
+# ApiaryConfig.cmake — package config for find_package(Apiary).
+#
+# Provides:
+#   apiary::apiary       - the codegen executable (IMPORTED)
+#   apiary::annotations  - INTERFACE target carrying the APIARY_* macro header
+#   apiary_detect_toolchain() and the other apiary_* helper functions
+#   APIARY_SCRIPTS_DIR   - directory of the bundled Python scripts
+#                          (aggregate_stubs.py, render_cpp_rst.py, render_docs_rst.py)
+
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/ApiaryTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/ApiaryHelpers.cmake")
+
+set_and_check(APIARY_SCRIPTS_DIR "@PACKAGE_APIARY_SCRIPTS_DIR@")
+
+check_required_components(Apiary)
