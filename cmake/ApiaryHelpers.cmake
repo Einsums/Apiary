@@ -413,6 +413,12 @@ function(apiary_aggregate_extension)
         target_include_directories(${_A_NAME} PRIVATE "${_A_MODULES_INCLUDE_DIR}")
     endif()
 
+    # The stub/docs steps run bundled Python scripts; make sure we have an
+    # interpreter even if the consumer didn't already find one.
+    if((_A_STUBS_TARGET OR _A_DOCS_TARGET) AND NOT Python_EXECUTABLE)
+        find_package(Python COMPONENTS Interpreter REQUIRED)
+    endif()
+
     # 3. .pyi aggregation (ALL) — optional.
     if(_A_STUBS_TARGET)
         set(_stamp "${_A_FRAG_DIR}/.stubs.stamp")
