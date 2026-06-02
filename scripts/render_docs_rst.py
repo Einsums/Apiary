@@ -3,11 +3,11 @@
 # Copyright (c) The Einsums Developers. All rights reserved.
 # Licensed under the MIT License. See LICENSE.txt in the project root for license information.
 # ----------------------------------------------------------------------------------------------
-"""Render the Python API reference (reStructuredText) from einsums-pybind docs JSON.
+"""Render the Python API reference (reStructuredText) from apiary docs JSON.
 
 This is the renderer half of "Option 1" of the custom doc-tool plan: the C++
 tool emits a faithful description of the Python-facing surface
-(``einsums-pybind --emit-docs-json``); this script turns one or more of those
+(``apiary --emit-docs-json``); this script turns one or more of those
 JSON documents into Sphinx ``.rst`` reference pages, **grouped by Python
 submodule** (``einsums``, ``einsums.linalg``, ``einsums.graph``, ...).
 
@@ -18,7 +18,7 @@ re-derives pybind naming rules. It only formats.
 Usage::
 
     render_docs_rst.py --outdir <dir> module1.docs.json [module2.docs.json ...]
-    einsums-pybind --emit-docs-json ... | render_docs_rst.py --outdir <dir> -
+    apiary --emit-docs-json ... | render_docs_rst.py --outdir <dir> -
 
 One ``.rst`` is written per submodule, plus an ``index.rst`` with a toctree.
 The schema this consumes is documented in ``DocsJson.hpp``.
@@ -395,7 +395,7 @@ def render_page(module: str, group: dict) -> str:
     out.append("")
     out.append(".. note::")
     out.append(f"{IND}This page is generated from the C++ binding annotations by")
-    out.append(f"{IND}``einsums-pybind --emit-docs-json``. Do not edit by hand.")
+    out.append(f"{IND}``apiary --emit-docs-json``. Do not edit by hand.")
     out.append("")
     out.append(f".. py:module:: {module}")
     out.append("")

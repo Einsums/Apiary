@@ -6,17 +6,17 @@
 """Generate the C++ API reference pages for selected modules (Option 2).
 
 For each public header of each selected ``lib/module``, runs
-``einsums-pybind --emit-cpp-docs-json`` and ``render_cpp_rst.py`` to produce a
+``apiary --emit-cpp-docs-json`` and ``render_cpp_rst.py`` to produce a
 cpp-domain reStructuredText page, replacing Breathe's ``autodoxygenfile``.
 
-Compile flags are taken from a representative ``einsums-pybind`` codegen
+Compile flags are taken from a representative ``apiary`` codegen
 command already present in the build's ``build.ninja`` (the Tensor module's,
 whose transitive include set covers the whole library) — so we don't
 re-derive per-module flags here.
 
 Usage::
 
-    gen_cpp_docs.py --source-dir <repo> --build-dir <build> --tool <einsums-pybind> \
+    gen_cpp_docs.py --source-dir <repo> --build-dir <build> --tool <apiary> \
                     --out-dir <dir> --modules Einsums/BLASVendor Einsums/Concepts
 """
 
@@ -40,7 +40,7 @@ def log(msg: str) -> None:
 def universal_flags(build_dir: Path, source_dir: Path) -> list[str]:
     """Compile flags for parsing any module's headers.
 
-    Start from a representative einsums-pybind command in build.ninja (it
+    Start from a representative apiary command in build.ninja (it
     carries the resource-dir / isysroot / -std / system flags libtooling
     needs), then append EVERY module's include dir — both source and
     build-tree (for generated ``Defines.hpp``). The Tensor command alone
@@ -48,7 +48,7 @@ def universal_flags(build_dir: Path, source_dir: Path) -> list[str]:
     doesn't depend on (ComputeGraph, Comm, GPU, ...) wouldn't resolve their
     own includes and would parse to nothing."""
     ninja = (build_dir / "build.ninja").read_text()
-    m = re.search(r"einsums-pybind --register-function einsums_pybind_register_Tensor [^\n]*", ninja)
+    m = re.search(r"apiary --register-function einsums_pybind_register_Tensor [^\n]*", ninja)
     if not m:
         raise SystemExit("gen_cpp_docs: no Tensor pybind command in build.ninja (need EINSUMS_BUILD_PYTHON)")
     toks = shlex.split(m.group(0))
@@ -138,7 +138,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source-dir", required=True)
     ap.add_argument("--build-dir", required=True)
-    ap.add_argument("--tool", required=True, help="einsums-pybind binary")
+    ap.add_argument("--tool", required=True, help="apiary binary")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--modules", nargs="+", default=None,
                     help="lib/module pairs, e.g. Einsums/BLASVendor. When omitted, every "

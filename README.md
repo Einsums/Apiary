@@ -1,8 +1,20 @@
-# einsums-pybind
+# Apiary
 
-A libtooling-based code generator that walks Einsums headers, finds
-declarations marked with `EINSUMS_PYBIND_*` macros, and emits two
-artifacts per annotated module:
+A libclang/libtooling-based C++ introspection engine. It parses real C++23 with
+a Clang frontend and, from a single AST walk, emits pybind11/nanobind binding
+TUs, `.pyi` type stubs, Sphinx C++ API documentation (cpp/c-domain directives,
+including macros — no Doxygen), and a structured public-API JSON IR.
+
+Apiary began as `apiary`, the binding generator for the
+[Einsums](https://github.com/Einsums/Einsums) tensor library, and is being
+generalized into a standalone tool. The annotation contract still uses the
+`EINSUMS_PYBIND_*` macro names (shipped in `include/apiary/Annotations.hpp`);
+these will be renamed to neutral `APIARY_*` names in a later pass.
+
+## Origins (Einsums binding generator)
+
+Walking Einsums headers, it finds declarations marked with `EINSUMS_PYBIND_*`
+macros and emits two artifacts per annotated module:
 
 1. **A pybind11 binding TU** that gets linked into a single `einsums`
    Python extension, so users get one `import einsums` instead of one
@@ -323,9 +335,9 @@ diagnostic instead of producing wrong bindings.
    target, and emits one `add_custom_command` per opted-in module.
 
 2. **Build** — ninja resolves the dependency chain:
-   - `einsums-pybind` tool builds first.
+   - `apiary` tool builds first.
    - Each `Einsums_<Module>` library builds.
-   - For every annotated module, `einsums-pybind` runs over its headers
+   - For every annotated module, `apiary` runs over its headers
      and emits `${BUILD}/generated/pybind/Einsums_<Module>_pybind.cpp`,
      which contains a `void einsums_pybind_register_<Module>(py::module_ &m)`
      function.
@@ -361,11 +373,11 @@ single shared library.
 
 ## Backend target
 
-einsums-pybind can emit code against either pybind11 (default) or
+apiary can emit code against either pybind11 (default) or
 nanobind. Pass `--target {pybind11,nanobind}` on the command line:
 
 ```bash
-einsums-pybind --target nanobind --module myext header.hpp -- ...
+apiary --target nanobind --module myext header.hpp -- ...
 ```
 
 The output differs in:
@@ -398,7 +410,7 @@ build/generated/pybind/Einsums_LinearAlgebra_pybind.cpp   # bindings
 build/generated/pybind/Einsums_LinearAlgebra.pyi          # stub fragment
 ```
 
-A finalize step (`tools/einsums-pybind/scripts/aggregate_stubs.py`)
+A finalize step (`tools/apiary/scripts/aggregate_stubs.py`)
 runs as a `PyEinsumsStubs` custom target after `PyEinsums` is linked.
 It splits each fragment by the `# %%submodule: <name>` sentinels the
 emitter inserts and merges them into per-submodule files in the

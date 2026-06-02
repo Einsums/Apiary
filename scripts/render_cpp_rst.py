@@ -4,7 +4,7 @@
 # Licensed under the MIT License. See LICENSE.txt in the project root for license information.
 # ----------------------------------------------------------------------------------------------
 """Render a C++ API reference page (reStructuredText, Sphinx cpp domain) from
-einsums-pybind ``--emit-cpp-docs-json`` output.
+apiary ``--emit-cpp-docs-json`` output.
 
 This is the renderer half of "Option 2" — replacing Doxygen + Breathe with our
 own libclang extraction. Where Breathe forwarded Doxygen's raw signatures to
@@ -300,7 +300,7 @@ def render_page(title: str, doc: dict, embed: bool = False) -> str:
         out.append(bar)
     out.append("")
     out.append(".. note::")
-    out.append(f"{IND}Generated from the C++ headers by ``einsums-pybind --emit-cpp-docs-json``.")
+    out.append(f"{IND}Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.")
     out.append("")
 
     # Macros are not namespaced — emit them first, before any
