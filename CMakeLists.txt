@@ -33,6 +33,10 @@ include(CMakePackageConfigHelpers)
 # Consumer-facing helper functions (apiary_detect_toolchain, ...). Available
 # in both add_subdirectory and find_package(Apiary) modes.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ApiaryHelpers.cmake)
+# Bundled Python scripts (stub aggregation, doc rendering) the helpers invoke.
+# For add_subdirectory consumers this points in-tree; find_package consumers
+# get the installed location from ApiaryConfig.cmake instead.
+set(APIARY_SCRIPTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/scripts" CACHE INTERNAL "apiary bundled scripts dir")
 
 # --- Locate Clang/LLVM development packages -------------------------------
 # find_package(Clang) brings in the AST, ASTMatchers, Frontend, Tooling,
