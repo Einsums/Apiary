@@ -15,9 +15,11 @@ permissions:
   pages: write
   id-token: write
 
-# One in-flight deploy at a time; let a newer push cancel an older run.
+# Scope concurrency per ref so a PR build never cancels the main build (and
+# vice versa) — a static "pages" group made them fight. A newer push to the
+# SAME ref still supersedes an older, in-flight run.
 concurrency:
-  group: pages
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -65,6 +67,11 @@ jobs:
     needs: build
     # Only publish from main; PRs build-and-verify but don't deploy.
     if: github.ref == 'refs/heads/main'
+    # Serialize actual deployments (never cancel one mid-flight) — independent
+    # of the per-ref build concurrency above.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment:
       name: github-pages
