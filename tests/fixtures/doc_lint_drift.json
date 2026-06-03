@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "module": "fixture_doc_drift",
+  "classes": [
+    {
+      "name": "Widget",
+      "qualified_name": "Widget",
+      "location": { "file": "doc_drift.hpp", "line": 30, "column": 7 },
+      "doc_structured": { "brief": "A widget.", "detail": "", "params": [], "tparams": [], "returns": "", "throws": [] },
+      "constructors": [
+        {
+          "name": "Widget",
+          "qualified_name": "Widget::Widget",
+          "location": { "file": "doc_drift.hpp", "line": 31, "column": 5 },
+          "return_type": "",
+          "is_constructor": true,
+          "params": [ { "name": "n", "type": "int" } ],
+          "template_params": [],
+          "doc_structured": { "brief": "Build a widget.", "detail": "", "params": [], "tparams": [], "returns": "", "throws": [] }
+        }
+      ],
+      "methods": [
+        {
+          "name": "resize",
+          "qualified_name": "Widget::resize",
+          "location": { "file": "doc_drift.hpp", "line": 33, "column": 10 },
+          "return_type": "void",
+          "return_type_canonical": "void",
+          "is_constructor": false,
+          "params": [ { "name": "w", "type": "int" }, { "name": "h", "type": "int" } ],
+          "template_params": [],
+          "doc_structured": {
+            "brief": "Resize.", "detail": "",
+            "params": [ { "name": "w", "description": "width" } ],
+            "tparams": [], "returns": "", "throws": []
+          }
+        }
+      ],
+      "nested_classes": []
+    }
+  ],
+  "functions": [
+    {
+      "name": "compute",
+      "qualified_name": "compute",
+      "location": { "file": "doc_drift.hpp", "line": 10, "column": 6 },
+      "return_type": "void",
+      "return_type_canonical": "void",
+      "params": [ { "name": "a", "type": "int" }, { "name": "b", "type": "int" } ],
+      "template_params": [],
+      "doc_structured": {
+        "brief": "Compute something.", "detail": "",
+        "params": [ { "name": "a", "description": "first" }, { "name": "c", "description": "typo" } ],
+        "tparams": [], "returns": "the result", "throws": []
+      }
+    },
+    {
+      "name": "transform",
+      "qualified_name": "transform",
+      "location": { "file": "doc_drift.hpp", "line": 20, "column": 3 },
+      "return_type": "int",
+      "return_type_canonical": "int",
+      "params": [ { "name": "x", "type": "int" } ],
+      "template_params": [ "T" ],
+      "doc_structured": {
+        "brief": "Transform x.", "detail": "",
+        "params": [ { "name": "x", "description": "input" } ],
+        "tparams": [ { "name": "U", "description": "wrong" } ],
+        "returns": "", "throws": [ { "name": "", "description": "on failure" } ]
+      }
+    }
+  ],
+  "enums": [],
+  "typedefs": [],
+  "concepts": [],
+  "macros": [
+    {
+      "name": "MAX",
+      "qualified_name": "MAX",
+      "location": { "file": "doc_drift.hpp", "line": 40, "column": 9 },
+      "is_function_like": true,
+      "params": [ "a", "b" ],
+      "doc_structured": {
+        "brief": "Max of two.", "detail": "",
+        "params": [ { "name": "a", "description": "first" }, { "name": "z", "description": "typo" } ],
+        "tparams": [], "returns": "", "throws": []
+      }
+    }
+  ]
+}

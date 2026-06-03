@@ -27,6 +27,7 @@ jobs:
             llvmdev
             cxx-compiler
             zlib
+            python
 
       - name: Configure
         run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"

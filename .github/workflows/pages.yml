@@ -56,6 +56,11 @@ jobs:
           python docs/gen_self_docs.py --tool ./build/apiary
           python docs/extract_cmake_docs.py docs/cmake.rst
 
+      - name: Doc-quality lint (apiary lints its own docs)
+        # gen_self_docs.py emits docs/api/*.json — cross-check doc vs signature.
+        # --strict so any drift (incl. missing-param warnings) fails the build.
+        run: python scripts/doc_lint.py --strict docs/api/*.json
+
       - name: Build HTML
         run: sphinx-build -b html -W docs docs/_build/html
 
