@@ -92,6 +92,7 @@
 /// to know the concrete instantiation's element type, rank, and stride
 /// representation, and produce a valid buffer_info.
 ///
+/// @code
 ///     namespace einsums::pybuf {
 ///         template <typename T, size_t N, typename A>
 ///         pybind11::buffer_info make(GeneralTensor<T, N, A> &t);
@@ -100,6 +101,8 @@
 ///     APIARY_BUFFER_PROTOCOL
 ///     APIARY_BUFFER_FROM(einsums::pybuf::make)
 ///     struct GeneralTensor { ... };
+/// @endcode
+///
 /// @param ... the helper function name
 #define APIARY_BUFFER_FROM(...) APIARY_DETAIL_ANNOTATE("buffer_from:" #__VA_ARGS__)
 
@@ -120,12 +123,14 @@
 /// template parameter that gives the element type; the codegen substitutes
 /// it per instantiation when emitting the format string and sizeof().
 ///
+/// @code
 ///   template <typename T, typename Alloc>
 ///   APIARY_EXPOSE
 ///   APIARY_BUFFER_PROTOCOL_STD(
 ///       data = data, rank = rank, dim = dim, stride = stride,
 ///       element_type = T)
 ///   struct GeneralRuntimeTensor { ... };
+/// @endcode
 ///
 /// The named methods must satisfy:
 ///   - ``T*       data();``     // pointer to first element
@@ -147,6 +152,7 @@
 ///   - ``Iter begin();``
 ///   - ``Iter end();``
 ///
+/// @code
 ///   template <typename T, typename Alloc>
 ///   APIARY_EXPOSE
 ///   APIARY_ITERATOR_STD(begin = begin, end = end)
@@ -154,6 +160,7 @@
 ///       Iter begin();   // pure C++
 ///       Iter end();
 ///   };
+/// @endcode
 ///
 /// @note The Python iterator borrows a reference to the underlying object
 /// (py::keep_alive<0, 1>) so iteration is safe across the parent's lifetime.
@@ -172,6 +179,7 @@
 ///   at_element   — T   (std::vector<int64_t> const &idx) const
 ///   set_element  — void(std::vector<int64_t> const &idx, T value)
 ///
+/// @code
 ///   template <typename T, typename Alloc>
 ///   APIARY_EXPOSE
 ///   APIARY_INDEX_PROTOCOL_STD(
@@ -181,6 +189,7 @@
 ///       T    at_element(std::vector<int64_t> const &) const;
 ///       void set_element(std::vector<int64_t> const &, T);
 ///   };
+/// @endcode
 ///
 /// Python:
 ///   t[5]            → scalar (rank-1 tensor)
@@ -203,9 +212,12 @@
 /// Emits ``py::implicitly_convertible<Source, Class>()``
 /// after the class definition. Useful for ergonomic factory ctors:
 ///
+/// @code
 ///     APIARY_EXPOSE
 ///     APIARY_IMPLICIT_FROM(int)
 ///     class Tensor { Tensor(int n); ... };  // can call Python f(t=42)
+/// @endcode
+///
 /// @param ... the source type to convert from
 #define APIARY_IMPLICIT_FROM(...) APIARY_DETAIL_ANNOTATE("implicit_from:" #__VA_ARGS__)
 
@@ -229,9 +241,11 @@
 /// ``std::exception`` (or whatever pybind11's register_exception template
 /// requires) for the registration to compile.
 ///
+/// @code
 ///     class APIARY_EXPOSE
 ///           APIARY_EXCEPTION
 ///           TensorError : public std::exception { ... };
+/// @endcode
 ///
 /// Subsequent ``raise einsums.TensorError(...)`` from Python (or
 /// ``throw einsums::TensorError("...")`` from C++) crosses the boundary cleanly.
@@ -269,19 +283,20 @@
 /// expanded arity is given by the template parameter named ``param_name``.
 /// Each expanded slot has type ``element_type``.
 ///
+/// @code
 ///   template <typename T, size_t rank> struct Tensor;
 ///
 ///   template <typename... Dims>
 ///   APIARY_EXPOSE
 ///   APIARY_VARIADIC_FROM(rank, size_t)
 ///   Tensor(std::string name, Dims... dims);
+/// @endcode
 ///
 /// For ``Tensor<double, 2>``, this binds a ctor with signature
 /// ``(std::string, size_t, size_t)``.
 /// @param param_name template parameter that gives the expanded arity
 /// @param element_type type of each expanded slot
-#define APIARY_VARIADIC_FROM(param_name, element_type)                                                                             \
-    APIARY_DETAIL_ANNOTATE("variadic_from:" #param_name ":" #element_type)
+#define APIARY_VARIADIC_FROM(param_name, element_type) APIARY_DETAIL_ANNOTATE("variadic_from:" #param_name ":" #element_type)
 
 /// @brief Pin a member-template parameter to a concrete type for binding purposes.
 ///
@@ -294,6 +309,7 @@
 /// @note Multiple member-template parameters: stack the directive once per
 /// parameter. Position-independent — the codegen matches by name.
 ///
+/// @code
 ///   template <typename T, typename Alloc>
 ///   struct GeneralRuntimeTensor {
 ///     template <Container Dim>
@@ -301,6 +317,7 @@
 ///     APIARY_INSTANTIATE_MEMBER(Dim = std::vector<size_t>)
 ///     GeneralRuntimeTensor(std::string name, Dim const &dims);
 ///   };
+/// @endcode
 ///
 /// For ``GeneralRuntimeTensor<float, std::allocator<float>>`` this binds
 /// a constructor with signature ``(std::string, std::vector<size_t> const &)``.
@@ -317,6 +334,7 @@
 /// ``Param = Type`` assignments pinning each member-template parameter to
 /// a concrete type for this instantiation.
 ///
+/// @code
 ///   template <typename T, typename Alloc = std::allocator<T>>
 ///   APIARY_EXPOSE
 ///   APIARY_INSTANTIATE_MEMBER_AS("declare_runtime_tensor",
@@ -324,6 +342,7 @@
 ///   APIARY_INSTANTIATE_MEMBER_AS("declare_runtime_tensor",
 ///                                        T = double, Alloc = std::allocator<double>)
 ///   GeneralRuntimeTensor<T, Alloc> &declare_runtime_tensor(...);
+/// @endcode
 ///
 /// @note Sharing a Python name across directives produces a pybind11 overload
 /// set; py_name disambiguation is the user's responsibility.
@@ -379,17 +398,22 @@
 /// use ``APIARY_INSTANTIATE_TEMPLATE`` if you want to control the
 /// name explicitly.
 ///
+/// @code
 ///   template <typename T, size_t rank>
 ///   APIARY_INSTANTIATE(Tensor,
 ///       T(float, double, std::complex<float>, std::complex<double>),
 ///       rank(1, 2, 3, 4))
 ///   struct Tensor;
+/// @endcode
 ///
 /// @note Reordering is allowed; this is equivalent to the above:
 ///
+/// @code
 ///   APIARY_INSTANTIATE(Tensor,
 ///       rank(1, 2, 3, 4),
 ///       T(float, double, std::complex<float>, std::complex<double>))
+/// @endcode
+///
 /// @param ... the class name followed by ``Param(values...)`` groups
 #define APIARY_INSTANTIATE(...) APIARY_DETAIL_ANNOTATE("instantiate:" #__VA_ARGS__)
 
@@ -404,8 +428,11 @@
 /// The Python name comes first so the C++ type, whose template arguments
 /// may contain commas, can occupy the variadic tail.
 ///
+/// @code
 ///   APIARY_INSTANTIATE_AS("Tensor2d_double",
 ///                                 GeneralTensor<double, 2, std::allocator<double>>)
+/// @endcode
+///
 /// @param py_name string literal naming the Python binding
 /// @param ... the fully-qualified C++ type to instantiate
 #define APIARY_INSTANTIATE_AS(py_name, ...) APIARY_DETAIL_ANNOTATE("instantiate_as:" py_name ":" #__VA_ARGS__)
@@ -416,20 +443,21 @@
 /// must be a C++ template-parameter name. Placeholders in the name
 /// template use those same names.
 ///
+/// @code
 ///   template <typename Element, int Rank> class Block;
 ///
 ///   APIARY_INSTANTIATE_TEMPLATE("Block_{Element}_{Rank}",
 ///       Block,
 ///       Element(float, double),
 ///       Rank(1, 2))
+/// @endcode
 ///
 /// Produces ``Block_float_1``, ``Block_float_2``, ``Block_double_1``,
 /// ``Block_double_2``. Placeholder values are sanitized to valid Python
 /// identifiers (``std::complex<double>`` -> ``std_complex_double``).
 /// @param name_template string literal name template with ``{Param}`` placeholders
 /// @param ... the class name followed by ``Param(values...)`` groups
-#define APIARY_INSTANTIATE_TEMPLATE(name_template, ...)                                                                            \
-    APIARY_DETAIL_ANNOTATE("instantiate_template:" name_template ":" #__VA_ARGS__)
+#define APIARY_INSTANTIATE_TEMPLATE(name_template, ...) APIARY_DETAIL_ANNOTATE("instantiate_template:" name_template ":" #__VA_ARGS__)
 
 /// @brief Declare Python kwarg names for the leading bool template parameters of a
 /// templated free function.
@@ -465,10 +493,12 @@
 /// for one dtype slice — same syntax as ``APIARY_INSTANTIATE_AS``
 /// minus the leading bool prefix. Repeat the directive once per dtype.
 ///
+/// @code
 ///   APIARY_TEMPLATE_KWARGS("trans_a", "trans_b")
 ///   APIARY_INSTANTIATE_BOOLS("gemm", einsums::GeneralRuntimeTensor<float,  std::allocator<float>>,  float)
 ///   APIARY_INSTANTIATE_BOOLS("gemm", einsums::GeneralRuntimeTensor<double, std::allocator<double>>, double)
 ///   ...
+/// @endcode
 ///
 /// @note Use ``APIARY_INSTANTIATE_AS`` directly if you need to omit a
 /// particular bool combination for a given dtype (rare escape hatch).
