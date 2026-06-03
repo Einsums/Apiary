@@ -179,4 +179,12 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                 "$<TARGET_FILE:apiary>"
                 "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
+    # doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,
+    # so it needs no apiary binary — it diffs diagnostics for a seeded-drift
+    # fixture against a golden. Prefer a CMake-found interpreter, else python3.
+    find_package(Python COMPONENTS Interpreter QUIET)
+    add_test(NAME apiary_doc_lint
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_doc_lint.sh"
+                "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
+    )
 endif()
