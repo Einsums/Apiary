@@ -6,8 +6,12 @@
 # ApiaryConfig.cmake — package config for find_package(Apiary).
 #
 # Provides:
-#   apiary::apiary       - the codegen executable (IMPORTED)
 #   apiary::annotations  - INTERFACE target carrying the APIARY_* macro header
+#                          (always present)
+#   apiary::apiary       - the codegen executable (IMPORTED). Present only when
+#                          the package was built with APIARY_BUILD_TOOL=ON; a
+#                          header-only install omits it. Test for it with
+#                          ``if(TARGET apiary::apiary)`` before use.
 #   apiary_detect_toolchain() and the other apiary_* helper functions
 #   APIARY_SCRIPTS_DIR   - directory of the bundled Python scripts
 #                          (aggregate_stubs.py, render_cpp_rst.py, render_docs_rst.py)
@@ -18,5 +22,13 @@ include("${CMAKE_CURRENT_LIST_DIR}/ApiaryTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ApiaryHelpers.cmake")
 
 set_and_check(APIARY_SCRIPTS_DIR "@PACKAGE_APIARY_SCRIPTS_DIR@")
+
+# APIARY_TOOL_FOUND lets consumers branch on whether the codegen executable
+# is available in this install (header-only installs ship annotations only).
+if(TARGET apiary::apiary)
+    set(APIARY_TOOL_FOUND TRUE)
+else()
+    set(APIARY_TOOL_FOUND FALSE)
+endif()
 
 check_required_components(Apiary)

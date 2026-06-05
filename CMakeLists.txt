@@ -11,12 +11,22 @@
 # einsums_add_module() so that adding a new C++ feature requires no manual
 # binding work — just annotate the declaration and rebuild.
 #
-# This directory is gated by EINSUMS_BUILD_PYTHON at the project root;
-# the parent CMakeLists.txt only descends here when that option is ON.
+# This directory provides two independent pieces:
+#   * apiary::annotations - a header-only INTERFACE target carrying the
+#     APIARY_* macros. Always defined; needs no Clang/LLVM. Every consumer
+#     that merely annotates declarations (i.e. every Einsums TU) depends on
+#     just this.
+#   * apiary            - the libtooling codegen executable. Built only when
+#     APIARY_BUILD_TOOL is ON (the default). It links libtooling
+#     (clangTooling, clangFrontend, clangAST, clangBasic, ...) and
+#     llvmSupport, so it needs the Clang/LLVM development packages; it
+#     mirrors the discovery pattern used by EinsumsClangd's clang-tidy
+#     module.
 #
-# The tool links against libtooling (clangTooling, clangFrontend, clangAST,
-# clangBasic, ...) and llvmSupport. It mirrors the discovery pattern used
-# by EinsumsClangd's clang-tidy module.
+# Turn APIARY_BUILD_TOOL OFF to vendor the annotation header without pulling
+# in Clang/LLVM — e.g. a pure-C++ build that neither generates bindings nor
+# builds docs. Bindings generation and the docs C++ reference both need the
+# executable, so the consumer enables APIARY_BUILD_TOOL for those.
 
 # Allow this directory to act as a standalone CMake project for local
 # iteration without rebuilding the parent — useful while hacking on the
@@ -28,6 +38,11 @@ endif()
 
 set(APIARY_VERSION 0.1.0)
 
+# Building the libtooling executable needs the Clang/LLVM development
+# packages. Consumers that only want the annotation header (apiary::annotations)
+# can switch this OFF to avoid that dependency entirely.
+option(APIARY_BUILD_TOOL "Build the libtooling codegen executable (requires Clang/LLVM dev)" ON)
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 # Consumer-facing helper functions (apiary_detect_toolchain, ...). Available
@@ -38,6 +53,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ApiaryHelpers.cmake)
 # get the installed location from ApiaryConfig.cmake instead.
 set(APIARY_SCRIPTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/scripts" CACHE INTERNAL "apiary bundled scripts dir")
 
+if(APIARY_BUILD_TOOL)
 # --- Locate Clang/LLVM development packages -------------------------------
 # find_package(Clang) brings in the AST, ASTMatchers, Frontend, Tooling,
 # and the imported targets we link against. The conda einsums-dev env ships
@@ -105,6 +121,7 @@ target_compile_options(apiary PRIVATE -fno-rtti)
 # Namespaced alias so add_subdirectory consumers use the same apiary::apiary
 # they would get from find_package(Apiary).
 add_executable(apiary::apiary ALIAS apiary)
+endif() # APIARY_BUILD_TOOL
 
 # --- Annotation contract (consumer-facing header) -------------------------
 # The APIARY_* binding-annotation macros. Consumers link this INTERFACE
@@ -120,7 +137,16 @@ add_library(apiary::annotations ALIAS apiary_annotations)
 # --- Install / export (find_package(Apiary)) ------------------------------
 set(_apiary_cmakedir "${CMAKE_INSTALL_LIBDIR}/cmake/Apiary")
 
-install(TARGETS apiary apiary_annotations
+# apiary_annotations (and the header it carries) install unconditionally so a
+# find_package(Apiary) / install tree always provides the macros, even in a
+# header-only (APIARY_BUILD_TOOL=OFF) configuration. The executable is added
+# to the same export set only when it was built; ApiaryTargets.cmake then
+# defines apiary::apiary just for tool-enabled installs.
+set(_apiary_install_targets apiary_annotations)
+if(APIARY_BUILD_TOOL)
+    list(PREPEND _apiary_install_targets apiary)
+endif()
+install(TARGETS ${_apiary_install_targets}
     EXPORT ApiaryTargets
     RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
@@ -161,24 +187,28 @@ install(FILES
 # golden-output diffs once the emitter output stabilizes.
 if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
-    add_test(NAME apiary_phase2_smoke
-        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_smoke.sh"
-                "$<TARGET_FILE:apiary>"
-                "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    )
-    add_test(NAME apiary_phase3_golden
-        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_golden.sh"
-                "$<TARGET_FILE:apiary>"
-                "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    )
-    # .pyi golden suite — diffs the generated stub for each fixture
-    # against a committed golden. Catches drift in per-instantiation
-    # type resolution, docstring extraction, property merge, etc.
-    add_test(NAME apiary_pyi_golden
-        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_pyi_golden.sh"
-                "$<TARGET_FILE:apiary>"
-                "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    )
+    # The smoke/golden/pyi suites drive the executable, so they only register
+    # when it was built. doc_lint below is pure Python and runs either way.
+    if(APIARY_BUILD_TOOL)
+        add_test(NAME apiary_phase2_smoke
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_smoke.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        add_test(NAME apiary_phase3_golden
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_golden.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        # .pyi golden suite — diffs the generated stub for each fixture
+        # against a committed golden. Catches drift in per-instantiation
+        # type resolution, docstring extraction, property merge, etc.
+        add_test(NAME apiary_pyi_golden
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_pyi_golden.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+    endif()
     # doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,
     # so it needs no apiary binary — it diffs diagnostics for a seeded-drift
     # fixture against a golden. Prefer a CMake-found interpreter, else python3.
