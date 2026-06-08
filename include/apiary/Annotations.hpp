@@ -414,6 +414,22 @@
 ///       T(float, double, std::complex<float>, std::complex<double>))
 /// @endcode
 ///
+/// @note Non-type parameters may be of enum type. Name the enumerators in the
+/// group (scope-qualified ``Layout::RowMajor`` or bare ``RowMajor``); the
+/// codegen rewrites each to its fully-qualified form so the binding compiles
+/// at module scope, names the instantiation after the enumerator leaf
+/// (``Storage_float_RowMajor``), and errors if a value is not a real
+/// enumerator of that parameter's enum:
+///
+/// @code
+///   enum class Layout { RowMajor, ColumnMajor };
+///   template <typename T, Layout L>
+///   APIARY_INSTANTIATE(Storage,
+///       T(float, double),
+///       L(Layout::RowMajor, Layout::ColumnMajor))
+///   struct Storage;
+/// @endcode
+///
 /// @param ... the class name followed by ``Param(values...)`` groups
 #define APIARY_INSTANTIATE(...) APIARY_DETAIL_ANNOTATE("instantiate:" #__VA_ARGS__)
 

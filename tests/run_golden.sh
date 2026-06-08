@@ -41,6 +41,7 @@ readonly CASES=(
     "fixture_namespace_module|namespace_module.hpp|namespace_module.cpp.golden"
     "fixture_dtype_dispatcher|dtype_dispatcher.hpp|dtype_dispatcher.cpp.golden"
     "fixture_member_template|member_template.hpp|member_template.cpp.golden"
+    "fixture_enum_nttp|enum_nttp.hpp|enum_nttp.cpp.golden"
 )
 
 run_tool() {

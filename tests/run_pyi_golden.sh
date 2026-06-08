@@ -40,6 +40,7 @@ readonly CASES=(
     "fixture_namespace_module|namespace_module.hpp|namespace_module.pyi.golden"
     "fixture_dtype_dispatcher|dtype_dispatcher.hpp|dtype_dispatcher.pyi.golden"
     "fixture_member_template|member_template.hpp|member_template.pyi.golden"
+    "fixture_enum_nttp|enum_nttp.hpp|enum_nttp.pyi.golden"
 )
 
 # Run the tool with --stub-output to a temp file and emit the stub on

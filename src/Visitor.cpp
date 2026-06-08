@@ -9,6 +9,10 @@
 #include "DocExtractor.hpp"
 #include "InstantiateParser.hpp"
 #include "TypeTranslator.hpp"
+#include <algorithm>
+#include <cctype>
+#include <utility>
+
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
@@ -151,6 +155,151 @@ std::vector<std::string> split_combo(std::string const &combo) {
     return parts;
 }
 
+// ---- enum non-type template parameters -----------------------------------
+//
+// A class/function template parameter can be a non-type parameter of enum
+// type, e.g. ``template <Layout L>``, instantiated with enumerators such as
+// ``L(Layout::RowMajor, Layout::ColumnMajor)``. Unlike an integer NTTP, an
+// enumerator written ``Layout::RowMajor`` does not resolve at the global scope
+// where the bindings are emitted, so we rewrite each value to its fully
+// qualified form (``einsums::fixture::Layout::RowMajor``) and validate that it
+// names a real enumerator. The Python name uses just the enumerator leaf.
+
+struct EnumNTTP {
+    /// True if this template parameter is a non-type parameter of enum type.
+    bool        is_enum = false;
+    /// Fully-qualified enum type name, e.g. "einsums::fixture::Layout".
+    std::string type_fq;
+    /// {leaf, fully-qualified value} for every enumerator of the type.
+    std::vector<std::pair<std::string, std::string>> enumerators;
+};
+
+// One EnumNTTP per template parameter, in declaration order. Works for both
+// class and function templates; parameters that aren't enum NTTPs get a
+// default (is_enum == false) entry so positions line up with type_args.
+std::vector<EnumNTTP> collect_enum_nttps(clang::NamedDecl const *decl) {
+    std::vector<EnumNTTP>               out;
+    clang::TemplateParameterList const *params = nullptr;
+    if (auto const *rd = clang::dyn_cast<clang::CXXRecordDecl>(decl)) {
+        if (auto const *t = rd->getDescribedClassTemplate()) {
+            params = t->getTemplateParameters();
+        }
+    } else if (auto const *fd = clang::dyn_cast<clang::FunctionDecl>(decl)) {
+        if (auto const *t = fd->getDescribedFunctionTemplate()) {
+            params = t->getTemplateParameters();
+        }
+    }
+    if (params == nullptr) {
+        return out;
+    }
+    out.reserve(params->size());
+    for (clang::NamedDecl const *p : *params) {
+        EnumNTTP info;
+        if (auto const *nttp = clang::dyn_cast<clang::NonTypeTemplateParmDecl>(p)) {
+            if (auto const *et = nttp->getType()->getAs<clang::EnumType>()) {
+                clang::EnumDecl const *ed = et->getDecl();
+                info.is_enum              = true;
+                info.type_fq              = ed->getQualifiedNameAsString();
+                for (clang::EnumConstantDecl const *ec : ed->enumerators()) {
+                    info.enumerators.emplace_back(ec->getNameAsString(), info.type_fq + "::" + ec->getNameAsString());
+                }
+            }
+        }
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
+bool any_enum_nttp(std::vector<EnumNTTP> const &enums) {
+    return std::any_of(enums.begin(), enums.end(), [](EnumNTTP const &e) { return e.is_enum; });
+}
+
+// Match a written value (``Layout::RowMajor``, bare ``RowMajor``, or already
+// fully qualified) to one of the enum's enumerators by its trailing token.
+// On success fq_out/leaf_out get the canonical forms; returns false otherwise.
+bool resolve_enum_value(EnumNTTP const &info, std::string const &written, std::string &fq_out, std::string &leaf_out) {
+    std::string leaf = written;
+    if (auto const pos = leaf.rfind("::"); pos != std::string::npos) {
+        leaf = leaf.substr(pos + 2);
+    }
+    std::size_t b = 0;
+    std::size_t e = leaf.size();
+    while (b < e && (std::isspace(static_cast<unsigned char>(leaf[b])) != 0)) {
+        ++b;
+    }
+    while (e > b && (std::isspace(static_cast<unsigned char>(leaf[e - 1])) != 0)) {
+        --e;
+    }
+    leaf = leaf.substr(b, e - b);
+    for (auto const &en : info.enumerators) {
+        if (en.first == leaf) {
+            fq_out   = en.second;
+            leaf_out = leaf;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Rewrite the enum-typed positions of a flat, comma-joined type-argument string
+// to their fully-qualified enumerator form. Returns "" on success (type_args
+// updated in place) or a diagnostic naming the offending value. No-op when the
+// template has no enum NTTPs.
+std::string qualify_enum_args_flat(std::string &type_args, std::vector<EnumNTTP> const &enums) {
+    if (!any_enum_nttp(enums)) {
+        return "";
+    }
+    std::vector<std::string> vals = split_combo(type_args);
+    for (std::size_t i = 0; i < vals.size() && i < enums.size(); ++i) {
+        if (!enums[i].is_enum) {
+            continue;
+        }
+        std::string fq;
+        std::string leaf;
+        if (!resolve_enum_value(enums[i], vals[i], fq, leaf)) {
+            return "'" + vals[i] + "' is not an enumerator of enum " + enums[i].type_fq;
+        }
+        vals[i] = fq;
+    }
+    std::string out;
+    for (std::size_t i = 0; i < vals.size(); ++i) {
+        if (i != 0) {
+            out += ", ";
+        }
+        out += vals[i];
+    }
+    type_args = out;
+    return "";
+}
+
+// Build the Python-name token string for a combo: enum-typed positions become
+// the bare enumerator leaf, everything else is left as written. Fed to
+// sanitize_python_name. No-op when the template has no enum NTTPs.
+std::string leafize_combo_for_pyname(std::string const &combo, std::vector<EnumNTTP> const &enums) {
+    if (!any_enum_nttp(enums)) {
+        return combo;
+    }
+    std::vector<std::string> vals = split_combo(combo);
+    for (std::size_t i = 0; i < vals.size() && i < enums.size(); ++i) {
+        if (!enums[i].is_enum) {
+            continue;
+        }
+        std::string fq;
+        std::string leaf;
+        if (resolve_enum_value(enums[i], vals[i], fq, leaf)) {
+            vals[i] = leaf;
+        }
+    }
+    std::string out;
+    for (std::size_t i = 0; i < vals.size(); ++i) {
+        if (i != 0) {
+            out += ", ";
+        }
+        out += vals[i];
+    }
+    return out;
+}
+
 // Parse a stringified macro-argument list of double-quoted identifiers,
 // e.g. ``"trans_a", "trans_b"`` -> ``{"trans_a", "trans_b"}``. The
 // payload comes from ``#__VA_ARGS__`` so each name is wrapped in
@@ -260,6 +409,40 @@ std::vector<BoundInstantiation> collect_instantiations(clang::NamedDecl const *d
                                                        std::vector<std::string> const &template_param_names, int &error_count) {
     std::vector<BoundInstantiation> out;
     std::string const               base = decl->getNameAsString();
+
+    // Enum-typed non-type template parameters (e.g. ``template <Layout L>``)
+    // need their written values rewritten to fully-qualified enumerators so
+    // they resolve at the binding scope. Non-enum templates get an all-empty
+    // list and every transform below short-circuits to its original behavior.
+    std::vector<EnumNTTP> const enums = collect_enum_nttps(decl);
+
+    auto report_enum_error = [&](std::string const &directive_name, std::string const &msg) {
+        clang::SourceManager const &sm  = ctx.getSourceManager();
+        clang::SourceLocation const loc = decl->getLocation();
+        llvm::errs() << sm.getFilename(loc) << ":" << sm.getSpellingLineNumber(loc) << ":" << sm.getSpellingColumnNumber(loc)
+                     << ": error: apiary: @" << directive_name << " on " << base << ": " << msg << "\n";
+    };
+
+    // Validate every enum-group value once (before the cross product) so a bad
+    // enumerator reports a single diagnostic rather than one per combo.
+    auto validate_enum_groups = [&](std::string const &directive_name, std::vector<std::vector<std::string>> const &ordered) {
+        bool ok = true;
+        for (std::size_t i = 0; i < ordered.size(); ++i) {
+            if (i >= enums.size() || !enums[i].is_enum) {
+                continue;
+            }
+            for (std::string const &v : ordered[i]) {
+                std::string fq;
+                std::string leaf;
+                if (!resolve_enum_value(enums[i], v, fq, leaf)) {
+                    report_enum_error(directive_name, "'" + v + "' is not an enumerator of enum " + enums[i].type_fq);
+                    ok = false;
+                }
+            }
+        }
+        return ok;
+    };
+
     for (auto const &d : directives) {
         if (d.name == "instantiate" && !d.args.empty()) {
             InstantiateSpec const spec = parse_instantiate(d.args.front());
@@ -269,10 +452,15 @@ std::vector<BoundInstantiation> collect_instantiations(clang::NamedDecl const *d
                 ++error_count;
                 continue;
             }
+            if (!validate_enum_groups(d.name, *ordered)) {
+                ++error_count;
+                continue;
+            }
             for (auto const &combo : cross_product(*ordered)) {
                 BoundInstantiation inst;
                 inst.type_args = combo;
-                inst.py_name   = sanitize_python_name(base, combo);
+                qualify_enum_args_flat(inst.type_args, enums); // validated above; cannot fail
+                inst.py_name = sanitize_python_name(base, leafize_combo_for_pyname(combo, enums));
                 out.push_back(std::move(inst));
             }
         } else if (d.name == "instantiate_as" && d.args.size() == 2) {
@@ -280,6 +468,11 @@ std::vector<BoundInstantiation> collect_instantiations(clang::NamedDecl const *d
             BoundInstantiation      inst;
             inst.py_name   = spec.py_name;
             inst.type_args = spec.type_args;
+            if (std::string const err = qualify_enum_args_flat(inst.type_args, enums); !err.empty()) {
+                report_enum_error(d.name, err);
+                ++error_count;
+                continue;
+            }
             out.push_back(std::move(inst));
         } else if (d.name == "instantiate_template" && d.args.size() == 2) {
             std::string const     name_template = d.args[0];
@@ -290,10 +483,15 @@ std::vector<BoundInstantiation> collect_instantiations(clang::NamedDecl const *d
                 ++error_count;
                 continue;
             }
+            if (!validate_enum_groups(d.name, *ordered)) {
+                ++error_count;
+                continue;
+            }
             for (auto const &combo : cross_product(*ordered)) {
                 BoundInstantiation inst;
-                inst.type_args                       = combo;
-                std::vector<std::string> const split = split_combo(combo);
+                inst.type_args = combo;
+                qualify_enum_args_flat(inst.type_args, enums); // validated above; cannot fail
+                std::vector<std::string> const split = split_combo(leafize_combo_for_pyname(combo, enums));
                 inst.py_name                         = substitute_name_template(name_template, template_param_names, split);
                 out.push_back(std::move(inst));
             }
@@ -686,6 +884,18 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
                 BoundInstantiation inst;
                 inst.py_name   = d.args[0];
                 inst.type_args = d.args[1];
+                // Qualify enum-typed non-type template parameters (e.g.
+                // ``template <Layout L> ...``) so ``Layout::RowMajor`` resolves
+                // at the binding scope.
+                if (std::string const err = qualify_enum_args_flat(inst.type_args, collect_enum_nttps(decl)); !err.empty()) {
+                    clang::SourceManager const &sm  = _context.getSourceManager();
+                    clang::SourceLocation const loc = decl->getLocation();
+                    llvm::errs() << sm.getFilename(loc) << ":" << sm.getSpellingLineNumber(loc) << ":"
+                                 << sm.getSpellingColumnNumber(loc) << ": error: apiary: @instantiate_as on " << fn.qualified_name
+                                 << ": " << err << "\n";
+                    ++_error_count;
+                    continue;
+                }
                 fn.instantiations.push_back(std::move(inst));
             } else if (d.name == "instantiate_bools" && d.args.size() == 2) {
                 // Expand 2^N false/true combinations and prepend each to
