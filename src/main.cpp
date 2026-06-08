@@ -98,6 +98,29 @@ llvm::cl::opt<apiary::Target>
                               clEnumValN(apiary::Target::Nanobind, "nanobind", "nanobind")),
              llvm::cl::cat(g_tool_category), llvm::cl::init(apiary::Target::Pybind11));
 
+llvm::cl::opt<int> g_max_defs_per_tu("max-defs-per-tu",
+                                     llvm::cl::desc("When > 0, split the generated binding TU into several smaller "
+                                                    "TUs, each holding at most ~N binding statements (.def/.value/...). "
+                                                    "Shards are written next to --output as '<stem>.shard<k><ext>' and a "
+                                                    "dispatcher in shard 0 calls them in order, so consumers still call "
+                                                    "one register symbol. Keeps heavily-instantiated modules from "
+                                                    "exhausting compiler memory. 0 (default) emits a single TU."),
+                                     llvm::cl::cat(g_tool_category), llvm::cl::init(0));
+
+llvm::cl::opt<bool> g_report_defs("report-defs",
+                                  llvm::cl::desc("Print to stdout the number of binding statements (.def/.value/...) "
+                                                 "this module would emit, the emit-unit count, and the largest single "
+                                                 "unit, then exit without emitting. Use it to pick a --max-defs-per-tu "
+                                                 "budget: a shard can never be smaller than the largest unit."),
+                                  llvm::cl::cat(g_tool_category), llvm::cl::init(false));
+
+llvm::cl::opt<bool> g_plan("plan",
+                           llvm::cl::desc("Print (to stdout, one per line) the shard output paths --max-defs-per-tu "
+                                          "would produce for these headers, then exit without emitting. Lets a build "
+                                          "system learn the generated filenames at configure time. Requires "
+                                          "--max-defs-per-tu and --output."),
+                           llvm::cl::cat(g_tool_category), llvm::cl::init(false));
+
 llvm::cl::opt<std::string> g_register_fn("register-function",
                                          llvm::cl::desc("Emit a free function with this name that takes "
                                                         "(py::module_ &m) and registers all bindings, instead of "
@@ -258,8 +281,52 @@ int main(int argc, char const **argv) {
     for (std::string const &p : g_source_includes) {
         opts.source_includes.push_back(p);
     }
-    std::string const generated = apiary::emit(g_module, opts);
-    int const         write_rc  = write_output(generated);
+
+    // --report-defs: print the module's binding-statement tally and exit, so a
+    // budget for --max-defs-per-tu can be sized empirically.
+    if (g_report_defs) {
+        apiary::DefReport const rep = apiary::report_defs(g_module, opts);
+        llvm::outs() << "apiary: module '" << g_module_name << "': " << rep.total_defs << " binding statement(s) across "
+                     << rep.unit_count << " emit unit(s); largest single unit = " << rep.max_unit_defs
+                     << " (a shard can never be smaller than this).\n";
+        return g_error_count > 0 ? 1 : (rc != 0 ? rc : 0);
+    }
+
+    // Sharding: when --max-defs-per-tu is set, the binding body is split
+    // across several smaller TUs (named off --output) so a heavily
+    // instantiated module doesn't produce one TU large enough to exhaust the
+    // compiler's memory. --plan just reports the shard filenames (for
+    // configure-time wiring) and exits.
+    if (g_max_defs_per_tu > 0 || g_plan) {
+        if (g_output_path.empty()) {
+            llvm::errs() << "apiary: --max-defs-per-tu/--plan require --output (shard filenames are derived from it).\n";
+            return 1;
+        }
+        if (g_plan && g_max_defs_per_tu <= 0) {
+            llvm::errs() << "apiary: --plan requires --max-defs-per-tu > 0.\n";
+            return 1;
+        }
+        if (g_plan) {
+            for (std::string const &p : apiary::plan_shards(g_module, opts, g_max_defs_per_tu, g_output_path)) {
+                llvm::outs() << p << "\n";
+            }
+            return g_error_count > 0 ? 1 : (rc != 0 ? rc : 0);
+        }
+        for (apiary::ShardFile const &shard : apiary::emit_shards(g_module, opts, g_max_defs_per_tu, g_output_path)) {
+            std::error_code      ec;
+            llvm::raw_fd_ostream out(shard.path, ec);
+            if (ec) {
+                llvm::errs() << "apiary: cannot open shard output '" << shard.path << "': " << ec.message() << "\n";
+                return 1;
+            }
+            out << shard.content;
+        }
+    } else {
+        std::string const generated = apiary::emit(g_module, opts);
+        if (int const single_rc = write_output(generated); single_rc != 0) {
+            return single_rc;
+        }
+    }
 
     // Optionally also emit a Python stub (.pyi) file for pyright. The
     // stub mirrors what the C++ binding TU exposes — same py_names,
@@ -287,5 +354,5 @@ int main(int argc, char const **argv) {
         llvm::errs() << "apiary: " << g_error_count << " error(s) — bindings may be incomplete.\n";
         return 1;
     }
-    return rc != 0 ? rc : write_rc;
+    return rc;
 }

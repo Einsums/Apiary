@@ -57,4 +57,60 @@ struct EmitOptions {
 /// @return The emitted, clang-formatted C++ binding source.
 std::string emit(Module const &module_, EmitOptions const &opts);
 
+/// @brief One generated shard: its output path and its formatted contents.
+struct ShardFile {
+    std::string path;
+    std::string content;
+};
+
+/// @brief Emit `module_`'s bindings split across several smaller TUs.
+///
+/// The body is cut into contiguous, order-preserving shards so that no single
+/// translation unit exceeds roughly `max_defs` binding statements. Shard 0
+/// also carries a dispatcher (the register function, or the module macro in
+/// standalone form) that calls every `<base>__shard<k>` in order, so the
+/// ordering invariants of the single-TU path are preserved and consumers keep
+/// calling one symbol.
+///
+/// When everything fits in a single shard the result is one file at
+/// `base_output_path` whose contents are byte-identical to `emit()`.
+///
+/// @param module_ The IR module to emit bindings for.
+/// @param opts Emit configuration (output shape, target, formatting path, includes).
+/// @param max_defs Approximate per-TU budget in binding statements (> 0).
+/// @param base_output_path The would-be single-TU path; shard names are
+///   derived from it as `<stem>.shard<k><ext>`.
+/// @return One entry per shard, each with its destination path and contents.
+std::vector<ShardFile> emit_shards(Module const &module_, EmitOptions const &opts, int max_defs,
+                                   std::string const &base_output_path);
+
+/// @brief Compute the shard output paths without emitting their contents.
+///
+/// Runs the same partition as `emit_shards()` so a build system can learn the
+/// generated filenames at configure time. Returns `{ base_output_path }` when
+/// the module fits in a single TU.
+std::vector<std::string> plan_shards(Module const &module_, EmitOptions const &opts, int max_defs,
+                                     std::string const &base_output_path);
+
+/// @brief Per-module tally of binding statements, for sizing
+/// `--max-defs-per-tu` before committing a budget.
+struct DefReport {
+    /// All binding statements (.def / .value / register_exception) the module
+    /// would emit — the quantity `--max-defs-per-tu` is measured against.
+    int total_defs = 0;
+    /// Number of indivisible emit units (one enum, one class *instantiation*,
+    /// or one free function). Sharding splits between units, never within one.
+    int unit_count = 0;
+    /// Largest single unit's statement count. A shard can never be smaller
+    /// than this, so a budget below it yields one oversized shard rather than
+    /// a finer split.
+    int max_unit_defs = 0;
+};
+
+/// @brief Tally binding statements for `module_` without emitting code.
+///
+/// Uses the same units and cost metric as `emit_shards()`, so the numbers are
+/// directly comparable to a `--max-defs-per-tu` budget.
+DefReport report_defs(Module const &module_, EmitOptions const &opts);
+
 } // namespace apiary

@@ -1521,6 +1521,65 @@ std::string format_cpp(std::string const &source, llvm::StringRef path_hint) {
     return *formatted;
 }
 
+// ---- shared file-preamble / submodule helpers ----------------------------
+//
+// Extracted from emit() so the multi-shard path produces byte-identical
+// preambles and submodule setup. emit() and emit_shards() both call these.
+
+// The ``#include "..."`` source headers, the backend's own headers, and the
+// ``namespace py = pybind11;`` alias — everything between the leading banner
+// comment and the entry block.
+void emit_includes_and_ns(llvm::raw_string_ostream &os, EmitOptions const &opts, Backend const &b) {
+    for (auto const &inc : opts.source_includes) {
+        os << "#include \"" << inc << "\"\n";
+    }
+    if (!opts.source_includes.empty()) {
+        os << "\n";
+    }
+    for (std::string const &h : b.headers) {
+        os << "#include " << h << "\n";
+    }
+    os << "\nnamespace " << b.ns << " = " << b.ns_full << ";\n\n";
+}
+
+// The ``auto _sub_x = m.def_submodule("x");`` preamble for a set of submodule
+// paths. The set is lexicographically ordered so parents precede children;
+// ``def_submodule`` is idempotent (returns the existing submodule when called
+// again with the same name) so emitting the same path from several shards is
+// safe.
+void emit_submodule_block(llvm::raw_string_ostream &os, std::set<std::string> const &submodule_paths) {
+    if (submodule_paths.empty()) {
+        return;
+    }
+    os << "    // Submodules declared via @module directives.\n";
+    for (std::string const &path : submodule_paths) {
+        std::string parent_var = "m";
+        std::string leaf       = path;
+        if (auto dot = path.rfind('.'); dot != std::string::npos) {
+            parent_var = submodule_var_name(path.substr(0, dot));
+            leaf       = path.substr(dot + 1);
+        }
+        os << "    auto " << submodule_var_name(path) << " = " << parent_var << ".def_submodule(\"" << leaf << "\");\n";
+    }
+    os << "\n";
+}
+
+// Accumulate ``p`` and every ancestor path into ``out`` ("a.b.c" -> "a",
+// "a.b", "a.b.c"). Mirrors the global add_path lambda in emit().
+void expand_submodule_paths(std::string const &p, std::set<std::string> &out) {
+    if (p.empty()) {
+        return;
+    }
+    std::string accumulated;
+    for (char const c : p) {
+        if (c == '.') {
+            out.insert(accumulated);
+        }
+        accumulated += c;
+    }
+    out.insert(accumulated);
+}
+
 } // namespace
 
 std::string emit(Module const &module_, EmitOptions const &opts) {
@@ -1532,19 +1591,10 @@ std::string emit(Module const &module_, EmitOptions const &opts) {
        << "// Source IR contains " << module_.classes.size() << " class(es), " << module_.functions.size() << " function(s), "
        << module_.enums.size() << " enum(s).\n\n";
 
-    // Source headers the bindings refer to.
-    for (auto const &inc : opts.source_includes) {
-        os << "#include \"" << inc << "\"\n";
-    }
-    if (!opts.source_includes.empty()) {
-        os << "\n";
-    }
-
+    // Source headers the bindings refer to, the backend headers, and the
+    // ``namespace py = ...;`` alias.
     Backend const b = make_backend(opts.target);
-    for (std::string const &h : b.headers) {
-        os << "#include " << h << "\n";
-    }
-    os << "\nnamespace " << b.ns << " = " << b.ns_full << ";\n\n";
+    emit_includes_and_ns(os, opts, b);
 
     // We deliberately do NOT emit ``template class Class<args>;`` here.
     // Explicit instantiation in the codegen TU duplicates the one already
@@ -1584,19 +1634,7 @@ std::string emit(Module const &module_, EmitOptions const &opts) {
     // so each ``_sub_x = m.def_submodule("x")`` already has its parent
     // module variable defined.
     std::set<std::string> submodule_paths;
-    auto                  add_path = [&](std::string const &p) {
-        if (p.empty()) {
-            return;
-        }
-        std::string accumulated;
-        for (char const c : p) {
-            if (c == '.') {
-                submodule_paths.insert(accumulated);
-            }
-            accumulated += c;
-        }
-        submodule_paths.insert(accumulated);
-    };
+    auto                  add_path = [&](std::string const &p) { expand_submodule_paths(p, submodule_paths); };
     for (auto const &c : module_.classes) {
         add_path(submodule_path_for(c));
     }
@@ -1609,21 +1647,9 @@ std::string emit(Module const &module_, EmitOptions const &opts) {
     for (auto const &f : module_.functions) {
         add_path(submodule_path_for(f));
     }
-    if (!submodule_paths.empty()) {
-        os << "    // Submodules declared via @module directives.\n";
-        // ``std::set<std::string>`` orders lexicographically, so
-        // "tensor" comes before "tensor.algebra" — parents first.
-        for (std::string const &path : submodule_paths) {
-            std::string parent_var = "m";
-            std::string leaf       = path;
-            if (auto dot = path.rfind('.'); dot != std::string::npos) {
-                parent_var = submodule_var_name(path.substr(0, dot));
-                leaf       = path.substr(dot + 1);
-            }
-            os << "    auto " << submodule_var_name(path) << " = " << parent_var << ".def_submodule(\"" << leaf << "\");\n";
-        }
-        os << "\n";
-    }
+    // ``std::set<std::string>`` orders lexicographically, so "tensor" comes
+    // before "tensor.algebra" — parents first.
+    emit_submodule_block(os, submodule_paths);
 
     // Enums are emitted before classes so that any class method/ctor
     // that references an enum value as a default argument can resolve
@@ -1661,6 +1687,339 @@ std::string emit(Module const &module_, EmitOptions const &opts) {
     os << "}\n";
 
     return format_cpp(buffer, opts.source_path_for_format);
+}
+
+// ===== Sharded emission ===================================================
+//
+// One module's bindings are normally emitted into a single register function
+// in a single TU. For modules with many heavily-instantiated classes that TU
+// can grow large enough that Clang exhausts memory compiling it. Sharding
+// cuts the body into several smaller register sub-functions across separate
+// TUs, plus a thin dispatcher that calls them in order.
+//
+// The split is per *emit unit* — one enum, one class *instantiation*, or one
+// free function — and is CONTIGUOUS in the original emission order. Because
+// the dispatcher calls the shard functions in that same order, every
+// ordering invariant the single TU relied on (enums before classes that use
+// them as default args, base classes before derived, parents before nested)
+// is preserved automatically.
+
+namespace {
+
+// One indivisible piece of the register-function body, captured as already
+// emitted text plus the submodule paths it references and a rough cost used
+// to balance shards. ``cost`` counts binding statements (.def / .value /
+// register_exception), which tracks the per-unit compile cost closely enough
+// to pack against a ``--max-defs-per-tu`` budget.
+struct BodyUnit {
+    std::string           text;
+    std::set<std::string> subs;
+    int                   cost = 0;
+};
+
+// Count binding statements in a unit's emitted text. ``.def`` covers
+// ``.def``/``.def_static``/``.def_property``/``.def_readwrite``/``.def_buffer``;
+// ``.value(`` covers enum values; ``register_exception`` covers @exception
+// classes. (``.def_submodule`` lives in the preamble, never in unit text.)
+int count_defs(std::string const &s) {
+    int  n = 0;
+    auto tally = [&](char const *needle, std::size_t len) {
+        std::size_t pos = 0;
+        while ((pos = s.find(needle, pos)) != std::string::npos) {
+            ++n;
+            pos += len;
+        }
+    };
+    tally(".def", 4);
+    tally(".value(", 7);
+    tally("register_exception", 18);
+    return n;
+}
+
+// Capture one already-emitted unit (text + referenced submodule paths) into
+// ``out``. Empty text produces no unit.
+void push_unit(std::string text, std::string const &submodule_path, std::vector<BodyUnit> &out) {
+    if (text.empty()) {
+        return;
+    }
+    BodyUnit u;
+    u.cost = count_defs(text);
+    u.text = std::move(text);
+    expand_submodule_paths(submodule_path, u.subs);
+    out.push_back(std::move(u));
+}
+
+// Append the unit(s) for one class, mirroring emit_class() but emitting each
+// template instantiation as its own unit so a single heavily-instantiated
+// class can still be split across shards.
+void collect_class_units(BoundClass const &cls, std::unordered_set<std::string> const &bound_class_names, Backend const &b,
+                         std::vector<BodyUnit> &out) {
+    if (is_hidden(cls) || cls.is_external) {
+        return;
+    }
+    std::string const path    = submodule_path_for(cls);
+    std::string const mod_var = submodule_var_name(path);
+
+    if (DirectiveView(cls.directives).has("exception")) {
+        std::string buf;
+        llvm::raw_string_ostream os(buf);
+        emit_exception(os, cls, b, mod_var);
+        os.flush();
+        push_unit(std::move(buf), path, out);
+        return;
+    }
+
+    if (cls.is_template) {
+        if (cls.instantiations.empty()) {
+            std::string buf;
+            llvm::raw_string_ostream os(buf);
+            os << "    // skipped: templated class " << cls.qualified_name << " has no @instantiate / @instantiate_as directive\n";
+            os.flush();
+            push_unit(std::move(buf), path, out);
+            return;
+        }
+        for (auto const &inst : cls.instantiations) {
+            std::string const concrete = cls.qualified_name + "<" + inst.type_args + ">";
+            TemplateArgBindings            bindings;
+            std::vector<std::string> const split = split_instantiation_args(inst.type_args);
+            for (std::size_t i = 0; i < cls.template_param_names.size() && i < split.size(); ++i) {
+                bindings[cls.template_param_names[i]] = split[i];
+            }
+            std::string buf;
+            llvm::raw_string_ostream os(buf);
+            emit_class_body(os, cls, concrete, inst.py_name, bound_class_names, bindings, b, mod_var);
+            os.flush();
+            push_unit(std::move(buf), path, out);
+        }
+        return;
+    }
+
+    std::string buf;
+    llvm::raw_string_ostream os(buf);
+    emit_class_body(os, cls, cls.qualified_name, py_name_for(cls), bound_class_names, {}, b, mod_var);
+    os.flush();
+    push_unit(std::move(buf), path, out);
+}
+
+// Flatten the whole module body into ordered units, in exactly the order
+// emit() walks them: top-level enums, nested enums, classes (per
+// instantiation), nested classes, free functions.
+std::vector<BodyUnit> collect_body_units(Module const &module_, Backend const &b) {
+    std::vector<BodyUnit> units;
+
+    std::unordered_set<std::string> bound_class_names;
+    std::vector<BoundClass const *> all_nested_classes;
+    for (auto const &c : module_.classes) {
+        bound_class_names.insert(c.qualified_name);
+        collect_nested_classes(c, all_nested_classes);
+    }
+    for (BoundClass const *n : all_nested_classes) {
+        bound_class_names.insert(n->qualified_name);
+    }
+
+    auto add_enum_unit = [&](BoundEnum const &e) {
+        if (is_hidden(e)) {
+            return;
+        }
+        std::string const path = submodule_path_for(e);
+        std::string buf;
+        llvm::raw_string_ostream os(buf);
+        emit_enum(os, e, b, submodule_var_name(path));
+        os.flush();
+        push_unit(std::move(buf), path, units);
+    };
+
+    for (auto const &e : module_.enums) {
+        add_enum_unit(e);
+    }
+    std::vector<BoundEnum const *> nested_enums;
+    for (auto const &c : module_.classes) {
+        collect_nested_enums(c, nested_enums);
+    }
+    for (BoundEnum const *e : nested_enums) {
+        add_enum_unit(*e);
+    }
+
+    for (auto const &c : module_.classes) {
+        collect_class_units(c, bound_class_names, b, units);
+    }
+    for (BoundClass const *n : all_nested_classes) {
+        collect_class_units(*n, bound_class_names, b, units);
+    }
+
+    for (auto const &f : module_.functions) {
+        std::string const path = submodule_path_for(f);
+        std::string buf;
+        llvm::raw_string_ostream os(buf);
+        emit_function(os, f, b, submodule_var_name(path));
+        os.flush();
+        push_unit(std::move(buf), path, units);
+    }
+
+    return units;
+}
+
+// Greedy contiguous partition: walk units in order, starting a new shard
+// whenever adding the next unit would push the current shard past
+// ``max_defs`` (a non-empty shard always takes at least one unit, so a single
+// unit larger than the budget gets its own shard — instantiation is the
+// finest grain we can split at). Returns the index groups; never empty.
+std::vector<std::vector<std::size_t>> partition_units(std::vector<BodyUnit> const &units, int max_defs) {
+    std::vector<std::vector<std::size_t>> shards;
+    std::vector<std::size_t>              cur;
+    int                                   cur_cost = 0;
+    for (std::size_t i = 0; i < units.size(); ++i) {
+        if (!cur.empty() && cur_cost + units[i].cost > max_defs) {
+            shards.push_back(std::move(cur));
+            cur.clear();
+            cur_cost = 0;
+        }
+        cur.push_back(i);
+        cur_cost += units[i].cost;
+    }
+    if (!cur.empty()) {
+        shards.push_back(std::move(cur));
+    }
+    if (shards.empty()) {
+        shards.emplace_back();
+    }
+    return shards;
+}
+
+// Insert ``.shard<k>`` before the extension of ``base`` ("foo_pybind.cpp" ->
+// "foo_pybind.shard2.cpp"). A dot is only treated as an extension when it
+// follows the last path separator.
+std::string shard_path(std::string const &base, std::size_t k) {
+    std::string       stem = base;
+    std::string       ext;
+    std::size_t const slash = base.find_last_of("/\\");
+    std::size_t const dot   = base.find_last_of('.');
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+        stem = base.substr(0, dot);
+        ext  = base.substr(dot);
+    }
+    return stem + ".shard" + std::to_string(k) + ext;
+}
+
+// The base symbol for the per-shard register functions. In register-function
+// form it IS the register function name (the dispatcher), so the shards are
+// ``<name>__shard<k>``; in standalone module form there is no register name,
+// so derive a stable one from the module name.
+std::string shard_base_fn(EmitOptions const &opts) {
+    return opts.register_function_name.empty() ? ("apiary_" + opts.module_name + "_register") : opts.register_function_name;
+}
+
+// Compute the shard partition once; emit_shards() and plan_shards() both call
+// this so the configure-time plan and the build-time emission agree on the
+// shard count (and thus the output filenames). Deterministic for a given
+// module + options.
+std::vector<std::vector<std::size_t>> plan_partition(Module const &module_, Backend const &b, int max_defs,
+                                                     std::vector<BodyUnit> &units_out) {
+    units_out = collect_body_units(module_, b);
+    return partition_units(units_out, max_defs);
+}
+
+} // namespace
+
+std::vector<std::string> plan_shards(Module const &module_, EmitOptions const &opts, int max_defs, std::string const &base_output_path) {
+    Backend const         b = make_backend(opts.target);
+    std::vector<BodyUnit> units;
+    auto const            shards = plan_partition(module_, b, max_defs, units);
+
+    std::vector<std::string> paths;
+    if (shards.size() <= 1) {
+        // Nothing to split — the build emits a single, ordinary TU.
+        paths.push_back(base_output_path);
+        return paths;
+    }
+    for (std::size_t k = 0; k < shards.size(); ++k) {
+        paths.push_back(shard_path(base_output_path, k));
+    }
+    return paths;
+}
+
+std::vector<ShardFile> emit_shards(Module const &module_, EmitOptions const &opts, int max_defs, std::string const &base_output_path) {
+    Backend const         b = make_backend(opts.target);
+    std::vector<BodyUnit> units;
+    auto const            shards = plan_partition(module_, b, max_defs, units);
+
+    std::vector<ShardFile> files;
+
+    if (shards.size() <= 1) {
+        // Everything fits in one TU — emit byte-identically to the
+        // non-sharded path so small modules are untouched.
+        files.push_back({base_output_path, emit(module_, opts)});
+        return files;
+    }
+
+    bool const        use_register_form = !opts.register_function_name.empty();
+    std::string const basefn            = shard_base_fn(opts);
+
+    for (std::size_t k = 0; k < shards.size(); ++k) {
+        std::string              buffer;
+        llvm::raw_string_ostream os(buffer);
+
+        os << "// This file is generated by apiary. Do not edit.\n"
+           << "//\n"
+           << "// Shard " << k << " of " << shards.size() << " for module bindings. Split to keep each\n"
+           << "// translation unit small enough to compile without exhausting memory.\n\n";
+
+        emit_includes_and_ns(os, opts, b);
+
+        // Shard 0 owns the dispatcher, so it forward-declares every shard
+        // function (each defined in its sibling TU) and calls them in order.
+        if (k == 0) {
+            os << "// Per-shard registration functions, defined across the sibling shard TUs.\n";
+            for (std::size_t j = 0; j < shards.size(); ++j) {
+                os << "void " << basefn << "__shard" << j << "(" << b.ns << "::module_ &m);\n";
+            }
+            os << "\n";
+        }
+
+        os << "void " << basefn << "__shard" << k << "(" << b.ns << "::module_ &m) {\n";
+
+        std::set<std::string> subs;
+        for (std::size_t idx : shards[k]) {
+            subs.insert(units[idx].subs.begin(), units[idx].subs.end());
+        }
+        emit_submodule_block(os, subs);
+
+        for (std::size_t idx : shards[k]) {
+            os << units[idx].text;
+        }
+        os << "}\n";
+
+        // The entry point (dispatcher or module macro) lives in shard 0.
+        if (k == 0) {
+            os << "\n";
+            if (use_register_form) {
+                os << "void " << opts.register_function_name << "(" << b.ns << "::module_ &m) {\n";
+            } else {
+                os << b.module_macro << "(" << opts.module_name << ", m) {\n";
+            }
+            for (std::size_t j = 0; j < shards.size(); ++j) {
+                os << "    " << basefn << "__shard" << j << "(m);\n";
+            }
+            os << "}\n";
+        }
+
+        files.push_back({shard_path(base_output_path, k), format_cpp(buffer, opts.source_path_for_format)});
+    }
+
+    return files;
+}
+
+DefReport report_defs(Module const &module_, EmitOptions const &opts) {
+    Backend const               b     = make_backend(opts.target);
+    std::vector<BodyUnit> const units = collect_body_units(module_, b);
+
+    DefReport r;
+    r.unit_count = static_cast<int>(units.size());
+    for (BodyUnit const &u : units) {
+        r.total_defs += u.cost;
+        r.max_unit_defs = std::max(r.max_unit_defs, u.cost);
+    }
+    return r;
 }
 
 } // namespace apiary

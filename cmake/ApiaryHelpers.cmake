@@ -230,6 +230,7 @@ endfunction()
 #       OUTPUT_DIR      <dir>                # where generated files land
 #       OUTPUT_NAME     <stem>               # base filename for outputs
 #       CXX_STANDARD    <n>                  # default 17
+#       MAX_DEFS_PER_TU <n>                  # split binding into shard TUs of ~n .def's
 #       EXTRA_FLAGS     <flag...>            # extra -I/-D/... after --
 #       EXTRA_DEPENDS   <file...>            # extra DEPENDS (e.g. Defines.hpp)
 #       BINDING                              # emit the pybind TU (+ stub)
@@ -237,12 +238,21 @@ endfunction()
 #       OUT_BINDING <v>  OUT_STUB <v>  OUT_DOCS_JSON <v>
 #   )
 #
+# MAX_DEFS_PER_TU > 0 splits the generated binding into several smaller TUs
+# (``<name>_pybind.shard<k>.cpp``) so a heavily instantiated module doesn't
+# compile as one TU large enough to exhaust memory. The shard count is
+# discovered at configure time by running ``apiary --plan`` (so the OUT_BINDING
+# list and the custom-command OUTPUTs are exact). This needs the apiary binary
+# to already exist at configure time — true under find_package(Apiary); in
+# add_subdirectory mode the tool isn't built yet, so sharding is skipped (with
+# a status message) and a single TU is emitted.
+#
 # Computes flags = APIARY_SYSTEM_FLAGS + usage-requirements(DEPENDS_TARGETS) +
 # EXTRA_FLAGS + -std, and sets the requested OUT_* variables in the caller's
 # scope. Requires apiary_detect_toolchain() to have run.
 function(apiary_add_bindings)
     cmake_parse_arguments(_A "BINDING;DOCS_JSON"
-        "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON"
+        "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;MAX_DEFS_PER_TU;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON"
         "HEADERS;SOURCE_INCLUDES;DEPENDS_TARGETS;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
 
     if(NOT _A_HEADERS)
@@ -298,12 +308,65 @@ function(apiary_add_bindings)
     )
 
     if(_A_BINDING)
+        # The base path apiary writes to. In shard mode it derives the actual
+        # outputs as ``<stem>.shard<k>.cpp`` next to this; otherwise it writes
+        # this exact file.
         set(_binding "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}_pybind.cpp")
         set(_stub    "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}.pyi")
+
+        # Default: a single TU. When MAX_DEFS_PER_TU is set we ask apiary to
+        # plan the split now so the OUTPUTs (and OUT_BINDING) name every shard.
+        set(_binding_outputs "${_binding}")
+        set(_max_defs_flag "")
+        if(_A_MAX_DEFS_PER_TU AND _A_MAX_DEFS_PER_TU GREATER 0)
+            # Resolve a runnable apiary binary. An ALIASED_TARGET means the
+            # in-tree executable, which isn't built yet at configure time — we
+            # can't run it, so fall back to a single TU.
+            set(_apiary_exe "")
+            if(TARGET apiary::apiary)
+                get_target_property(_apiary_alias apiary::apiary ALIASED_TARGET)
+                if(NOT _apiary_alias)
+                    get_target_property(_apiary_exe apiary::apiary LOCATION)
+                endif()
+            endif()
+
+            if(_apiary_exe AND EXISTS "${_apiary_exe}")
+                execute_process(
+                    COMMAND "${_apiary_exe}"
+                            --plan --max-defs-per-tu ${_A_MAX_DEFS_PER_TU}
+                            --register-function ${_A_REGISTER_FUNCTION}
+                            --output "${_binding}"
+                            ${_source_includes}
+                            ${_A_HEADERS}
+                            -- ${_compile_flags}
+                    OUTPUT_VARIABLE _plan_out
+                    RESULT_VARIABLE _plan_rc
+                    ERROR_VARIABLE _plan_err
+                )
+                string(REPLACE "\r" "" _plan_out "${_plan_out}")
+                string(STRIP "${_plan_out}" _plan_out)
+                if(_plan_rc EQUAL 0 AND _plan_out)
+                    string(REPLACE "\n" ";" _binding_outputs "${_plan_out}")
+                    set(_max_defs_flag --max-defs-per-tu ${_A_MAX_DEFS_PER_TU})
+                    list(LENGTH _binding_outputs _nshards)
+                    message(STATUS "apiary: ${_A_OUTPUT_NAME} -> ${_nshards} shard TU(s) "
+                        "(MAX_DEFS_PER_TU=${_A_MAX_DEFS_PER_TU})")
+                else()
+                    message(WARNING "apiary: shard plan for ${_A_OUTPUT_NAME} failed "
+                        "(rc=${_plan_rc}) — emitting a single TU.\n${_plan_err}")
+                endif()
+            else()
+                message(STATUS "apiary: tool not runnable at configure time — "
+                    "${_A_OUTPUT_NAME} emitted as a single TU (MAX_DEFS_PER_TU ignored). "
+                    "Sharding needs a prebuilt apiary (find_package(Apiary)).")
+            endif()
+        endif()
+
         add_custom_command(
-            OUTPUT ${_binding} ${_stub}
+            OUTPUT ${_binding_outputs} ${_stub}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_OUTPUT_DIR}"
             COMMAND $<TARGET_FILE:apiary::apiary>
+                    ${_max_defs_flag}
                     --register-function ${_A_REGISTER_FUNCTION}
                     --output ${_binding}
                     --stub-output ${_stub}
@@ -312,10 +375,10 @@ function(apiary_add_bindings)
                     -- ${_compile_flags}
             DEPENDS ${_A_HEADERS} apiary::apiary ${_A_EXTRA_DEPENDS}
             VERBATIM
-            COMMENT "apiary: generating ${_A_OUTPUT_NAME}_pybind.cpp + .pyi"
+            COMMENT "apiary: generating ${_A_OUTPUT_NAME} bindings + .pyi"
         )
         if(_A_OUT_BINDING)
-            set(${_A_OUT_BINDING} "${_binding}" PARENT_SCOPE)
+            set(${_A_OUT_BINDING} "${_binding_outputs}" PARENT_SCOPE)
         endif()
         if(_A_OUT_STUB)
             set(${_A_OUT_STUB} "${_stub}" PARENT_SCOPE)

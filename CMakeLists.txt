@@ -208,6 +208,14 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
         )
+        # Sharded emission (--max-defs-per-tu / --plan): asserts plan==emit,
+        # multiple balanced shards, the dispatcher wiring, and that no binding
+        # is dropped or duplicated relative to the single-TU output.
+        add_test(NAME apiary_shard
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_shard.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
     endif()
     # doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,
     # so it needs no apiary binary — it diffs diagnostics for a seeded-drift
