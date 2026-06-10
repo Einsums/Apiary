@@ -56,69 +56,6 @@ import numpy.typing
 
 """
 
-# Hand-written overlay for the NumPy-style ergonomics layer that
-# ``einsums/__init__.py`` installs at runtime (monkey-patched onto the bound
-# RuntimeTensor classes + module-level constructors). The codegen reads the
-# C++ AST and can't see runtime patching, so these stubs are maintained here.
-#
-# Two parts: top-level ``def``\\s become module functions appended to
-# ``__init__.pyi``; the ``_TensorErgonomics`` methods are injected into every
-# ``RuntimeTensor{F,D,C,Z}`` / ``RuntimeTensorView{F,D,C,Z}`` class in
-# ``_core.pyi``. Keep in sync with ``_patch_numpy_ergonomics`` and the
-# constructors in ``einsums/__init__.py``.
-ERGONOMICS_OVERLAY = '''
-def zeros(shape: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-def ones(shape: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-def empty(shape: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-def full(shape: Any, fill_value: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-def eye(n: int, m: Any = ..., dtype: Any = ..., name: Any = ...) -> Any: ...
-def array(obj: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-def asarray(obj: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-def zeros_like(t: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-def ones_like(t: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-def empty_like(t: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-def full_like(t: Any, fill_value: Any, dtype: Any = ..., name: Any = ...) -> Any: ...
-
-class _TensorErgonomics:
-    @property
-    def shape(self) -> tuple[int, ...]: ...
-    @property
-    def ndim(self) -> int: ...
-    @property
-    def dtype(self) -> numpy.dtype[Any]: ...
-    @property
-    def T(self) -> Any: ...
-    def __len__(self) -> int: ...
-    def __repr__(self) -> str: ...
-    def __array__(self, dtype: Any = ..., copy: Any = ...) -> numpy.ndarray[Any, Any]: ...
-    def __getitem__(self, key: Any) -> Any: ...
-    def __setitem__(self, key: Any, value: Any) -> None: ...
-    def transpose(self, *axes: Any) -> Any: ...
-    def swapaxes(self, axis1: int, axis2: int) -> Any: ...
-    def copy(self) -> Any: ...
-    def sum(self) -> Any: ...
-    def mean(self) -> Any: ...
-    def max(self) -> Any: ...
-    def __matmul__(self, other: Any) -> Any: ...
-    def __add__(self, other: Any) -> Any: ...
-    def __radd__(self, other: Any) -> Any: ...
-    def __sub__(self, other: Any) -> Any: ...
-    def __rsub__(self, other: Any) -> Any: ...
-    def __mul__(self, other: Any) -> Any: ...
-    def __rmul__(self, other: Any) -> Any: ...
-    def __truediv__(self, other: Any) -> Any: ...
-    def __neg__(self) -> Any: ...
-    def __pos__(self) -> Any: ...
-    def __iadd__(self, other: Any) -> Any: ...
-    def __isub__(self, other: Any) -> Any: ...
-    def __imul__(self, other: Any) -> Any: ...
-    def __itruediv__(self, other: Any) -> Any: ...
-'''
-
-# Tensor classes (in _core.pyi) that receive the ergonomics methods.
-_ERGONOMICS_CLASS_RE = re.compile(r"^class (RuntimeTensor(?:View)?[FDCZ]):\s*$")
-
-
 def _is_docstring(node: ast.stmt) -> bool:
     return (
         isinstance(node, ast.Expr)
@@ -228,21 +165,24 @@ def parse_fragment(path: Path) -> dict[str, str]:
     return {sm: "".join(lines).rstrip() + "\n" for sm, lines in blocks.items() if lines}
 
 
-def load_ergonomics_overlay() -> tuple[str, str]:
-    """Parse :data:`ERGONOMICS_OVERLAY` into (module_funcs, tensor_methods).
+def load_overlay(overlay_path: Path) -> tuple[str, str]:
+    """Parse a consumer-provided overlay stub into (module_funcs, class_methods).
 
-    ``module_funcs`` is the rendered top-level constructor stubs (for
-    ``__init__.pyi``); ``tensor_methods`` is the ``_TensorErgonomics`` class
-    body rendered as a 4-space-indented method block (for injection into each
-    bound tensor class in ``_core.pyi``).
+    The overlay is a hand-written ``.pyi`` fragment describing runtime-patched
+    members the C++ codegen can't see (Apiary itself is domain-agnostic). Its
+    top-level ``def``\\s become module-level functions appended to
+    ``__init__.pyi``; the methods of any class(es) it defines are collected into
+    a 4-space-indented block injected into each ``_core.pyi`` class matching the
+    caller's ``--overlay-class-regex``. Imports / other top-level statements are
+    ignored — the shared header already supplies typing + numpy.
     """
-    tree = ast.parse(ERGONOMICS_OVERLAY)
+    tree = ast.parse(overlay_path.read_text())
     funcs: list[ast.stmt] = []
     methods: list[str] = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             funcs.append(_stub_function(node))
-        elif isinstance(node, ast.ClassDef) and node.name == "_TensorErgonomics":
+        elif isinstance(node, ast.ClassDef):
             for child in node.body:
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     rendered = ast.unparse(_stub_function(child))
@@ -251,10 +191,11 @@ def load_ergonomics_overlay() -> tuple[str, str]:
     return module_text, "\n".join(methods)
 
 
-def inject_tensor_methods(core_text: str, methods_block: str) -> str:
-    """Append the ergonomics method block to the end of each bound tensor
-    class body — after the codegen members, so the class docstring stays
-    first. A class body ends at the next column-0 statement (or EOF)."""
+def inject_class_methods(core_text: str, methods_block: str, class_re: re.Pattern[str]) -> str:
+    """Append the overlay method block to the end of each ``_core.pyi`` class
+    whose ``class <Name>:`` line matches @p class_re — after the codegen
+    members, so the class docstring stays first. A class body ends at the next
+    column-0 statement (or EOF)."""
     if not methods_block:
         return core_text
     out: list[str] = []
@@ -270,7 +211,7 @@ def inject_tensor_methods(core_text: str, methods_block: str) -> str:
         # A column-0 non-blank, non-comment line ends the current class body.
         if pending and line and not line[0].isspace() and not line.startswith("#"):
             flush()
-        if _ERGONOMICS_CLASS_RE.match(line):
+        if class_re.match(line):
             flush()  # safety: close any still-open target class
             out.append(line)
             pending = True
@@ -280,7 +221,8 @@ def inject_tensor_methods(core_text: str, methods_block: str) -> str:
     return "\n".join(out)
 
 
-def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None) -> dict[str, Path]:
+def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
+              overlay_path: Path | None = None, overlay_class_re: "re.Pattern[str] | None" = None) -> dict[str, Path]:
     """Read every *.pyi in `frag_dir` and write per-submodule files into `pkg_dir`.
 
     When ``py_helpers_dir`` is given, any ``<sub>.py`` file there whose name
@@ -293,10 +235,13 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None)
         for sub, body in parse_fragment(frag).items():
             by_sub.setdefault(sub, []).append(f"# from: {frag.name}\n{body}")
 
-    # NumPy-style ergonomics installed at runtime by einsums/__init__.py
-    # (invisible to the C++ codegen): constructor functions for __init__.pyi,
-    # and methods to inject into each bound tensor class in _core.pyi.
-    ergonomics_funcs, ergonomics_methods = load_ergonomics_overlay()
+    # Optional consumer-provided overlay for members installed at runtime
+    # (invisible to the C++ codegen): module-level functions for __init__.pyi,
+    # and methods to inject into _core.pyi classes matching overlay_class_re.
+    if overlay_path is not None:
+        overlay_funcs, overlay_methods = load_overlay(overlay_path)
+    else:
+        overlay_funcs, overlay_methods = "", ""
 
     pkg_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
@@ -313,9 +258,9 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None)
                 helper_stub = render_py_helpers(helper_py)
                 if helper_stub:
                     text += f"\n# helpers from einsums/{sub}.py\n{helper_stub.rstrip()}\n"
-        # Attach the runtime-patched ergonomics methods to the tensor classes.
-        if sub == "":
-            text = inject_tensor_methods(text, ergonomics_methods)
+        # Attach the overlay's runtime-patched methods to matching _core classes.
+        if sub == "" and overlay_class_re is not None:
+            text = inject_class_methods(text, overlay_methods, overlay_class_re)
         out_path.write_text(text)
         written[sub] = out_path
 
@@ -359,9 +304,9 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None)
         init_body += "\n"
         for sub in all_sub_names:
             init_body += f"from . import {sub} as {sub}\n"
-    # NumPy-style constructors defined in einsums/__init__.py (not in _core).
-    if ergonomics_funcs:
-        init_body += "\n# NumPy-style constructors (einsums/__init__.py)\n" + ergonomics_funcs.rstrip() + "\n"
+    # Overlay module-level functions (runtime-patched; not in _core).
+    if overlay_funcs:
+        init_body += "\n# Overlay module-level functions (runtime-patched)\n" + overlay_funcs.rstrip() + "\n"
     init_pyi.write_text(init_body)
 
     return written
@@ -374,9 +319,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--pkg-dir", required=True, type=Path,
                    help="Destination einsums/ package directory.")
     p.add_argument("--py-helpers-dir", type=Path, default=None,
-                   help="Source directory of hand-written einsums/*.py helper "
+                   help="Source directory of hand-written <sub>.py helper "
                         "modules. When set, public top-level decls in "
                         "<sub>.py are merged into <sub>.pyi.")
+    p.add_argument("--overlay", type=Path, default=None,
+                   help="Optional .pyi overlay describing members installed at "
+                        "runtime (invisible to the codegen): top-level defs go to "
+                        "__init__.pyi; class methods inject into _core.pyi classes "
+                        "matching --overlay-class-regex.")
+    p.add_argument("--overlay-class-regex", default=None,
+                   help="Regex matched against ``class <Name>:`` lines in "
+                        "_core.pyi; matching classes receive the overlay methods.")
     args = p.parse_args(argv)
 
     if not args.frag_dir.is_dir():
@@ -385,8 +338,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.py_helpers_dir is not None and not args.py_helpers_dir.is_dir():
         print(f"aggregate_stubs: {args.py_helpers_dir} is not a directory", file=sys.stderr)
         return 1
+    if args.overlay is not None and not args.overlay.is_file():
+        print(f"aggregate_stubs: overlay {args.overlay} is not a file", file=sys.stderr)
+        return 1
+    overlay_re = re.compile(args.overlay_class_regex) if args.overlay_class_regex else None
 
-    written = aggregate(args.frag_dir, args.pkg_dir, args.py_helpers_dir)
+    written = aggregate(args.frag_dir, args.pkg_dir, args.py_helpers_dir, args.overlay, overlay_re)
     if written:
         names = ", ".join(sorted(p.name for p in written.values()))
         print(f"aggregate_stubs: wrote {names} to {args.pkg_dir}")
