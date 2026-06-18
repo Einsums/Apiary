@@ -623,7 +623,9 @@ def enum_entity(node: ast.ClassDef, module: str, file: Path, qualprefix: str) ->
             target, value = stmt.target.id, stmt.value
         if target is None or not is_public(target):
             continue
-        ival = value.value if isinstance(value, ast.Constant) and isinstance(value.value, int) else 0
+        # A real int literal -> its value; anything else (auto(), str, expr) ->
+        # None, so the renderer doesn't claim a misleading ``0``.
+        ival = value.value if isinstance(value, ast.Constant) and isinstance(value.value, int) else None
         edoc = data_doc(stmt)
         enumerators.append({"name": target, "value": ival, "doc": edoc, "doc_structured": doc_structured(edoc)})
     ent.update({

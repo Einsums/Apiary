@@ -245,6 +245,9 @@ assert_contains "${RST_DIR}/einsums.linalg.rst" "admonition:: Deprecated"
 # Coverage-gap shapes render: enum + members, module data, nested class.
 assert_contains "${RST_DIR}/einsums.linalg.rst" "py:class:: Norm"
 assert_contains "${RST_DIR}/einsums.linalg.rst" "py:attribute:: L1"
+# Enum members render their value and their #: doc comment.
+assert_contains "${RST_DIR}/einsums.linalg.rst" ":value: 1"
+assert_contains "${RST_DIR}/einsums.linalg.rst" "Sum of absolute values\."
 assert_contains "${RST_DIR}/einsums.linalg.rst" "py:data:: DEFAULT_PIVOT_THRESHOLD"
 assert_contains "${RST_DIR}/einsums.linalg.rst" "py:class:: Decomposition.Stats"
 # Phase-5 navigation: a per-page Summary of link-rich entries with briefs.

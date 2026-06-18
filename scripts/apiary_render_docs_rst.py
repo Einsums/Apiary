@@ -470,7 +470,10 @@ def render_enum(out: list[str], en: dict, nested_indent: str = "") -> None:
     out.append("")
     for v in en.get("enumerators", []):
         out.append(f"{nested_indent}{IND}.. py:attribute:: {v['name']}")
+        if v.get("value") is not None:
+            out.append(f"{nested_indent}{IND}{IND}:value: {v['value']}")
         emit_doc(out, v, nested_indent + IND * 2, with_params=False)
+        out.append("")
     out.append("")
 
 
