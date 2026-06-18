@@ -34,6 +34,17 @@ import sys
 from pathlib import Path
 
 from apiary_docs_schema import DEFAULT_TOP, full_module, load_document
+from apiary_docs_resolve import build_resolver, rewrite_links
+
+# The docs-graph resolver, set in main(); rewrites ``[[Type/member]]`` author
+# links in doc text into reST py-domain cross-references. None until built.
+RESOLVER = None
+
+
+def md(text: str) -> str:
+    """Apply docs-graph link rewriting to a doc-text fragment, if a resolver is
+    configured. A no-op otherwise, so the renderer still works standalone."""
+    return rewrite_links(text, RESOLVER) if RESOLVER is not None else (text or "")
 
 LICENSE_HEADER = """..
     ----------------------------------------------------------------------------------------------
@@ -218,7 +229,7 @@ def py_signature(params: list[dict]) -> str:
 
 def emit_text(out: list[str], text: str, indent: str) -> None:
     """Emit a block of (already reST-ready) text at the given indent."""
-    text = (text or "").strip()
+    text = md((text or "").strip())
     if not text:
         return
     out.append("")
@@ -235,10 +246,10 @@ def emit_doc(out: list[str], entity: dict, indent: str, *, with_params: bool) ->
     string when no structured form is present (older JSON, or empty parse).
     """
     ds = entity.get("doc_structured") or {}
-    brief = (ds.get("brief") or "").strip()
-    detail = (ds.get("detail") or "").strip()
+    brief = md((ds.get("brief") or "").strip())
+    detail = md((ds.get("detail") or "").strip())
     params = ds.get("params", []) if with_params else []
-    returns = (ds.get("returns") or "").strip() if with_params else ""
+    returns = md((ds.get("returns") or "").strip()) if with_params else ""
     throws = ds.get("throws", []) if with_params else []
 
     if not (brief or detail or params or returns or throws):
@@ -256,12 +267,12 @@ def emit_doc(out: list[str], entity: dict, indent: str, *, with_params: bool) ->
     if params or returns or throws:
         out.append("")
         for p in params:
-            desc = (p.get("description") or "").strip()
+            desc = md((p.get("description") or "").strip())
             out.append(f"{indent}:param {p['name']}: {desc}".rstrip())
         if returns:
             out.append(f"{indent}:returns: {returns}".rstrip())
         for t in throws:
-            desc = (t.get("description") or "").strip()
+            desc = md((t.get("description") or "").strip())
             out.append(f"{indent}:raises {pythonize(t['name'])}: {desc}".rstrip())
     out.append("")
 
@@ -481,10 +492,17 @@ def main() -> int:
         log("no entities found; nothing written")
         return 0
 
+    # The docs-graph resolver powers ``[[ ]]`` link rewriting and seeds the type
+    # sanitizer below, so a type named anywhere in the merged graph (including
+    # another submodule) is recognized rather than collapsed to ``Any``.
+    global RESOLVER
+    RESOLVER = build_resolver(docs)
+
     # Record every documented class/enum name (including per-instantiation
     # class names) so the annotation sanitizer keeps real types and only
     # collapses genuinely-unresolvable ones (template params, dependent C++
     # spellings) to Any.
+    KNOWN_TYPES.update(RESOLVER.class_and_enum_names())
     for g in groups.values():
         for c in g["classes"]:
             KNOWN_TYPES.update(class_py_names(c))

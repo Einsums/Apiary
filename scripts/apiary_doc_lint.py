@@ -32,6 +32,8 @@ import re
 import sys
 from dataclasses import dataclass
 
+from apiary_docs_resolve import build_resolver, unresolved_references
+
 # check id -> default severity
 SEVERITY = {
     "unknown-param": "error",
@@ -40,6 +42,10 @@ SEVERITY = {
     "missing-tparam": "warning",
     "returns-on-void": "warning",
     "malformed-throws": "warning",
+    # Emitted only with --check-links, over a MERGED docs.json (the resolver
+    # needs the whole graph). A ``[[Type/member]]`` author link that resolves to
+    # nothing in the merged docs graph.
+    "unresolved-reference": "warning",
 }
 
 
@@ -176,6 +182,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--format", choices=("text", "json"), default="text")
     ap.add_argument("--strict", action="store_true", help="treat warnings as errors for the exit status")
     ap.add_argument("--select", default="", help="comma-separated check ids to run (default: all)")
+    ap.add_argument("--check-links", action="store_true",
+                    help="also report unresolved [[Type/member]] author links. Pass the MERGED "
+                         "docs.json (or all fragments) so the resolver sees the whole graph.")
     args = ap.parse_args(argv)
 
     selected = set(filter(None, args.select.split(","))) or set(SEVERITY)
@@ -184,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"unknown check id(s): {', '.join(sorted(unknown))}; valid: {', '.join(sorted(SEVERITY))}")
 
     findings: list[Finding] = []
+    docs: list[dict] = []
     for path in args.files:
         try:
             with open(path) as fh:
@@ -191,7 +201,17 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, json.JSONDecodeError) as e:
             print(f"doc_lint: cannot read {path}: {e}", file=sys.stderr)
             return 2
+        docs.append(doc)
         lint_module(doc, findings)
+
+    # Link resolution needs the WHOLE graph, so build one resolver over the union
+    # of inputs (a single merged docs.json, or every fragment) and check each.
+    if args.check_links:
+        resolver = build_resolver(docs)
+        for doc in docs:
+            for file, line, token in unresolved_references(doc, resolver):
+                findings.append(Finding(file, line, 0, SEVERITY["unresolved-reference"],
+                                        "unresolved-reference", f"unresolved reference '[[{token}]]'"))
 
     findings = [f for f in findings if f.check in selected]
     findings.sort(key=Finding.sort_key)

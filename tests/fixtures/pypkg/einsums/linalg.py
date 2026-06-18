@@ -61,6 +61,10 @@ def cho_factor(matrix: ArrayLike) -> Decomposition:
     Exercises annotation recovery: the parameter is annotated with an
     undocumented name (collapses to ``Any`` in the rendered page) and the return
     is a documented class (cross-links to its page).
+
+    Delegates to [[Decomposition/factor]] for the heavy lifting. The dangling
+    link [[NoSuchSymbol]] is intentional — it exercises unresolved-reference
+    diagnostics and renders as plain text.
     """
     return Decomposition()
 

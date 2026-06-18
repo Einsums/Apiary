@@ -196,7 +196,12 @@ assert_contains "${RST_DIR}/einsums.linalg.rst" "py:staticmethod:: identity"
 assert_contains "${RST_DIR}/einsums.linalg.rst" "py:attribute:: rank"
 assert_contains "${RST_DIR}/einsums.linalg.rst" ":param ord:"
 assert_contains "${RST_DIR}/einsums.linalg.rst" "ord: int"
-echo "ok: end-to-end render presence + cross-ref + decorator shapes"
+# Phase-2 symbol links: a resolved [[Decomposition/factor]] becomes a py-domain
+# cross-ref; the dangling [[NoSuchSymbol]] renders as plain text (brackets gone).
+assert_contains "${RST_DIR}/einsums.linalg.rst" "py:meth:.~einsums.linalg.Decomposition.factor."
+assert_contains "${RST_DIR}/einsums.linalg.rst" "NoSuchSymbol"
+assert_absent   "${RST_DIR}/einsums.linalg.rst" "\[\["
+echo "ok: end-to-end render presence + cross-ref + decorator shapes + symbol links"
 
 # ── 5. Source links (.rst layer, origin-aware .py vs .hpp) ───────────────────
 RST_LINKS="${WORK}/rst_links"
@@ -211,5 +216,14 @@ assert_contains "${RST_LINKS}/einsums.linalg.rst" "example.org/einsums/blob/main
 # Without templates, no source links are emitted (back-compat default).
 assert_absent   "${RST_DIR}/einsums.linalg.rst" "\[source\]"
 echo "ok: origin-aware source links"
+
+# ── 6. Reference-resolution diagnostics ──────────────────────────────────────
+# Over the merged graph: the dangling [[NoSuchSymbol]] is reported; the valid
+# [[Decomposition/factor]] is NOT. --select isolates the link check.
+"${PY}" "${SCRIPTS_DIR}/apiary_doc_lint.py" --check-links --select unresolved-reference "${MERGED}" \
+    > "${WORK}/links.out" 2>/dev/null || true
+assert_contains "${WORK}/links.out" "unresolved reference '\[\[NoSuchSymbol\]\]'"
+assert_absent   "${WORK}/links.out" "factor"
+echo "ok: unresolved-reference diagnostics"
 
 echo "PASS: run_py_extract"

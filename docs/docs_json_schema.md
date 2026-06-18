@@ -169,6 +169,31 @@ membership via `submodule`, so they get no `memberOf` edge. The Python frontend
 emits `memberOf` + `inheritsFrom`; `overrides` is C++-only (it can't be
 determined statically without MRO).
 
+## Reference resolution (Phase 2)
+
+Authors write **symbol links** in docstrings (C++ `///` or Python) as
+`[[Type/member]]`. The inner token is a symbol path; `/`, `.` and `::` are
+accepted separators and a trailing `()` is ignored:
+
+```
+[[Decomposition]]            the class
+[[Decomposition/factor]]     a member, by partial path
+[[einsums.linalg.solve]]     a fully-qualified path
+```
+
+`scripts/apiary_docs_resolve.py` indexes the merged graph by each entity's
+Python-visible dotted path (`full_module` + the `py_name` chain) and resolves a
+token by, in order: exact path, component-aligned suffix, then bare short name
+(a token matching nothing — or more than one distinct symbol — does not
+resolve). It is the single source of truth shared by:
+
+- the **renderer**, which rewrites a resolved `[[ ]]` into a reST py-domain
+  cross-reference (`:py:meth:`~einsums.linalg.Decomposition.factor``) and leaves
+  an unresolved one as plain leaf text; and
+- the **linter** (`apiary_doc_lint.py --check-links`, run over the *merged*
+  docs.json so the resolver sees the whole graph), which reports every
+  unresolved link as `file:line: unresolved reference '[[token]]'`.
+
 ## Merge & collisions
 
 The merge stage (`scripts/apiary_merge_docs_json.py`):
