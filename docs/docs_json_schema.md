@@ -47,7 +47,11 @@ already-merged document is a no-op). `schema_version` is currently **5**.
 Python frontend fills them from module-level constants (skipping `__all__`).
 The Python frontend also now extracts **nested classes** (`nested_classes`),
 **`enum.Enum` subclasses** (as `enums` with `enumerators`), and **class-level
-annotated attributes** (as `fields`) — previously silently dropped.
+annotated attributes** (as `fields`) — previously silently dropped. Data
+entities (variables, fields, enum members) take their `doc` from a **`#:` or
+plain-`#` comment** — the contiguous block immediately above the assignment
+(with a leading `# Section`-style header stripped) or a trailing comment on the
+line — since they carry no docstring.
 
 When several fragments are merged, the result is a single document of the same
 shape: the arrays are concatenated and de-duplicated (see *Merge & collisions*).

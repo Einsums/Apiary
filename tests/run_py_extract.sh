@@ -180,7 +180,12 @@ stats="[n for n in ${decomp}['nested_classes'] if n['name']=='Stats'][0]"
 assert_eq "nested class present"    "$(jget "${PY_FRAG}" "'Stats' in [n['name'] for n in ${decomp}['nested_classes']]")" "True"
 assert_eq "nested class method"     "$(jget "${PY_FRAG}" "[m['name'] for m in ${stats}['methods']]")" "['condition_number']"
 assert_eq "nested class field"      "$(jget "${PY_FRAG}" "[f['name'] for f in ${stats}['fields']]")" "['rows']"
-echo "ok: enums / module variables / nested classes"
+# #: / # doc comments on data: module variable (section header stripped),
+# trailing comment on a class field, and a trailing comment on an enum member.
+assert_eq "variable doc comment" "$(jget "${PY_FRAG}" "${thr}['doc_structured']['brief']")" "Default partial-pivoting threshold."
+assert_eq "field doc comment"    "$(jget "${PY_FRAG}" "${stats}['fields'][0]['doc_structured']['brief']")" "Number of rows in the factored matrix."
+assert_eq "enum member doc"      "$(jget "${PY_FRAG}" "[v['doc'] for v in ${norm_enum}['enumerators'] if v['name']=='L1'][0]")" "Sum of absolute values."
+echo "ok: enums / module variables / nested classes / data doc comments"
 
 # ── 2. Merge (cross-origin co-location + collision resolution) ───────────────
 "${PY}" "${SCRIPTS_DIR}/apiary_merge_docs_json.py" -o "${MERGED}" "${CPP_FRAG}" "${PY_FRAG}" 2> "${WORK}/merge.err"

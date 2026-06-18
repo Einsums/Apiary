@@ -14,13 +14,15 @@ from __future__ import annotations
 import enum
 from typing import deprecated, overload
 
+# Tuning
+#: Default partial-pivoting threshold.
 DEFAULT_PIVOT_THRESHOLD: float = 0.1
 
 
 class Norm(enum.Enum):
     """Supported norm kinds."""
 
-    L1 = 1
+    L1 = 1  #: Sum of absolute values.
     L2 = 2
     INF = 3
 
@@ -140,7 +142,7 @@ class Decomposition:
     class Stats:
         """Cached statistics about a factored matrix (a nested class)."""
 
-        rows: int = 0
+        rows: int = 0  #: Number of rows in the factored matrix.
 
         def condition_number(self) -> float:
             """Estimate the 2-norm condition number."""

@@ -33,9 +33,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import json
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 SCHEMA_VERSION = 5  # keep in lockstep with apiary_docs_schema.SCHEMA_VERSION
@@ -45,6 +47,76 @@ PREFIX = "py_extract"
 
 def log(msg: str) -> None:
     print(f"{PREFIX}: {msg}", file=sys.stderr)
+
+
+# ── Doc comments for data (#: / # ...) ───────────────────────────────────────
+#
+# Module variables, class attributes, and enum members are documented with
+# comments, not docstrings — and comments live outside the AST. We index the
+# file's comments by line with ``tokenize`` and attach, to each data
+# assignment, the contiguous standalone comment block immediately above it
+# (Sphinx's ``#:`` convention, and plain ``#`` blocks), or a trailing comment on
+# the assignment line. Set per file in ``extract_file``.
+_CTX: dict = {"comments": {}, "code_rows": set()}
+
+# Trivial token types that don't count as "code on this row".
+_TRIVIAL_TOKENS = frozenset({
+    tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE,
+    tokenize.INDENT, tokenize.DEDENT, tokenize.ENCODING, tokenize.ENDMARKER,
+})
+
+
+def index_comments(source: str) -> tuple[dict[int, str], set[int]]:
+    """Map line-number -> comment text, plus the set of lines that carry code."""
+    comments: dict[int, str] = {}
+    code_rows: set[int] = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type == tokenize.COMMENT:
+                comments[tok.start[0]] = tok.string
+            elif tok.type not in _TRIVIAL_TOKENS:
+                code_rows.add(tok.start[0])
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass  # best-effort; a parse-clean file rarely trips this
+    return comments, code_rows
+
+
+def _strip_comment_marker(c: str) -> str:
+    return re.sub(r"^#:?\s?", "", c).rstrip()
+
+
+def _is_section_header(line: str) -> bool:
+    """A short Title-Case comment with no terminal punctuation reads as a section
+    divider (``# Logging``, ``# ComputeGraph Passes``), not a description."""
+    words = line.split()
+    if not words or len(words) > 3 or line.rstrip()[-1:] in ".:?!,":
+        return False
+    return all(w[0].isupper() for w in words if w[:1].isalpha())
+
+
+def data_doc(node: ast.AST) -> str:
+    """The doc comment for a data assignment: the contiguous standalone comment
+    block immediately above it (``#:`` or plain ``#``, with a leading section
+    header stripped), else a trailing comment on its last line."""
+    comments = _CTX["comments"]
+    code_rows = _CTX["code_rows"]
+    if not comments:
+        return ""
+    block: list[str] = []
+    row = getattr(node, "lineno", 0) - 1
+    while row in comments and row not in code_rows:
+        block.append(_strip_comment_marker(comments[row]))
+        row -= 1
+    block.reverse()
+    while block and _is_section_header(block[0]):
+        block.pop(0)  # drop a leading "# Logging"-style divider
+    text = " ".join(s for s in block if s).strip()
+    if text:
+        return text
+    end = getattr(node, "end_lineno", None) or getattr(node, "lineno", 0)
+    if end in comments and end in code_rows:
+        return _strip_comment_marker(comments[end]).strip()
+    return ""
 
 
 # ── Module-path resolution (the shared join key) ─────────────────────────────
@@ -506,10 +578,19 @@ def is_enum(node: ast.ClassDef) -> bool:
     return any(ast.unparse(b).split(".")[-1] in _ENUM_BASES for b in node.bases)
 
 
+def _apply_data_doc(ent: dict, node: ast.AST) -> None:
+    """Attach a data assignment's #: / # doc comment, if any."""
+    doc = data_doc(node)
+    if doc:
+        ent["doc"] = doc
+        ent["doc_structured"] = doc_structured(doc)
+
+
 def field_entity(name: str, annotation: str, node: ast.AST, module: str, file: Path, qualprefix: str) -> dict:
     """A class-level data attribute (annotated assignment) -> BoundField shape."""
     ent = _common(node, name, module, f"{qualprefix}.{name}", file)
     ent.update({"type": "", "py_type": annotation or "", "is_static": True})
+    _apply_data_doc(ent, node)
     return ent
 
 
@@ -525,6 +606,7 @@ def variable_entity(name: str, annotation: str | None, value: ast.AST | None,
         "py_type": annotation or "",
         "value": _unparse(value) if isinstance(value, _SIMPLE_VALUE) else None,
     })
+    _apply_data_doc(ent, node)
     return ent
 
 
@@ -542,7 +624,8 @@ def enum_entity(node: ast.ClassDef, module: str, file: Path, qualprefix: str) ->
         if target is None or not is_public(target):
             continue
         ival = value.value if isinstance(value, ast.Constant) and isinstance(value.value, int) else 0
-        enumerators.append({"name": target, "value": ival, "doc": "", "doc_structured": doc_structured(None)})
+        edoc = data_doc(stmt)
+        enumerators.append({"name": target, "value": ival, "doc": edoc, "doc_structured": doc_structured(edoc)})
     ent.update({
         "is_scoped": True,
         "underlying_type": "",
@@ -650,7 +733,10 @@ def extract_file(file: Path, package: str, package_dir: Path,
     """Return (classes, functions, enums) for one ``.py`` file."""
     module = dotted_module(file, package, package_dir)
     recorded = _recorded_path(file, source_root)
-    tree = ast.parse(file.read_text(), filename=str(file))
+    source = file.read_text()
+    tree = ast.parse(source, filename=str(file))
+    # Index this file's comments so data assignments can pick up #: / # docs.
+    _CTX["comments"], _CTX["code_rows"] = index_comments(source)
 
     allow = module_all(tree)
     public = (lambda name: name in allow) if allow is not None else is_public
