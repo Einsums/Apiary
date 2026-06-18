@@ -228,6 +228,12 @@ warns about curation gaps — a documented symbol no topic lists, or a curated
 link that resolves to nothing. Curation is authored content, not part of the
 docs-JSON schema; it consumes the same graph the JSON describes.
 
+**Navigation.** Each module page leads with a **Summary** — a link-rich list of
+its symbols (py-domain cross-reference + brief). The index page leads with a
+**Modules** overview — a `:doc:` link per module plus a one-line summary (the
+authored overview's first sentence, else symbol counts) — above the navigation
+toctrees. Both are derived from the graph, so they stay in sync automatically.
+
 ## Merge & collisions
 
 The merge stage (`scripts/apiary_merge_docs_json.py`):

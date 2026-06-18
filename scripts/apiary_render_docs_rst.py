@@ -429,6 +429,45 @@ def _heading(out: list[str], text: str, char: str) -> None:
     out.append("")
 
 
+def _first_sentence(text: str) -> str:
+    """First sentence of a (possibly multi-line) prose block, collapsed."""
+    collapsed = " ".join((text or "").split())
+    head, sep, _ = collapsed.partition(". ")
+    return head + ("." if sep else "")
+
+
+def brief_of(entity: dict) -> str:
+    """The one-line brief of an entity, whitespace-collapsed (for summaries)."""
+    ds = entity.get("doc_structured") or {}
+    return " ".join((ds.get("brief") or "").split())
+
+
+def render_summary(out: list[str], module: str, classes: list[dict],
+                   func_groups: dict[str, list[dict]], enums: list[dict]) -> None:
+    """A compact, link-rich Summary at the top of a module page — every symbol
+    as a py-domain cross-reference plus its brief, so the page leads with a
+    navigable index (DocC's per-page symbol listing)."""
+    items: list[tuple[str, str, str]] = []  # (role, dotted-target, brief)
+    for c in sorted(classes, key=lambda c: c.get("py_name") or c["name"]):
+        for nm in class_py_names(c):
+            items.append(("class", f"{module}.{nm}", brief_of(c)))
+    for name in sorted(func_groups):
+        members = func_groups[name]
+        doc_member = next((m for m in members if brief_of(m)), members[0])
+        items.append(("func", f"{module}.{name}", brief_of(doc_member)))
+    for e in sorted(enums, key=lambda e: e.get("py_name") or e["name"]):
+        items.append(("class", f"{module}.{e.get('py_name') or e['name']}", brief_of(e)))
+    if not items:
+        return
+    _heading(out, "Summary", "-")
+    for role, target, brief in items:
+        line = f"- :py:{role}:`~{target}`"
+        if brief:
+            line += f" — {md(brief)}"
+        out.append(line)
+    out.append("")
+
+
 def render_by_kind(out: list[str], classes: list[dict], func_groups: dict[str, list[dict]],
                    func_names: list[str], enums: list[dict]) -> None:
     """Render a set of symbols under the default by-kind sections."""
@@ -478,6 +517,9 @@ def render_page(module: str, group: dict, curation=None) -> str:
     cls_by_id = {c["symbol_id"]: c for c in classes if c.get("symbol_id")}
     enum_by_id = {e["symbol_id"]: e for e in enums if e.get("symbol_id")}
     func_name_by_id = {f["symbol_id"]: name for name, fs in func_groups.items() for f in fs if f.get("symbol_id")}
+
+    # Lead with a compact, link-rich summary of everything on the page.
+    render_summary(out, module, classes, func_groups, enums)
 
     used_cls: set[str] = set()
     used_enum: set[str] = set()
@@ -529,12 +571,26 @@ def render_article(article) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def render_index(modules: list[str], articles: list = ()) -> str:
+def render_index(modules: list[str], articles: list = (), module_briefs: dict | None = None) -> str:
     out: list[str] = [LICENSE_HEADER, ""]
     out.append(".. _api_python:")
     out.append("")
     title = "Python API Reference"
     _heading_overline(out, title)
+
+    # An overview list of the modules: a link to each page plus a one-line
+    # summary (its authored overview, else its symbol counts) — the API's
+    # front door, above the navigation toctrees.
+    briefs = module_briefs or {}
+    if modules:
+        _heading(out, "Modules", "-")
+        for m in modules:
+            line = f"- :doc:`{m}`"
+            if briefs.get(m):
+                line += f" — {md(briefs[m])}"
+            out.append(line)
+        out.append("")
+
     if articles:
         out.append(".. toctree::")
         out.append(f"{IND}:maxdepth: 1")
@@ -634,17 +690,23 @@ def main() -> int:
 
     # Top-level module first, then submodules alphabetically.
     modules = sorted(groups, key=lambda m: (m != top, m))
+    module_briefs: dict[str, str] = {}
     for module in modules:
-        page = render_page(module, groups[module], curations.get(module))
+        g = groups[module]
+        page = render_page(module, g, curations.get(module))
         (outdir / f"{module}.rst").write_text(page)
-        log(f"wrote {module}.rst ({len(groups[module]['classes'])} classes, "
-            f"{len(groups[module]['functions'])} functions, {len(groups[module]['enums'])} enums)")
+        log(f"wrote {module}.rst ({len(g['classes'])} classes, "
+            f"{len(g['functions'])} functions, {len(g['enums'])} enums)")
+        # Index summary line: the authored overview's first sentence, else counts.
+        cur = curations.get(module)
+        module_briefs[module] = _first_sentence(cur.overview if cur else "") or (
+            f"{len(g['classes'])} classes, {len(g['functions'])} functions, {len(g['enums'])} enums")
 
     for article in articles:
         (outdir / f"{article.slug}.rst").write_text(render_article(article))
         log(f"wrote article {article.slug}.rst")
 
-    (outdir / "index.rst").write_text(render_index(modules, articles))
+    (outdir / "index.rst").write_text(render_index(modules, articles, module_briefs))
     log(f"wrote index.rst with {len(modules)} module(s), {len(articles)} article(s)")
     return 0
 
