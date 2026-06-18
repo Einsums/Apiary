@@ -734,8 +734,21 @@ def main() -> int:
     functions: list[dict] = []
     enums: list[dict] = []
     variables: list[dict] = []
+    skipped = 0
     for f in files:
-        c, fn, en, var = extract_file(f, args.package, package_dir, source_root=source_root)
+        # One unparseable file (a syntax error, or syntax newer than the running
+        # Python) must not take down the whole package's docs — skip it, warn,
+        # and keep going.
+        try:
+            c, fn, en, var = extract_file(f, args.package, package_dir, source_root=source_root)
+        except (SyntaxError, ValueError) as e:
+            log(f"warning: skipping {f}: {e.__class__.__name__}: {e}")
+            skipped += 1
+            continue
+        except OSError as e:
+            log(f"warning: cannot read {f}: {e}")
+            skipped += 1
+            continue
         classes.extend(c)
         functions.extend(fn)
         enums.extend(en)
@@ -759,8 +772,9 @@ def main() -> int:
         sys.stdout.write(text)
     else:
         Path(args.output).write_text(text)
+        skipped_note = f", skipped {skipped} unparseable file(s)" if skipped else ""
         log(f"wrote {args.output} ({len(classes)} classes, {len(functions)} functions, "
-            f"{len(enums)} enums, {len(variables)} variables) from {len(files)} file(s)")
+            f"{len(enums)} enums, {len(variables)} variables) from {len(files)} file(s){skipped_note}")
     return 0
 
 

@@ -309,4 +309,15 @@ assert_contains "${RST_CUR}/index.rst" ":doc:.einsums.linalg. — The linear-alg
 assert_contains "${RST_CUR}/index.rst" ":doc:.einsums. — .*functions"
 echo "ok: navigation index overview"
 
+# ── 9. Robustness: one unparseable file must not kill extraction ─────────────
+BADPKG="${WORK}/badpkg/einsums"
+mkdir -p "${BADPKG}"
+printf 'def ok():\n    """Good."""\n    return 1\n' > "${BADPKG}/good.py"
+printf 'def bad(:\n    pass\n' > "${BADPKG}/oops.py"
+"${PY}" "${SCRIPTS_DIR}/apiary_py_extract.py" --package einsums --package-dir "${BADPKG}" \
+    -o "${WORK}/bad.json" 2> "${WORK}/bad.err"
+assert_eq "good file survives a bad sibling" "$(jget "${WORK}/bad.json" "[f['name'] for f in d['functions']]")" "['ok']"
+assert_contains "${WORK}/bad.err" "skipping.*oops\.py"
+echo "ok: robustness (skip unparseable file)"
+
 echo "PASS: run_py_extract"
