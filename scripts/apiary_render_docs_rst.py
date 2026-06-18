@@ -141,15 +141,18 @@ def load_documents(paths: list[str]) -> tuple[str, list[dict]]:
     return top_module, docs
 
 
+_PAGE_KINDS = ("classes", "functions", "enums", "variables")
+
+
 def group_by_module(top: str, docs: list[dict]) -> dict[str, dict]:
-    """Bucket classes/functions/enums onto their submodule pages (layout only)."""
+    """Bucket classes/functions/enums/variables onto their submodule pages."""
     groups: dict[str, dict] = {}
 
     def bucket(mod: str) -> dict:
-        return groups.setdefault(mod, {"classes": [], "functions": [], "enums": []})
+        return groups.setdefault(mod, {k: [] for k in _PAGE_KINDS})
 
     for doc in docs:
-        for kind in ("classes", "functions", "enums"):
+        for kind in _PAGE_KINDS:
             for ent in doc.get(kind, []):
                 bucket(full_module(ent, top))[kind].append(ent)
     return groups
@@ -391,14 +394,14 @@ def _method_directive(members: list[dict]) -> str:
     return "staticmethod" if members[0].get("is_static") else "method"
 
 
-def render_class(out: list[str], cls: dict) -> None:
+def render_class(out: list[str], cls: dict, name_prefix: str = "") -> None:
     # Per-type curation (a class's own ## Topics), keyed by the class doc path.
     type_cur = None
     if TYPE_CURATIONS and RESOLVER is not None and cls.get("symbol_id"):
         type_cur = TYPE_CURATIONS.get(RESOLVER.path_for_symbol(cls["symbol_id"]))
 
     for cname in class_py_names(cls):
-        out.append(f".. py:class:: {cname}")
+        out.append(f".. py:class:: {name_prefix}{cname}")
         emit_doc(out, cls, IND, with_params=False)
         # Authored type overview, prepended to the class body.
         if type_cur is not None and type_cur.overview.strip():
@@ -452,6 +455,10 @@ def render_class(out: list[str], cls: dict) -> None:
         for e in cls.get("enums", []):
             render_enum(out, e, nested_indent=IND)
         out.append("")
+        # Nested classes render as qualified entries (``Outer.Inner``) after the
+        # parent body, so Sphinx scopes them without indent threading.
+        for nested in cls.get("nested_classes", []):
+            render_class(out, nested, name_prefix=f"{name_prefix}{cname}.")
 
 
 def render_enum(out: list[str], en: dict, nested_indent: str = "") -> None:
@@ -464,6 +471,18 @@ def render_enum(out: list[str], en: dict, nested_indent: str = "") -> None:
     for v in en.get("enumerators", []):
         out.append(f"{nested_indent}{IND}.. py:attribute:: {v['name']}")
         emit_doc(out, v, nested_indent + IND * 2, with_params=False)
+    out.append("")
+
+
+def render_variable(out: list[str], var: dict) -> None:
+    out.append(f".. py:data:: {var.get('py_name') or var['name']}")
+    if var.get("py_type"):
+        out.append(f"{IND}:type: {pythonize(var['py_type'])}")
+    if var.get("value"):
+        out.append(f"{IND}:value: {var['value']}")
+    emit_doc(out, var, IND, with_params=False)
+    out.extend(availability_lines(var, IND))
+    out.extend(source_link_lines(var, IND))
     out.append("")
 
 
@@ -490,7 +509,7 @@ def brief_of(entity: dict) -> str:
 
 
 def render_summary(out: list[str], module: str, classes: list[dict],
-                   func_groups: dict[str, list[dict]], enums: list[dict]) -> None:
+                   func_groups: dict[str, list[dict]], enums: list[dict], variables: list[dict]) -> None:
     """A compact, link-rich Summary at the top of a module page — every symbol
     as a py-domain cross-reference plus its brief, so the page leads with a
     navigable index (DocC's per-page symbol listing)."""
@@ -504,6 +523,8 @@ def render_summary(out: list[str], module: str, classes: list[dict],
         items.append(("func", f"{module}.{name}", brief_of(doc_member)))
     for e in sorted(enums, key=lambda e: e.get("py_name") or e["name"]):
         items.append(("class", f"{module}.{e.get('py_name') or e['name']}", brief_of(e)))
+    for v in sorted(variables, key=lambda v: v.get("py_name") or v["name"]):
+        items.append(("data", f"{module}.{v.get('py_name') or v['name']}", brief_of(v)))
     if not items:
         return
     _heading(out, "Summary", "-")
@@ -516,7 +537,7 @@ def render_summary(out: list[str], module: str, classes: list[dict],
 
 
 def render_by_kind(out: list[str], classes: list[dict], func_groups: dict[str, list[dict]],
-                   func_names: list[str], enums: list[dict]) -> None:
+                   func_names: list[str], enums: list[dict], variables: list[dict]) -> None:
     """Render a set of symbols under the default by-kind sections."""
     if classes:
         _heading(out, "Classes", "-")
@@ -530,6 +551,10 @@ def render_by_kind(out: list[str], classes: list[dict], func_groups: dict[str, l
         _heading(out, "Enumerations", "-")
         for e in sorted(enums, key=lambda e: e.get("py_name") or e["name"]):
             render_enum(out, e)
+    if variables:
+        _heading(out, "Data", "-")
+        for v in sorted(variables, key=lambda v: v.get("py_name") or v["name"]):
+            render_variable(out, v)
 
 
 def render_page(module: str, group: dict, curation=None) -> str:
@@ -556,6 +581,7 @@ def render_page(module: str, group: dict, curation=None) -> str:
 
     classes = group["classes"]
     enums = group["enums"]
+    variables = group["variables"]
     func_groups: dict[str, list[dict]] = {}
     for f in group["functions"]:
         for name in entity_py_names(f):
@@ -563,14 +589,16 @@ def render_page(module: str, group: dict, curation=None) -> str:
 
     cls_by_id = {c["symbol_id"]: c for c in classes if c.get("symbol_id")}
     enum_by_id = {e["symbol_id"]: e for e in enums if e.get("symbol_id")}
+    var_by_id = {v["symbol_id"]: v for v in variables if v.get("symbol_id")}
     func_name_by_id = {f["symbol_id"]: name for name, fs in func_groups.items() for f in fs if f.get("symbol_id")}
 
     # Lead with a compact, link-rich summary of everything on the page.
-    render_summary(out, module, classes, func_groups, enums)
+    render_summary(out, module, classes, func_groups, enums, variables)
 
     used_cls: set[str] = set()
     used_enum: set[str] = set()
     used_func: set[str] = set()
+    used_var: set[str] = set()
 
     # Curated topic groups first, in authored order.
     if curation is not None and curation.topics and RESOLVER is not None:
@@ -585,6 +613,9 @@ def render_page(module: str, group: dict, curation=None) -> str:
                 elif sid in enum_by_id and sid not in used_enum:
                     render_enum(out, enum_by_id[sid])
                     used_enum.add(sid)
+                elif sid in var_by_id and sid not in used_var:
+                    render_variable(out, var_by_id[sid])
+                    used_var.add(sid)
                 elif sid in func_name_by_id and func_name_by_id[sid] not in used_func:
                     name = func_name_by_id[sid]
                     emit_overload_set(out, "", "function", name, func_groups[name])
@@ -598,6 +629,7 @@ def render_page(module: str, group: dict, curation=None) -> str:
         func_groups,
         [n for n in func_groups if n not in used_func],
         [e for e in enums if e.get("symbol_id") not in used_enum],
+        [v for v in variables if v.get("symbol_id") not in used_var],
     )
 
     return "\n".join(out).rstrip() + "\n"
@@ -663,7 +695,7 @@ def report_coverage(curations: dict, groups: dict, top: str) -> None:
     for module, cur in curations.items():
         group = groups.get(module, {})
         documented: dict[str, str] = {}
-        for kind in ("classes", "functions", "enums"):
+        for kind in ("classes", "functions", "enums", "variables"):
             for e in group.get(kind, []):
                 if e.get("symbol_id"):
                     documented[e["symbol_id"]] = e.get("py_name") or e.get("name", "")
@@ -749,8 +781,10 @@ def main() -> int:
             f"{len(g['functions'])} functions, {len(g['enums'])} enums)")
         # Index summary line: the authored overview's first sentence, else counts.
         cur = curations.get(module)
-        module_briefs[module] = _first_sentence(cur.overview if cur else "") or (
-            f"{len(g['classes'])} classes, {len(g['functions'])} functions, {len(g['enums'])} enums")
+        _counts = [(len(g["classes"]), "classes"), (len(g["functions"]), "functions"),
+                   (len(g["enums"]), "enums"), (len(g["variables"]), "variables")]
+        module_briefs[module] = _first_sentence(cur.overview if cur else "") or \
+            ", ".join(f"{n} {label}" for n, label in _counts if n)
 
     for article in articles:
         (outdir / f"{article.slug}.rst").write_text(render_article(article))

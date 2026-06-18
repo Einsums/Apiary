@@ -38,7 +38,7 @@ import re
 import sys
 from pathlib import Path
 
-SCHEMA_VERSION = 4  # keep in lockstep with apiary_docs_schema.SCHEMA_VERSION
+SCHEMA_VERSION = 5  # keep in lockstep with apiary_docs_schema.SCHEMA_VERSION
 
 PREFIX = "py_extract"
 
@@ -498,6 +498,60 @@ def collect_methods(nodes: list, module: str, file: Path, qualprefix: str) -> li
     return out
 
 
+_ENUM_BASES = {"Enum", "IntEnum", "IntFlag", "Flag", "StrEnum", "ReprEnum"}
+
+
+def is_enum(node: ast.ClassDef) -> bool:
+    """True when a class derives from a stdlib ``enum`` base (by last name)."""
+    return any(ast.unparse(b).split(".")[-1] in _ENUM_BASES for b in node.bases)
+
+
+def field_entity(name: str, annotation: str, node: ast.AST, module: str, file: Path, qualprefix: str) -> dict:
+    """A class-level data attribute (annotated assignment) -> BoundField shape."""
+    ent = _common(node, name, module, f"{qualprefix}.{name}", file)
+    ent.update({"type": "", "py_type": annotation or "", "is_static": True})
+    return ent
+
+
+# Value expressions simple enough to show verbatim for a module constant.
+_SIMPLE_VALUE = (ast.Constant, ast.Tuple, ast.List, ast.Set, ast.Dict, ast.UnaryOp, ast.Name)
+
+
+def variable_entity(name: str, annotation: str | None, value: ast.AST | None,
+                    node: ast.AST, module: str, file: Path) -> dict:
+    """A module-level constant -> a top-level ``variables`` (py:data) entity."""
+    ent = _common(node, name, module, f"{module}.{name}", file)
+    ent.update({
+        "py_type": annotation or "",
+        "value": _unparse(value) if isinstance(value, _SIMPLE_VALUE) else None,
+    })
+    return ent
+
+
+def enum_entity(node: ast.ClassDef, module: str, file: Path, qualprefix: str) -> dict:
+    """A Python ``enum.Enum`` subclass -> BoundEnum shape (with enumerators)."""
+    qualified = f"{qualprefix}.{node.name}"
+    ent = _common(node, node.name, module, qualified, file)
+    enumerators: list[dict] = []
+    for stmt in node.body:
+        target = value = None
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            target, value = stmt.targets[0].id, stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            target, value = stmt.target.id, stmt.value
+        if target is None or not is_public(target):
+            continue
+        ival = value.value if isinstance(value, ast.Constant) and isinstance(value.value, int) else 0
+        enumerators.append({"name": target, "value": ival, "doc": "", "doc_structured": doc_structured(None)})
+    ent.update({
+        "is_scoped": True,
+        "underlying_type": "",
+        "underlying_py_type": "int",
+        "enumerators": enumerators,
+    })
+    return ent
+
+
 def class_entity(node: ast.ClassDef, module: str, file: Path, *, qualprefix: str) -> dict:
     qualified = f"{qualprefix}.{node.name}"
     ent = _common(node, node.name, module, qualified, file)
@@ -505,25 +559,35 @@ def class_entity(node: ast.ClassDef, module: str, file: Path, *, qualprefix: str
     properties: dict[str, dict] = {}
     prop_order: list[str] = []
     method_defs: list = []
+    fields: list[dict] = []
+    nested_classes: list[dict] = []
+    nested_enums: list[dict] = []
     for child in node.body:
-        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) or not is_public(child.name):
-            continue
-        decs = decorator_names(child)
-        if "property" in decs or "cached_property" in decs:
-            if child.name not in properties:
-                prop_order.append(child.name)
-            properties[child.name] = property_entity(child, module, file, qualified)
-        elif "setter" in decs:
-            # @<name>.setter — the property name is the method name.
-            if child.name in properties:
-                properties[child.name]["writable"] = True
+        if isinstance(child, ast.ClassDef) and is_public(child.name):
+            if is_enum(child):
+                nested_enums.append(enum_entity(child, module, file, qualified))
             else:
-                prop_order.append(child.name)
-                p = property_entity(child, module, file, qualified)
-                p["writable"] = True
-                properties[child.name] = p
-        else:
-            method_defs.append(child)
+                nested_classes.append(class_entity(child, module, file, qualprefix=qualified))
+        elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name) and is_public(child.target.id):
+            # A class-level annotated data attribute (e.g. a dataclass field).
+            fields.append(field_entity(child.target.id, _unparse(child.annotation), child, module, file, qualified))
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and is_public(child.name):
+            decs = decorator_names(child)
+            if "property" in decs or "cached_property" in decs:
+                if child.name not in properties:
+                    prop_order.append(child.name)
+                properties[child.name] = property_entity(child, module, file, qualified)
+            elif "setter" in decs:
+                # @<name>.setter — the property name is the method name.
+                if child.name in properties:
+                    properties[child.name]["writable"] = True
+                else:
+                    prop_order.append(child.name)
+                    p = property_entity(child, module, file, qualified)
+                    p["writable"] = True
+                    properties[child.name] = p
+            else:
+                method_defs.append(child)
 
     built = collect_methods(method_defs, module, file, qualified)
     ctors = [m for m in built if m["name"] == "__init__"]
@@ -538,9 +602,9 @@ def class_entity(node: ast.ClassDef, module: str, file: Path, *, qualprefix: str
         "constructors": ctors,
         "methods": methods,
         "properties": [properties[n] for n in prop_order],
-        "fields": [],
-        "enums": [],
-        "nested_classes": [],
+        "fields": fields,
+        "enums": nested_enums,
+        "nested_classes": nested_classes,
     })
     return ent
 
@@ -581,8 +645,9 @@ def module_all(tree: ast.Module) -> set[str] | None:
     return None
 
 
-def extract_file(file: Path, package: str, package_dir: Path, *, source_root: Path | None = None) -> tuple[list[dict], list[dict]]:
-    """Return (classes, functions) for one ``.py`` file."""
+def extract_file(file: Path, package: str, package_dir: Path,
+                 *, source_root: Path | None = None) -> tuple[list[dict], list[dict], list[dict]]:
+    """Return (classes, functions, enums) for one ``.py`` file."""
     module = dotted_module(file, package, package_dir)
     recorded = _recorded_path(file, source_root)
     tree = ast.parse(file.read_text(), filename=str(file))
@@ -590,17 +655,33 @@ def extract_file(file: Path, package: str, package_dir: Path, *, source_root: Pa
     allow = module_all(tree)
     public = (lambda name: name in allow) if allow is not None else is_public
 
-    classes = [
-        class_entity(n, module, recorded, qualprefix=module)
-        for n in tree.body
-        if isinstance(n, ast.ClassDef) and public(n.name)
-    ]
+    classes: list[dict] = []
+    enums: list[dict] = []
+    for n in tree.body:
+        if isinstance(n, ast.ClassDef) and public(n.name):
+            if is_enum(n):
+                enums.append(enum_entity(n, module, recorded, module))
+            else:
+                classes.append(class_entity(n, module, recorded, qualprefix=module))
     func_defs = [
         n for n in tree.body
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and public(n.name)
     ]
     functions = collect_functions(func_defs, module, recorded, module)
-    return classes, functions
+
+    # Module-level constants -> variables (py:data). ``__all__`` is config, not data.
+    variables: list[dict] = []
+    for n in tree.body:
+        target = ann = val = None
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+            target, ann, val = n.target.id, _unparse(n.annotation), n.value
+        elif isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+            target, val = n.targets[0].id, n.value
+        if target is None or target == "__all__" or not public(target):
+            continue
+        variables.append(variable_entity(target, ann, val, n, module, recorded))
+
+    return classes, functions, enums, variables
 
 
 def class_edges(classes: list[dict]) -> list[dict]:
@@ -617,7 +698,7 @@ def class_edges(classes: list[dict]) -> list[dict]:
         for base in cls.get("bases", []):
             if cid:
                 edges.append({"source": cid, "target": base, "kind": "inheritsFrom"})
-        for m in cls.get("constructors", []) + cls.get("methods", []):
+        for m in (cls.get("constructors", []) + cls.get("methods", []) + cls.get("fields", []) + cls.get("enums", [])):
             if cid and m.get("symbol_id"):
                 edges.append({"source": m["symbol_id"], "target": cid, "kind": "memberOf"})
         for nested in cls.get("nested_classes", []):
@@ -651,20 +732,25 @@ def main() -> int:
 
     classes: list[dict] = []
     functions: list[dict] = []
+    enums: list[dict] = []
+    variables: list[dict] = []
     for f in files:
-        c, fn = extract_file(f, args.package, package_dir, source_root=source_root)
+        c, fn, en, var = extract_file(f, args.package, package_dir, source_root=source_root)
         classes.extend(c)
         functions.extend(fn)
+        enums.extend(en)
+        variables.extend(var)
 
     doc = {
         "schema_version": SCHEMA_VERSION,
         "module": args.package,
         "classes": classes,
         "functions": functions,
-        "enums": [],
+        "enums": enums,
         "typedefs": [],
         "concepts": [],
         "macros": [],
+        "variables": variables,
         "edges": class_edges(classes),
     }
 
@@ -673,7 +759,8 @@ def main() -> int:
         sys.stdout.write(text)
     else:
         Path(args.output).write_text(text)
-        log(f"wrote {args.output} ({len(classes)} classes, {len(functions)} functions) from {len(files)} file(s)")
+        log(f"wrote {args.output} ({len(classes)} classes, {len(functions)} functions, "
+            f"{len(enums)} enums, {len(variables)} variables) from {len(files)} file(s)")
     return 0
 
 

@@ -65,7 +65,7 @@ find_expr() {
 }
 
 # Schema + origin
-assert_eq "schema_version" "$(jget "${PY_FRAG}" "d['schema_version']")" "4"
+assert_eq "schema_version" "$(jget "${PY_FRAG}" "d['schema_version']")" "5"
 assert_eq "top module"     "$(jget "${PY_FRAG}" "d['module']")"          "einsums"
 
 solve="$(find_expr functions solve)"
@@ -164,6 +164,24 @@ assert_eq "gesv note"       "$(jget "${PY_FRAG}" "${gesv}['availability']['depre
 assert_eq "versionadded stripped from detail" "$(jget "${PY_FRAG}" "'versionadded' in ${gesv}['doc_structured']['detail']")" "False"
 echo "ok: availability (since / deprecated)"
 
+# ── 1g. Coverage gaps: enums, module variables, nested classes ───────────────
+# Python enum.Enum -> a top-level enum with enumerators.
+norm_enum="[e for e in d['enums'] if e['name']=='Norm'][0]"
+assert_eq "Norm is an enum"      "$(jget "${PY_FRAG}" "'Norm' in [e['name'] for e in d['enums']]")" "True"
+assert_eq "Norm enumerators"     "$(jget "${PY_FRAG}" "[v['name'] for v in ${norm_enum}['enumerators']]")" "['L1', 'L2', 'INF']"
+assert_eq "Norm enum value"      "$(jget "${PY_FRAG}" "[v['value'] for v in ${norm_enum}['enumerators']]")" "[1, 2, 3]"
+# Module-level constant -> a top-level variable (py:data).
+thr="[v for v in d['variables'] if v['name']=='DEFAULT_PIVOT_THRESHOLD'][0]"
+assert_eq "module variable py_type" "$(jget "${PY_FRAG}" "${thr}['py_type']")" "float"
+assert_eq "module variable value"   "$(jget "${PY_FRAG}" "${thr}['value']")" "0.1"
+assert_eq "__all__ not a variable"  "$(jget "${PY_FRAG}" "'__all__' in [v['name'] for v in d['variables']]")" "False"
+# Nested class -> nested_classes (with its own members).
+stats="[n for n in ${decomp}['nested_classes'] if n['name']=='Stats'][0]"
+assert_eq "nested class present"    "$(jget "${PY_FRAG}" "'Stats' in [n['name'] for n in ${decomp}['nested_classes']]")" "True"
+assert_eq "nested class method"     "$(jget "${PY_FRAG}" "[m['name'] for m in ${stats}['methods']]")" "['condition_number']"
+assert_eq "nested class field"      "$(jget "${PY_FRAG}" "[f['name'] for f in ${stats}['fields']]")" "['rows']"
+echo "ok: enums / module variables / nested classes"
+
 # ── 2. Merge (cross-origin co-location + collision resolution) ───────────────
 "${PY}" "${SCRIPTS_DIR}/apiary_merge_docs_json.py" -o "${MERGED}" "${CPP_FRAG}" "${PY_FRAG}" 2> "${WORK}/merge.err"
 
@@ -219,6 +237,11 @@ assert_contains "${RST_DIR}/einsums.linalg.rst" "Use solve\(\) instead\."
 assert_contains "${RST_DIR}/einsums.linalg.rst" "\.\. deprecated:: 0.5.0"
 assert_contains "${RST_DIR}/einsums.linalg.rst" "admonition:: Deprecated"
 [[ "$(grep -c "versionadded:: 0.1.0" "${RST_DIR}/einsums.linalg.rst")" == "1" ]] || fail "versionadded rendered more than once"
+# Coverage-gap shapes render: enum + members, module data, nested class.
+assert_contains "${RST_DIR}/einsums.linalg.rst" "py:class:: Norm"
+assert_contains "${RST_DIR}/einsums.linalg.rst" "py:attribute:: L1"
+assert_contains "${RST_DIR}/einsums.linalg.rst" "py:data:: DEFAULT_PIVOT_THRESHOLD"
+assert_contains "${RST_DIR}/einsums.linalg.rst" "py:class:: Decomposition.Stats"
 # Phase-5 navigation: a per-page Summary of link-rich entries with briefs.
 assert_contains "${RST_DIR}/einsums.linalg.rst" "^Summary$"
 assert_contains "${RST_DIR}/einsums.linalg.rst" "- :py:class:.~einsums.linalg.Decomposition. "
@@ -283,7 +306,7 @@ echo "ok: curation + articles + coverage + per-type rubrics"
 # symbol counts.
 assert_contains "${RST_CUR}/index.rst" "^Modules$"
 assert_contains "${RST_CUR}/index.rst" ":doc:.einsums.linalg. — The linear-algebra convenience layer over the bound tensor types\."
-assert_contains "${RST_CUR}/index.rst" ":doc:.einsums. — .*classes"
+assert_contains "${RST_CUR}/index.rst" ":doc:.einsums. — .*functions"
 echo "ok: navigation index overview"
 
 echo "PASS: run_py_extract"

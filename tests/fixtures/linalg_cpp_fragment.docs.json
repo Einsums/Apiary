@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "module": "einsums",
   "classes": [],
   "functions": [
@@ -52,5 +52,6 @@
   "typedefs": [],
   "concepts": [],
   "macros": [],
+  "variables": [],
   "edges": []
 }

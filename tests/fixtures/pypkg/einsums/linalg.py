@@ -11,7 +11,18 @@ alongside any C++-origin ``einsums.linalg`` symbols.
 
 from __future__ import annotations
 
+import enum
 from typing import deprecated, overload
+
+DEFAULT_PIVOT_THRESHOLD: float = 0.1
+
+
+class Norm(enum.Enum):
+    """Supported norm kinds."""
+
+    L1 = 1
+    L2 = 2
+    INF = 3
 
 
 @deprecated("Use solve() instead.")
@@ -125,6 +136,15 @@ class Decomposition:
     def from_kind(cls, kind: str) -> Decomposition:
         """Construct a decomposition selecting the algorithm by ``kind``."""
         return cls(kind)
+
+    class Stats:
+        """Cached statistics about a factored matrix (a nested class)."""
+
+        rows: int = 0
+
+        def condition_number(self) -> float:
+            """Estimate the 2-norm condition number."""
+            return 1.0
 
     def _private_helper(self):
         """Must NOT be documented."""

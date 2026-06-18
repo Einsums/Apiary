@@ -50,8 +50,11 @@ namespace apiary {
 /// fragments and the merged document — merging is idempotent. v4 adds a stable
 /// per-entity `symbol_id` (the Clang USR for C++; `py:<dotted>` for Python) and
 /// a top-level `edges` array (memberOf / inheritsFrom / overrides) — the docs
-/// graph that reference resolution keys off.
-inline constexpr int k_docs_json_schema_version = 4;
+/// graph that reference resolution keys off. v5 adds a top-level `variables`
+/// array (module-level data — `py:data`); the C++ frontend emits it empty (it
+/// does not capture namespace-scope variables), the static Python frontend
+/// fills it from module-level constants.
+inline constexpr int k_docs_json_schema_version = 5;
 
 /// @brief Serialize `module_` to a pretty-printed JSON string per the schema above.
 ///

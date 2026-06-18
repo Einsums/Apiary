@@ -50,6 +50,7 @@ _PY_ROLE = {
     "function": "func",
     "method": "meth",
     "attribute": "attr",
+    "data": "data",
 }
 
 # The doc-text fields of an entity that may carry ``[[ ]]`` links.
@@ -129,6 +130,8 @@ class Resolver:
             self._add(self._path(f, None), "function", f.get("symbol_id", ""))
         for e in doc.get("enums", []):
             self._add(self._path(e, None), "enum", e.get("symbol_id", ""))
+        for v in doc.get("variables", []):
+            self._add(self._path(v, None), "data", v.get("symbol_id", ""))
 
     # ── resolving ────────────────────────────────────────────────────────────
 

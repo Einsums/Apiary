@@ -597,6 +597,9 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
         {"typedefs", std::move(typedefs)},
         {"concepts", std::move(concepts)},
         {"macros", std::move(macros)},
+        // Module-level data (py:data). The C++ frontend does not capture
+        // namespace-scope variables; the static Python frontend populates this.
+        {"variables", Array{}},
         {"edges", build_edges(module_)},
     };
 

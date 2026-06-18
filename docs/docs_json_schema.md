@@ -19,7 +19,7 @@ the **one contract** shared by:
 
 There is exactly one schema. Per-frontend *fragments* and the merged
 *document* have identical shape; merging is **idempotent** (merging an
-already-merged document is a no-op). `schema_version` is currently **4**.
+already-merged document is a no-op). `schema_version` is currently **5**.
 
 > The canonical field-by-field source of truth is still `src/DocsJson.cpp`
 > (`emit_docs_json`). This document explains the shape, the join keys, and the
@@ -29,7 +29,7 @@ already-merged document is a no-op). `schema_version` is currently **4**.
 
 ```jsonc
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "module": "einsums",          // top-level Python import name (NOT a submodule)
   "classes":   [ <class>...   ],
   "functions": [ <function>... ],
@@ -37,9 +37,17 @@ already-merged document is a no-op). `schema_version` is currently **4**.
   "typedefs":  [ <typedef>...  ],   // C++-origin, docs mode only
   "concepts":  [ <concept>...  ],   // C++-origin, docs mode only
   "macros":    [ <macro>...    ],   // C++-origin, docs mode only
+  "variables": [ <variable>... ],   // module-level data / py:data (v5)
   "edges":     [ <edge>...     ]    // relationship graph (v4)
 }
 ```
+
+**variable** (`py:data`): a documentable entity plus `py_type` and `value`
+(the constant's source, when simple). The C++ frontend emits none; the static
+Python frontend fills them from module-level constants (skipping `__all__`).
+The Python frontend also now extracts **nested classes** (`nested_classes`),
+**`enum.Enum` subclasses** (as `enums` with `enumerators`), and **class-level
+annotated attributes** (as `fields`) — previously silently dropped.
 
 When several fragments are merged, the result is a single document of the same
 shape: the arrays are concatenated and de-duplicated (see *Merge & collisions*).
