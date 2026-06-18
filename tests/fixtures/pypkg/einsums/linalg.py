@@ -114,3 +114,11 @@ class Decomposition:
     def _private_helper(self):
         """Must NOT be documented."""
         return None
+
+
+class LUDecomposition(Decomposition):
+    """An LU decomposition (exercises a Python-origin inheritsFrom edge)."""
+
+    def solve_with(self, b: ArrayLike) -> ArrayLike:
+        """Solve the system using the cached factors."""
+        raise NotImplementedError

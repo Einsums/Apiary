@@ -1,11 +1,12 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "module": "einsums",
   "classes": [],
   "functions": [
     {
       "name": "lu",
       "origin": "cpp",
+      "symbol_id": "c++:c:@N@einsums@N@linalg@F@lu#",
       "py_name": "lu",
       "hidden": false,
       "qualified_name": "einsums::linalg::lu",
@@ -27,6 +28,7 @@
     {
       "name": "solve",
       "origin": "cpp",
+      "symbol_id": "c++:c:@N@einsums@N@linalg@F@solve#",
       "py_name": "solve",
       "hidden": false,
       "qualified_name": "einsums::linalg::solve",
@@ -49,5 +51,6 @@
   "enums": [],
   "typedefs": [],
   "concepts": [],
-  "macros": []
+  "macros": [],
+  "edges": []
 }

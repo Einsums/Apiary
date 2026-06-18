@@ -19,7 +19,7 @@ the **one contract** shared by:
 
 There is exactly one schema. Per-frontend *fragments* and the merged
 *document* have identical shape; merging is **idempotent** (merging an
-already-merged document is a no-op). `schema_version` is currently **3**.
+already-merged document is a no-op). `schema_version` is currently **4**.
 
 > The canonical field-by-field source of truth is still `src/DocsJson.cpp`
 > (`emit_docs_json`). This document explains the shape, the join keys, and the
@@ -29,14 +29,15 @@ already-merged document is a no-op). `schema_version` is currently **3**.
 
 ```jsonc
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "module": "einsums",          // top-level Python import name (NOT a submodule)
   "classes":   [ <class>...   ],
   "functions": [ <function>... ],
   "enums":     [ <enum>...     ],
   "typedefs":  [ <typedef>...  ],   // C++-origin, docs mode only
   "concepts":  [ <concept>...  ],   // C++-origin, docs mode only
-  "macros":    [ <macro>...    ]    // C++-origin, docs mode only
+  "macros":    [ <macro>...    ],   // C++-origin, docs mode only
+  "edges":     [ <edge>...     ]    // relationship graph (v4)
 }
 ```
 
@@ -94,6 +95,7 @@ Common to every documentable entity:
 {
   "name": "...",                 // unqualified source name
   "origin": "cpp" | "python",
+  "symbol_id": "...",            // stable graph ID — see "Symbol IDs & edges"
   "py_name": "...",              // resolved Python identifier (naming authority is the producer)
   "hidden": false,               // bound but intentionally omitted from the Python surface
   "qualified_name": "...",       // ::ns::Class::m (cpp) or dotted path (python)
@@ -131,6 +133,42 @@ Common to every documentable entity:
   dtype_values[], default_dtype, kwarg_names[]}` — see `IR.hpp::PythonOverload`.
   Python origin uses `kind:"overload_set"` for `@overload` groups.
 
+## Symbol IDs & edges (v4 — the relationship graph)
+
+Every top-level documentable entity and every class member carries a stable,
+language-tagged **`symbol_id`**:
+
+- **C++:** `c++:<USR>` — the Clang USR from `clang::index::generateUSRForDecl`
+  (the same identifiers DocC consumes). Precise and unique per declaration
+  (overloads get distinct USRs).
+- **Python:** `py:<dotted-name>` (e.g. `py:einsums.linalg.Decomposition.factor`).
+  Python `@overload` variants share one `symbol_id` — it is the *logical*
+  symbol a `Type/member` link resolves to.
+
+`symbol_id` is empty only for entities with no underlying declaration (e.g.
+synthesized protocol dunders). It is the **primary identity** for the graph and
+(Phase 2) reference resolution — distinct from `qualified_name` (human-readable)
+and the Python-visible `(submodule, py_name)` collision key.
+
+The top-level **`edges`** array is the relationship graph; each edge is:
+
+```jsonc
+{ "source": "<symbol_id>", "target": "<symbol_id | name>", "kind": "..." }
+```
+
+| `kind` | meaning | source / target |
+|---|---|---|
+| `memberOf` | a class member belongs to its type | member → enclosing class |
+| `inheritsFrom` | public base class | derived class → base |
+| `overrides` | virtual override (C++ only) | method → overridden method |
+
+`target` may be an unresolved/external reference (a base whose type has no
+resolvable record, or a Python base emitted as its written name) — it is kept
+verbatim for Phase 2's resolver. Top-level functions/enums carry their module
+membership via `submodule`, so they get no `memberOf` edge. The Python frontend
+emits `memberOf` + `inheritsFrom`; `overrides` is C++-only (it can't be
+determined statically without MRO).
+
 ## Merge & collisions
 
 The merge stage (`scripts/apiary_merge_docs_json.py`):
@@ -141,6 +179,8 @@ The merge stage (`scripts/apiary_merge_docs_json.py`):
 3. Detects collisions on `(dotted_module, py_name)` across origins. Resolution
    is deterministic and emits a drift warning to stderr so a single source of
    truth is rendered rather than a drifted pair.
-4. Emits one canonical document of this same schema.
+4. Concatenates and de-dupes `edges`, dropping any whose `source` entity did not
+   survive (so a collision-dropped class takes its members' edges with it).
+5. Emits one canonical document of this same schema.
 
 Re-running the merge over its own output is a no-op (idempotent).

@@ -47,8 +47,11 @@ namespace apiary {
 /// concept/macro), so a second extraction frontend (the static Python `ast`
 /// frontend) can emit fragments in this same schema and a merge stage can
 /// resolve cross-origin collisions. The schema is identical for per-frontend
-/// fragments and the merged document — merging is idempotent.
-inline constexpr int k_docs_json_schema_version = 3;
+/// fragments and the merged document — merging is idempotent. v4 adds a stable
+/// per-entity `symbol_id` (the Clang USR for C++; `py:<dotted>` for Python) and
+/// a top-level `edges` array (memberOf / inheritsFrom / overrides) — the docs
+/// graph that reference resolution keys off.
+inline constexpr int k_docs_json_schema_version = 4;
 
 /// @brief Serialize `module_` to a pretty-printed JSON string per the schema above.
 ///

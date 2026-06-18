@@ -37,7 +37,7 @@ import json
 import sys
 from pathlib import Path
 
-SCHEMA_VERSION = 3  # keep in lockstep with apiary_docs_schema.SCHEMA_VERSION
+SCHEMA_VERSION = 4  # keep in lockstep with apiary_docs_schema.SCHEMA_VERSION
 
 PREFIX = "py_extract"
 
@@ -279,6 +279,10 @@ def _common(node: ast.AST, name: str, module: str, qualified: str, file: Path) -
     return {
         "name": name,
         "origin": "python",
+        # Stable symbol ID for the docs graph: the dotted path, language-tagged.
+        # Unlike C++ USRs (one per overload), Python overloads share the dotted
+        # id — it is the logical symbol a `Type/member` link resolves to.
+        "symbol_id": "py:" + qualified,
         "py_name": name,
         "hidden": False,
         "qualified_name": qualified,
@@ -532,6 +536,33 @@ def extract_file(file: Path, package: str, package_dir: Path, *, source_root: Pa
     return classes, functions
 
 
+def class_edges(classes: list[dict]) -> list[dict]:
+    """Relationship edges for the docs graph, mirroring the C++ frontend.
+
+    `memberOf` (method/ctor -> class) and `inheritsFrom` (class -> each base).
+    Bases are emitted as written names (Python can't statically resolve them to
+    a symbol id); Phase 2's resolver matches them against the merged graph.
+    `overrides` is omitted — it can't be determined statically without MRO."""
+    edges: list[dict] = []
+
+    def walk(cls: dict) -> None:
+        cid = cls.get("symbol_id")
+        for base in cls.get("bases", []):
+            if cid:
+                edges.append({"source": cid, "target": base, "kind": "inheritsFrom"})
+        for m in cls.get("constructors", []) + cls.get("methods", []):
+            if cid and m.get("symbol_id"):
+                edges.append({"source": m["symbol_id"], "target": cid, "kind": "memberOf"})
+        for nested in cls.get("nested_classes", []):
+            if cid and nested.get("symbol_id"):
+                edges.append({"source": nested["symbol_id"], "target": cid, "kind": "memberOf"})
+            walk(nested)
+
+    for c in classes:
+        walk(c)
+    return edges
+
+
 def iter_py_files(package_dir: Path) -> list[Path]:
     return sorted(p for p in package_dir.rglob("*.py"))
 
@@ -567,6 +598,7 @@ def main() -> int:
         "typedefs": [],
         "concepts": [],
         "macros": [],
+        "edges": class_edges(classes),
     }
 
     text = json.dumps(doc, indent=2) + "\n"

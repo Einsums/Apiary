@@ -128,6 +128,7 @@ Value json_string_list(std::vector<std::string> const &items); // fwd
 Value json_method(BoundMethod const &m) {
     return Object{
         {"name", m.name},
+        {"symbol_id", m.symbol_id},
         {"py_name", resolved_py_name(m)},
         {"hidden", is_hidden(m)},
         {"qualified_name", m.qualified_name},
@@ -163,6 +164,7 @@ Value json_methods(std::vector<BoundMethod> const &methods) {
 Value json_field(BoundField const &f) {
     return Object{
         {"name", f.name},
+        {"symbol_id", f.symbol_id},
         {"py_name", resolved_py_name(f)},
         {"hidden", is_hidden(f)},
         {"qualified_name", f.qualified_name},
@@ -189,6 +191,7 @@ Value json_enum(BoundEnum const &e) {
     return Object{
         {"name", e.name},
         {"origin", "cpp"},
+        {"symbol_id", e.symbol_id},
         {"py_name", resolved_py_name(e)},
         {"hidden", is_hidden(e)},
         {"qualified_name", e.qualified_name},
@@ -314,6 +317,7 @@ void add_protocol_dunders(BoundClass const &c, Array &methods) {
     auto emit = [&](std::string const &dunder, Array params, char const *ret, std::string const &brief) {
         methods.push_back(Object{
             {"name", dunder},
+            {"symbol_id", ""}, // synthesized protocol dunder — no AST decl, no USR
             {"py_name", dunder},
             {"hidden", false},
             {"qualified_name", c.qualified_name + "::" + dunder},
@@ -386,6 +390,7 @@ Value json_class(BoundClass const &c) {
     return Object{
         {"name", c.name},
         {"origin", "cpp"},
+        {"symbol_id", c.symbol_id},
         {"py_name", resolved_py_name(c)},
         {"hidden", is_hidden(c)},
         {"qualified_name", c.qualified_name},
@@ -412,6 +417,7 @@ Value json_function(BoundFunction const &f) {
     return Object{
         {"name", f.name},
         {"origin", "cpp"},
+        {"symbol_id", f.symbol_id},
         {"py_name", resolved_py_name(f)},
         {"hidden", is_hidden(f)},
         {"qualified_name", f.qualified_name},
@@ -430,6 +436,74 @@ Value json_function(BoundFunction const &f) {
         {"python_overloads", json_python_overloads(f.python_overloads)},
         {"directives", json_directives(f.directives)},
     };
+}
+
+Value json_edge(std::string const &source, std::string const &target, char const *kind) {
+    return Object{
+        {"source", source},
+        {"target", target},
+        {"kind", kind},
+    };
+}
+
+// Walk a class (recursively into nested classes) and append its relationship
+// edges: inheritsFrom (to each public base), memberOf (each member -> this
+// class), and overrides (each method -> the method(s) it overrides). Edges use
+// stable symbol IDs; a member with no symbol_id contributes none.
+// NOLINTNEXTLINE(misc-no-recursion)
+void collect_class_edges(BoundClass const &c, Array &edges) {
+    if (!c.symbol_id.empty()) {
+        for (std::size_t i = 0; i < c.bases.size(); ++i) {
+            // Prefer the base's symbol_id; fall back to its written name when
+            // the base type had no resolvable record (dependent/external).
+            std::string const target = (i < c.base_ids.size() && !c.base_ids[i].empty()) ? c.base_ids[i] : c.bases[i];
+            edges.push_back(json_edge(c.symbol_id, target, "inheritsFrom"));
+        }
+    }
+
+    auto member_of = [&](BoundEntityCommon const &m) {
+        if (!m.symbol_id.empty() && !c.symbol_id.empty()) {
+            edges.push_back(json_edge(m.symbol_id, c.symbol_id, "memberOf"));
+        }
+    };
+    auto overrides = [&](BoundMethod const &m) {
+        if (m.symbol_id.empty()) {
+            return;
+        }
+        for (auto const &oid : m.overridden_ids) {
+            edges.push_back(json_edge(m.symbol_id, oid, "overrides"));
+        }
+    };
+
+    for (auto const &m : c.ctors) {
+        member_of(m);
+    }
+    for (auto const &m : c.methods) {
+        member_of(m);
+        overrides(m);
+    }
+    for (auto const &f : c.fields) {
+        member_of(f);
+    }
+    for (auto const &e : c.nested_enums) {
+        member_of(e);
+    }
+    for (auto const &n : c.nested_classes) {
+        member_of(n);
+        collect_class_edges(n, edges);
+    }
+}
+
+// Build the document's relationship-edge list from the whole module. Top-level
+// functions/enums carry their module membership via ``submodule``, so they get
+// no memberOf edge here; only intra-type structure (membership/inheritance/
+// overrides) is emitted as graph edges.
+Array build_edges(Module const &module_) {
+    Array edges;
+    for (auto const &c : module_.classes) {
+        collect_class_edges(c, edges);
+    }
+    return edges;
 }
 
 } // namespace
@@ -452,6 +526,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
         typedefs.push_back(Object{
             {"name", t.name},
             {"origin", "cpp"},
+            {"symbol_id", t.symbol_id},
             {"qualified_name", t.qualified_name},
             {"doc", t.doc},
             {"doc_structured", json_doc_structured(t.doc)},
@@ -465,6 +540,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
         concepts.push_back(Object{
             {"name", c.name},
             {"origin", "cpp"},
+            {"symbol_id", c.symbol_id},
             {"qualified_name", c.qualified_name},
             {"doc", c.doc},
             {"doc_structured", json_doc_structured(c.doc)},
@@ -477,6 +553,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
         macros.push_back(Object{
             {"name", m.name},
             {"origin", "cpp"},
+            {"symbol_id", m.symbol_id},
             {"qualified_name", m.qualified_name},
             {"doc", m.doc},
             {"doc_structured", json_doc_structured(m.doc)},
@@ -495,6 +572,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
         {"typedefs", std::move(typedefs)},
         {"concepts", std::move(concepts)},
         {"macros", std::move(macros)},
+        {"edges", build_edges(module_)},
     };
 
     std::string              buffer;

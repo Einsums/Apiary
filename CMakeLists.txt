@@ -98,6 +98,7 @@ target_link_libraries(apiary PRIVATE
     clangFrontend
     clangSerialization
     clangSema
+    clangIndex
     clangAST
     clangASTMatchers
     clangBasic

@@ -65,7 +65,7 @@ find_expr() {
 }
 
 # Schema + origin
-assert_eq "schema_version" "$(jget "${PY_FRAG}" "d['schema_version']")" "3"
+assert_eq "schema_version" "$(jget "${PY_FRAG}" "d['schema_version']")" "4"
 assert_eq "top module"     "$(jget "${PY_FRAG}" "d['module']")"          "einsums"
 
 solve="$(find_expr functions solve)"
@@ -144,6 +144,16 @@ assert_eq "no top-level Decomposition alias" "$(jget "${PY_FRAG}" "len([c for c 
 assert_eq "solve only at definition site" "$(jget "${PY_FRAG}" "[f['submodule'] for f in d['functions'] if f['name']=='solve']")" "['einsums.linalg']"
 echo "ok: __all__ + re-export aliases"
 
+# ── 1e. Symbol IDs + relationship edges (docs graph) ─────────────────────────
+assert_eq "solve symbol_id"          "$(jget "${PY_FRAG}" "${solve}['symbol_id']")" "py:einsums.linalg.solve"
+assert_eq "Decomposition symbol_id"  "$(jget "${PY_FRAG}" "${decomp}['symbol_id']")" "py:einsums.linalg.Decomposition"
+assert_eq "factor symbol_id"         "$(jget "${PY_FRAG}" "[m for m in ${decomp}['methods'] if m['name']=='factor'][0]['symbol_id']")" "py:einsums.linalg.Decomposition.factor"
+# memberOf: factor -> Decomposition.
+assert_eq "memberOf edge" "$(jget "${PY_FRAG}" "any(e['kind']=='memberOf' and e['source']=='py:einsums.linalg.Decomposition.factor' and e['target']=='py:einsums.linalg.Decomposition' for e in d['edges'])")" "True"
+# inheritsFrom: LUDecomposition -> Decomposition (base emitted as written name).
+assert_eq "inheritsFrom edge" "$(jget "${PY_FRAG}" "any(e['kind']=='inheritsFrom' and e['source']=='py:einsums.linalg.LUDecomposition' and e['target']=='Decomposition' for e in d['edges'])")" "True"
+echo "ok: symbol IDs + relationship edges"
+
 # ── 2. Merge (cross-origin co-location + collision resolution) ───────────────
 "${PY}" "${SCRIPTS_DIR}/apiary_merge_docs_json.py" -o "${MERGED}" "${CPP_FRAG}" "${PY_FRAG}" 2> "${WORK}/merge.err"
 
@@ -156,6 +166,9 @@ assert_eq "Decomposition present (python)" "$(jget "${MERGED}" "'Decomposition' 
 assert_eq "solve count after merge" "$(jget "${MERGED}" "len([f for f in d['functions'] if f['py_name']=='solve'])")" "1"
 assert_eq "solve resolved to cpp"   "$(jget "${MERGED}" "[f for f in d['functions'] if f['py_name']=='solve'][0]['origin']")" "cpp"
 assert_contains "${WORK}/merge.err" "collision.*solve"
+
+# Edges survive the merge (source entity survived).
+assert_eq "inheritsFrom edge in merged" "$(jget "${MERGED}" "any(e['kind']=='inheritsFrom' and e['source']=='py:einsums.linalg.LUDecomposition' for e in d['edges'])")" "True"
 
 echo "ok: merge + cross-origin collision resolution"
 

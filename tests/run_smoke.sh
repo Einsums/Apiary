@@ -102,4 +102,15 @@ assert_contains namespace_module 'function einsums::fixture::graph::overridden' 
 assert_contains namespace_module 'submodule: graph\.ops$'                        "${out}"
 assert_contains namespace_module 'function einsums::fixture::top_level'          "${out}"
 
+# ---- inheritance.hpp (docs graph: symbol_id + relationship edges) ----------
+# Asserts on --emit-docs-json (not the IR dump): the docs graph — stable USR
+# symbol_ids plus inheritsFrom / overrides / memberOf edges — lives in the JSON,
+# which is the contract the merge stage and renderer consume.
+djson="$("${TOOL}" --emit-docs-json --module einsums "${FIXTURE_DIR}/inheritance.hpp" \
+    -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>/dev/null || true)"
+assert_contains inheritance '"symbol_id": "c\+\+:c:@N@einsums@N@fixture@S@BlockTensor"' "${djson}"
+assert_contains inheritance '"kind": "inheritsFrom"'                                    "${djson}"
+assert_contains inheritance '"kind": "overrides"'                                       "${djson}"
+assert_contains inheritance '"kind": "memberOf"'                                        "${djson}"
+
 echo "OK: all Phase-2 fixtures pass"

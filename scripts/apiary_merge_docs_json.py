@@ -40,6 +40,7 @@ from apiary_docs_schema import (
     TOP_LEVEL_KINDS,
     entity_dedupe_key,
     full_module,
+    iter_symbol_ids,
     load_document,
     py_identity,
 )
@@ -125,6 +126,28 @@ def merge(docs: list[dict]) -> dict:
                 resolved.extend(members)
 
         out[kind] = resolved
+
+    # 3. Relationship edges. An edge survives only if its SOURCE entity survived
+    #    (collision resolution may have dropped a class and with it its members);
+    #    targets may be unresolved/external and are kept verbatim for Phase 2's
+    #    resolver. De-dupe identical edges. Order-stable -> idempotent.
+    surviving: set[str] = set()
+    for kind in TOP_LEVEL_KINDS:
+        for ent in out[kind]:
+            surviving.update(iter_symbol_ids(ent))
+
+    seen_edges: set[tuple[str, str, str]] = set()
+    edges: list[dict] = []
+    for doc in docs:
+        for e in doc.get("edges", []):
+            if e.get("source") not in surviving:
+                continue
+            key = (e.get("source", ""), e.get("target", ""), e.get("kind", ""))
+            if key in seen_edges:
+                continue
+            seen_edges.add(key)
+            edges.append(e)
+    out["edges"] = edges
 
     return out
 

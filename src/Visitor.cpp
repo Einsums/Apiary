@@ -21,6 +21,8 @@
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Index/USRGeneration.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace apiary {
@@ -537,6 +539,39 @@ std::vector<std::string> collect_bases(clang::CXXRecordDecl const *decl, clang::
     return bases;
 }
 
+// Stable, language-tagged symbol identifier for a declaration: ``c++:`` + the
+// Clang USR. Empty when no USR can be generated (some implicit/anonymous
+// decls). USRs are the same identifiers DocC consumes from symbol graphs, so
+// they are precise and stable across runs and translation units.
+std::string compute_symbol_id(clang::Decl const *decl) {
+    llvm::SmallString<128> buf;
+    if (clang::index::generateUSRForDecl(decl, buf)) {
+        return {}; // declaration should be ignored / no USR
+    }
+    return "c++:" + std::string(buf.str());
+}
+
+// Symbol IDs of a record's public bases, parallel to ``collect_bases``. A base
+// whose type has no resolvable record decl (dependent/external) yields an empty
+// slot so the two vectors stay index-aligned.
+std::vector<std::string> collect_base_ids(clang::CXXRecordDecl const *decl) {
+    std::vector<std::string> ids;
+    if (!decl->hasDefinition()) {
+        return ids;
+    }
+    for (clang::CXXBaseSpecifier const &base : decl->bases()) {
+        if (base.getAccessSpecifier() != clang::AS_public) {
+            continue;
+        }
+        std::string id;
+        if (clang::CXXRecordDecl const *rd = base.getType()->getAsCXXRecordDecl()) {
+            id = compute_symbol_id(rd);
+        }
+        ids.push_back(std::move(id));
+    }
+    return ids;
+}
+
 } // namespace
 
 bool Visitor::has_any_pybind_annotation(clang::Decl const *decl) const {
@@ -637,6 +672,7 @@ bool Visitor::decl_in_module_headers(clang::Decl const *decl) const {
 void Visitor::fill_common(BoundEntityCommon &entity, clang::NamedDecl const *decl) {
     entity.name           = decl->getNameAsString();
     entity.qualified_name = decl->getQualifiedNameAsString();
+    entity.symbol_id      = compute_symbol_id(decl);
     entity.directives     = parse_attached_directives(decl);
     entity.doc            = extract_doc(decl, _context);
     entity.location       = to_ir_location(decl->getLocation(), _context.getSourceManager());
@@ -732,6 +768,7 @@ bool Visitor::TraverseCXXRecordDecl(clang::CXXRecordDecl *decl) {
     cls.is_template          = decl->getDescribedClassTemplate() != nullptr;
     cls.template_param_names = collect_template_param_names(decl);
     cls.bases                = collect_bases(decl, _context);
+    cls.base_ids             = collect_base_ids(decl);
     cls.instantiations       = collect_instantiations(decl, _context, cls.directives, cls.template_param_names, _error_count);
 
     BoundClass *parent = current_class();
@@ -790,6 +827,11 @@ bool Visitor::VisitCXXMethodDecl(clang::CXXMethodDecl *decl) {
     method.is_destructor         = clang::isa<clang::CXXDestructorDecl>(decl);
     method.is_operator           = decl->isOverloadedOperator();
     method.is_deleted            = decl->isDeleted();
+    for (clang::CXXMethodDecl const *overridden : decl->overridden_methods()) {
+        if (std::string id = compute_symbol_id(overridden); !id.empty()) {
+            method.overridden_ids.push_back(std::move(id));
+        }
+    }
     // Member function templates: capture their template parameters so the
     // renderer can emit a ``template <...>`` clause (and so docs collects the
     // param names for nitpick suppression — they are never xref targets).

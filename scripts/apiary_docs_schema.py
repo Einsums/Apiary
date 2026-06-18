@@ -19,11 +19,14 @@ import sys
 from pathlib import Path
 
 # Bump in lockstep with ``k_docs_json_schema_version`` in src/DocsJson.hpp.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # The top-level documentable arrays, in document order. These are the entities
 # that carry ``origin`` and participate in merge/de-dupe/collision detection.
 TOP_LEVEL_KINDS = ("classes", "functions", "enums", "typedefs", "concepts", "macros")
+
+# Nested member arrays of a class that carry their own ``symbol_id``.
+_MEMBER_ARRAYS = ("constructors", "methods", "fields", "enums")
 
 DEFAULT_TOP = "einsums"
 
@@ -84,3 +87,19 @@ def py_identity(entity: dict, top: str) -> tuple[str, str]:
     """Cross-origin collision key: the Python-visible identity of an entity —
     the dotted module it lands in plus the Python name it binds under."""
     return (full_module(entity, top), entity.get("py_name") or entity.get("name", ""))
+
+
+def iter_symbol_ids(entity: dict):
+    """Yield the symbol_id of an entity and of every nested member that carries
+    one (class members + nested classes, recursively). Used by the merge stage
+    to drop relationship edges whose source was removed by collision resolution."""
+    sid = entity.get("symbol_id")
+    if sid:
+        yield sid
+    for arr in _MEMBER_ARRAYS:
+        for m in entity.get(arr, []):
+            ms = m.get("symbol_id")
+            if ms:
+                yield ms
+    for nested in entity.get("nested_classes", []):
+        yield from iter_symbol_ids(nested)

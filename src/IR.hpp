@@ -54,6 +54,16 @@ struct BoundEntityCommon {
     std::string    name;
     /// Fully qualified name, e.g. ``::ns::Class::method``.
     std::string    qualified_name;
+    /// @brief Stable, language-tagged symbol identifier (docs graph).
+    ///
+    /// ``c++:<USR>`` for C++ entities (the Clang USR from
+    /// ``clang::index::generateUSRForDecl``); the static Python frontend
+    /// emits ``py:<dotted-name>``. This is the primary identity used by the
+    /// docs graph's relationship edges and (Phase 2) reference resolution —
+    /// distinct from ``qualified_name`` (human-readable) and the Python-visible
+    /// ``(submodule, py_name)`` identity (cross-origin collision). Empty when
+    /// no USR could be generated (e.g. some implicit decls).
+    std::string    symbol_id;
     /// Annotation directives attached to this entity.
     DirectiveList  directives;
     /// Raw doxygen text, or empty.
@@ -138,6 +148,10 @@ struct BoundMethod : BoundEntityCommon {
     bool                     is_operator     = false;
     /// True if this method is deleted (`= delete`).
     bool                     is_deleted      = false;
+    /// Symbol IDs of the methods this one directly overrides (from
+    /// ``CXXMethodDecl::overridden_methods``). Source of the docs graph's
+    /// ``overrides`` edges. Empty for non-overriding methods.
+    std::vector<std::string> overridden_ids;
 
     /// @brief Whether the last parameter is a variadic pack (set by APIARY_VARIADIC_FROM).
     ///
@@ -281,6 +295,11 @@ struct BoundClass : BoundEntityCommon {
     std::vector<std::string>        template_param_names;
     /// Base class names.
     std::vector<std::string>        bases;
+    /// Symbol IDs of the public base classes, parallel to ``bases``. Each is
+    /// the base's ``c++:<USR>`` (empty when the base type has no resolvable
+    /// record, e.g. a dependent or external base). Source of the docs graph's
+    /// ``inheritsFrom`` edges.
+    std::vector<std::string>        base_ids;
     /// Bound constructors.
     std::vector<BoundMethod>        ctors;
     /// Bound methods.
