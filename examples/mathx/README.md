@@ -70,8 +70,8 @@ the build, add `--strict` to the `apiary_doc_lint.py --check-links` step.
 
 ## The pipeline, by hand
 
-The CMake target is just these steps; you can run them directly against an
-in-tree Apiary build:
+Not using CMake? Emit the C++ fragment once (it needs the compiler flags), then
+let the one-command driver do extract → merge → check-links → render:
 
 ```bash
 APIARY=/path/to/apiary-build           # contains the `apiary` binary + scripts/
@@ -79,8 +79,13 @@ S=$APIARY/../scripts                    # or the installed share/apiary/scripts
 
 $APIARY/apiary --emit-docs-json --module mathx include/mathx/Vec.hpp \
     -- -std=c++20 -I/path/to/apiary/include > cpp.docs.json
-python3 $S/apiary_py_extract.py --package mathx --package-dir python/mathx \
-    --source-root . -o py.docs.json
-python3 $S/apiary_merge_docs_json.py -o docs.json cpp.docs.json py.docs.json
-python3 $S/apiary_render_docs_rst.py --outdir docs --content-dir content docs.json
+
+python3 $S/apiary_docs.py --outdir docs \
+    --package mathx --package-dir python/mathx --source-root . \
+    --cpp-docs cpp.docs.json --content-dir content --check-links
 ```
+
+`apiary_docs.py` is a thin wrapper over the individual stages
+(`apiary_py_extract.py` → `apiary_merge_docs_json.py` →
+`apiary_render_docs_rst.py`, plus `apiary_doc_lint.py --check-links`); run them
+separately if you need finer control.

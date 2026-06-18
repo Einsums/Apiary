@@ -328,4 +328,15 @@ assert_eq "good file survives a bad sibling" "$(jget "${WORK}/bad.json" "[f['nam
 assert_contains "${WORK}/bad.err" "skipping.*oops\.py"
 echo "ok: robustness (skip unparseable file)"
 
+# ── 10. One-command driver (apiary_docs.py) ──────────────────────────────────
+# extract -> merge -> check-links -> render, in a single invocation.
+DRIVE="${WORK}/drive"
+"${PY}" "${SCRIPTS_DIR}/apiary_docs.py" --outdir "${DRIVE}" \
+    --package einsums --package-dir "${PKG_DIR}" --source-root "${REPO_DIR}" \
+    --cpp-docs "${CPP_FRAG}" --content-dir "${FIXTURE_DIR}/pypkg_content" --check-links 2>/dev/null
+[[ -f "${DRIVE}/docs.json" ]] || fail "driver produced no merged docs.json"
+assert_contains "${DRIVE}/einsums.linalg.rst" "py:class:: Decomposition"
+assert_contains "${DRIVE}/index.rst" "^Modules$"
+echo "ok: one-command driver"
+
 echo "PASS: run_py_extract"
