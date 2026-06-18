@@ -83,6 +83,9 @@ Value json_availability(std::string const &raw) {
     return Object{
         {"since", dc.since.empty() ? Value(nullptr) : Value(dc.since)},
         {"deprecated", dc.deprecated},
+        // Doxygen's @deprecated carries no standard version, so the C++ frontend
+        // leaves this null; the Python frontend fills it from ``.. deprecated:: <v>``.
+        {"deprecated_since", Value(nullptr)},
         {"deprecated_note", dc.deprecated_note.empty() ? Value(nullptr) : Value(dc.deprecated_note)},
     };
 }

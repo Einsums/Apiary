@@ -277,7 +277,7 @@ def _location(file: Path, node: ast.AST) -> dict:
 
 # Sphinx availability directives in a docstring.
 _VERSIONADDED_RE = re.compile(r"^\s*\.\.\s+versionadded::\s*(\S+)", re.M)
-_DEPRECATED_RE = re.compile(r"^\s*\.\.\s+deprecated::", re.M)
+_DEPRECATED_RE = re.compile(r"^\s*\.\.\s+deprecated::\s*(\S+)?", re.M)
 _AVAIL_DIRECTIVE_RE = re.compile(r"^(\s*)\.\.\s+(versionadded|deprecated)::.*$")
 
 
@@ -325,12 +325,16 @@ def availability(node, raw: str | None) -> dict:
     C++ frontend fills the same shape from ``@since`` / ``@deprecated``."""
     deprecated, note = _deprecated_decorator(node)
     text = raw or ""
-    if _DEPRECATED_RE.search(text):
+    deprecated_since = None
+    dep = _DEPRECATED_RE.search(text)
+    if dep:
         deprecated = True
+        deprecated_since = dep.group(1) or None
     added = _VERSIONADDED_RE.search(text)
     return {
         "since": added.group(1) if added else None,
         "deprecated": bool(deprecated),
+        "deprecated_since": deprecated_since,
         "deprecated_note": note,
     }
 

@@ -19,6 +19,7 @@ def gesv(a, b):
     """Solve a linear system (legacy LAPACK-style name).
 
     .. versionadded:: 0.1.0
+    .. deprecated:: 0.5.0
     """
     return solve(a, b)
 
@@ -120,6 +121,7 @@ class Decomposition:
         return Decomposition()
 
     @classmethod
+    @deprecated("Construct the relevant subclass directly.")
     def from_kind(cls, kind: str) -> Decomposition:
         """Construct a decomposition selecting the algorithm by ``kind``."""
         return cls(kind)

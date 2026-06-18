@@ -539,14 +539,20 @@ function(apiary_aggregate_extension)
         add_custom_command(
             OUTPUT ${_dstamp}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_DOCS_OUTDIR}"
+            # Report unresolved [[ ]] symbol links over the whole merged graph.
+            # ``unresolved-reference`` is a warning, so this prints diagnostics
+            # without failing the build; add --strict in CI to make it fatal.
+            COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_doc_lint.py"
+                    --check-links --select unresolved-reference "${_merged}"
             COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_render_docs_rst.py"
                     --outdir "${_A_DOCS_OUTDIR}" ${_content_flag} "${_merged}"
             COMMAND ${CMAKE_COMMAND} -E touch ${_dstamp}
             DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_render_docs_rst.py"
                     "${APIARY_SCRIPTS_DIR}/apiary_docs_schema.py"
                     "${APIARY_SCRIPTS_DIR}/apiary_docs_resolve.py"
+                    "${APIARY_SCRIPTS_DIR}/apiary_doc_lint.py"
                     "${APIARY_SCRIPTS_DIR}/apiary_curation.py" ${_merged} ${_content_deps}
-            COMMENT "apiary: rendering Python API reference into ${_A_DOCS_OUTDIR}"
+            COMMENT "apiary: checking links + rendering Python API reference into ${_A_DOCS_OUTDIR}"
             VERBATIM
         )
         add_custom_target(${_A_DOCS_TARGET} DEPENDS ${_dstamp})

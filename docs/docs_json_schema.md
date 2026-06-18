@@ -113,6 +113,7 @@ Common to every documentable entity:
   "availability": {                            // v4 — see "Availability"
     "since": "1.2.0" | null,
     "deprecated": false,
+    "deprecated_since": "1.5.0" | null,
     "deprecated_note": "..." | null
   }
 }
@@ -123,9 +124,12 @@ Common to every documentable entity:
 `availability` is filled from `@since` / `@deprecated` (C++ Doxygen) and from a
 `@deprecated` decorator + `.. versionadded::` / `.. deprecated::` directives
 (Python). Both frontends produce the same shape, so the renderer emits identical
-badges: a `.. versionadded::` for `since` and a *Deprecated* admonition (with the
-migration note) for `deprecated`. The producing frontend strips the lifted
-directive from the prose so it is not rendered twice.
+badges: a `.. versionadded::` for `since`; and for `deprecated`, the proper
+`.. deprecated:: <version>` directive when `deprecated_since` is known, else a
+*Deprecated* admonition — both carrying the migration note. `deprecated_since`
+comes from Python's `.. deprecated:: <ver>`; Doxygen's `@deprecated` has no
+standard version, so the C++ frontend leaves it null. The producing frontend
+strips the lifted directive from the prose so it is not rendered twice.
 
 - **function**: adds `return_type`, `return_type_canonical`, `return_py_type`,
   `params[]`, `is_template`, `template_params[]`, `template_kwargs[]`,
@@ -220,6 +224,10 @@ layers two things on top of the generated pages:
   group whose ``[[ ]]`` links name the symbols to render there, in order.
   Symbols no topic lists still render, auto-grouped by kind, so nothing
   silently disappears.
+- **Type curation** — a file whose stem is a documented class path
+  (``einsums.linalg.Decomposition.md``). Its prose is prepended to the class
+  body, and each ``### Group`` under ``## Topics`` renders the named members
+  under a ``.. rubric::`` heading inside the class; uncurated members follow.
 - **Articles** — any other ``.md`` file: a free-standing page (overview, guide)
   added to the index toctree under a *Guides* caption.
 

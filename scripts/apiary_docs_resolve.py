@@ -78,6 +78,7 @@ class Resolver:
         self.top = top
         self.by_path: dict[str, Entry] = {}
         self.by_short: dict[str, list[Entry]] = {}
+        self.by_symbol: dict[str, str] = {}  # symbol_id -> doc path
 
     # ── building ─────────────────────────────────────────────────────────────
 
@@ -87,7 +88,17 @@ class Resolver:
         # ambiguity can be detected.
         self.by_path.setdefault(path, entry)
         self.by_short.setdefault(path.rsplit(".", 1)[-1], []).append(entry)
+        if symbol_id:
+            self.by_symbol.setdefault(symbol_id, path)
         return path
+
+    def path_for_symbol(self, symbol_id: str) -> str | None:
+        """The doc path of an entity by its symbol_id (for type-curation lookup)."""
+        return self.by_symbol.get(symbol_id)
+
+    def class_paths(self) -> set[str]:
+        """Doc paths of every class — the stems a type-curation file may target."""
+        return {e.target for e in self.by_path.values() if e.kind == "class"}
 
     def _path(self, entity: dict, parent: str | None) -> str:
         pyname = entity.get("py_name") or entity.get("name", "")

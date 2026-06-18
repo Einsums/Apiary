@@ -158,6 +158,7 @@ echo "ok: symbol IDs + relationship edges"
 gesv="[f for f in d['functions'] if f['name']=='gesv'][0]"
 assert_eq "gesv since"      "$(jget "${PY_FRAG}" "${gesv}['availability']['since']")" "0.1.0"
 assert_eq "gesv deprecated" "$(jget "${PY_FRAG}" "${gesv}['availability']['deprecated']")" "True"
+assert_eq "gesv deprecated_since" "$(jget "${PY_FRAG}" "${gesv}['availability']['deprecated_since']")" "0.5.0"
 assert_eq "gesv note"       "$(jget "${PY_FRAG}" "${gesv}['availability']['deprecated_note']")" "Use solve() instead."
 # The lifted directive is removed from the prose (rendered from the field instead).
 assert_eq "versionadded stripped from detail" "$(jget "${PY_FRAG}" "'versionadded' in ${gesv}['doc_structured']['detail']")" "False"
@@ -212,8 +213,11 @@ assert_contains "${RST_DIR}/einsums.linalg.rst" "NoSuchSymbol"
 assert_absent   "${RST_DIR}/einsums.linalg.rst" "\[\["
 # Phase-4 availability badges (rendered once, from the structured field).
 assert_contains "${RST_DIR}/einsums.linalg.rst" "versionadded:: 0.1.0"
-assert_contains "${RST_DIR}/einsums.linalg.rst" "admonition:: Deprecated"
 assert_contains "${RST_DIR}/einsums.linalg.rst" "Use solve\(\) instead\."
+# N1: a known deprecation version uses the proper Sphinx directive; a
+# version-less deprecation (Decomposition.from_kind) uses the admonition.
+assert_contains "${RST_DIR}/einsums.linalg.rst" "\.\. deprecated:: 0.5.0"
+assert_contains "${RST_DIR}/einsums.linalg.rst" "admonition:: Deprecated"
 [[ "$(grep -c "versionadded:: 0.1.0" "${RST_DIR}/einsums.linalg.rst")" == "1" ]] || fail "versionadded rendered more than once"
 # Phase-5 navigation: a per-page Summary of link-rich entries with briefs.
 assert_contains "${RST_DIR}/einsums.linalg.rst" "^Summary$"
@@ -266,7 +270,12 @@ assert_contains "${RST_CUR}/index.rst" ":caption: Guides"
 assert_contains "${RST_CUR}/index.rst" "getting-started"
 # Coverage diagnostic: an uncurated documented symbol is reported.
 assert_contains "${WORK}/coverage.err" "'norm' is documented but not curated"
-echo "ok: curation + articles + coverage"
+# N3: per-type curation — the class's own ## Topics render members under
+# .. rubric:: headings, with an authored type overview prepended.
+assert_contains "${RST_CUR}/einsums.linalg.rst" "An authored type overview for the decomposition helper"
+assert_contains "${RST_CUR}/einsums.linalg.rst" "rubric:: Factoring"
+assert_contains "${RST_CUR}/einsums.linalg.rst" "rubric:: Construction"
+echo "ok: curation + articles + coverage + per-type rubrics"
 
 # ── 8. Navigation: index Modules overview ────────────────────────────────────
 # The index leads with a Modules overview: a :doc: link per module plus a

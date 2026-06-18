@@ -41,6 +41,10 @@ from apiary_docs_resolve import build_resolver, rewrite_links
 # links in doc text into reST py-domain cross-references. None until built.
 RESOLVER = None
 
+# Per-type curation (class doc path -> TypeCuration), set in main() from the
+# content dir. Empty when no --content-dir or no type files.
+TYPE_CURATIONS: dict = {}
+
 
 def md(text: str) -> str:
     """Apply docs-graph link rewriting to a doc-text fragment, if a resolver is
@@ -82,10 +86,18 @@ def availability_lines(entity: dict, indent: str) -> list[str]:
     if a.get("since"):
         out += ["", f"{indent}.. versionadded:: {a['since']}", ""]
     if a.get("deprecated"):
-        out += ["", f"{indent}.. admonition:: Deprecated", f"{indent}{IND}:class: warning", ""]
         note = (a.get("deprecated_note") or "").strip()
-        if note:
-            out += [f"{indent}{IND}{md(note)}", ""]
+        if a.get("deprecated_since"):
+            # A known version -> the proper Sphinx ``.. deprecated:: <ver>``.
+            out += ["", f"{indent}.. deprecated:: {a['deprecated_since']}"]
+            if note:
+                out += ["", f"{indent}{IND}{md(note)}"]
+            out += [""]
+        else:
+            # No version -> a plain Deprecated admonition.
+            out += ["", f"{indent}.. admonition:: Deprecated", f"{indent}{IND}:class: warning", ""]
+            if note:
+                out += [f"{indent}{IND}{md(note)}", ""]
     return out
 
 
@@ -375,10 +387,25 @@ def class_py_names(cls: dict) -> list[str]:
     return [cls.get("py_name") or cls["name"]]
 
 
+def _method_directive(members: list[dict]) -> str:
+    return "staticmethod" if members[0].get("is_static") else "method"
+
+
 def render_class(out: list[str], cls: dict) -> None:
+    # Per-type curation (a class's own ## Topics), keyed by the class doc path.
+    type_cur = None
+    if TYPE_CURATIONS and RESOLVER is not None and cls.get("symbol_id"):
+        type_cur = TYPE_CURATIONS.get(RESOLVER.path_for_symbol(cls["symbol_id"]))
+
     for cname in class_py_names(cls):
         out.append(f".. py:class:: {cname}")
         emit_doc(out, cls, IND, with_params=False)
+        # Authored type overview, prepended to the class body.
+        if type_cur is not None and type_cur.overview.strip():
+            out.append("")
+            for line in md(type_cur.overview).split("\n"):
+                out.append(f"{IND}{line}".rstrip())
+            out.append("")
         out.extend(availability_lines(cls, IND))
         out.extend(source_link_lines(cls, IND))
         out.append("")
@@ -393,9 +420,29 @@ def render_class(out: list[str], cls: dict) -> None:
                 continue
             for name in entity_py_names(m):
                 method_groups.setdefault(name, []).append(m)
+
+        # Curated member topics first, each under a ``.. rubric::`` heading.
+        used: set[str] = set()
+        if type_cur is not None and type_cur.topics and RESOLVER is not None:
+            for topic in type_cur.topics:
+                names = []
+                for token in topic.tokens:
+                    entry = RESOLVER.resolve(token)
+                    nm = entry.target.rsplit(".", 1)[-1] if entry else None
+                    if nm in method_groups and nm not in used and nm not in names:
+                        names.append(nm)
+                if not names:
+                    continue
+                out.append(f"{IND}.. rubric:: {topic.title}")
+                out.append("")
+                for nm in names:
+                    emit_overload_set(out, IND, _method_directive(method_groups[nm]), nm, method_groups[nm])
+                    used.add(nm)
+
         for name, members in method_groups.items():
-            directive = "staticmethod" if members[0].get("is_static") else "method"
-            emit_overload_set(out, IND, directive, name, members)
+            if name in used:
+                continue
+            emit_overload_set(out, IND, _method_directive(members), name, members)
         for p in cls.get("properties", []):
             render_attribute(out, p["py_name"], p.get("py_type", ""), p, p.get("writable", False))
         for f in cls.get("fields", []):
@@ -678,11 +725,14 @@ def main() -> int:
         for e in g["enums"]:
             KNOWN_TYPES.add(e.get("py_name") or e["name"])
 
-    # Authored content (optional): per-module curation + free-standing articles.
+    # Authored content (optional): per-module curation, per-type curation, and
+    # free-standing articles.
     curations: dict = {}
     articles: list = []
     if args.content_dir:
-        curations, articles = load_content(args.content_dir, set(groups))
+        global TYPE_CURATIONS
+        curations, TYPE_CURATIONS, articles = load_content(
+            args.content_dir, set(groups), RESOLVER.class_paths())
         report_coverage(curations, groups, top)
 
     outdir = Path(args.outdir)

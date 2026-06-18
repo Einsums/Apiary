@@ -57,6 +57,18 @@ class ModuleCuration:
 
 
 @dataclass
+class TypeCuration:
+    """Curation for a single class: overview prepended to its doc, plus member
+    topic groups rendered under ``.. rubric::`` headings inside the class."""
+    type_path: str
+    overview: str = ""
+    topics: list[TopicGroup] = field(default_factory=list)
+
+    def curated_tokens(self) -> list[str]:
+        return [t for g in self.topics for t in g.tokens]
+
+
+@dataclass
 class Article:
     slug: str       # page name (filename stem)
     title: str
@@ -88,21 +100,21 @@ def _is_topics_header(line: str) -> bool:
     return bool(h and h[0] == 2 and h[1].strip().lower() == "topics")
 
 
-def parse_module_curation(module: str, text: str) -> ModuleCuration:
+def _parse_curation_body(text: str) -> tuple[str, list[TopicGroup]]:
+    """Shared parse for module and type curation: overview prose + topic groups."""
     lines = text.splitlines()
 
     # Split at the ``## Topics`` header: prose before, topic groups after.
     topics_at = next((i for i, ln in enumerate(lines) if _is_topics_header(ln)), len(lines))
     prose_lines = lines[:topics_at]
 
-    # Drop a leading level-1 title — the renderer supplies the page heading.
+    # Drop a leading level-1 title — the renderer supplies the heading.
     while prose_lines and not prose_lines[0].strip():
         prose_lines.pop(0)
     if prose_lines and (_heading(prose_lines[0]) or (0, ""))[0] == 1:
         prose_lines.pop(0)
 
-    cur = ModuleCuration(module=module, overview=_to_rest(prose_lines))
-
+    topics: list[TopicGroup] = []
     group: TopicGroup | None = None
     for line in lines[topics_at + 1:]:
         h = _heading(line)
@@ -110,11 +122,21 @@ def parse_module_curation(module: str, text: str) -> ModuleCuration:
             break  # next top-level section ends the Topics block
         if h and h[0] == 3:
             group = TopicGroup(title=h[1].strip())
-            cur.topics.append(group)
+            topics.append(group)
             continue
         if group is not None:
             group.tokens.extend(find_links(line))
-    return cur
+    return _to_rest(prose_lines), topics
+
+
+def parse_module_curation(module: str, text: str) -> ModuleCuration:
+    overview, topics = _parse_curation_body(text)
+    return ModuleCuration(module=module, overview=overview, topics=topics)
+
+
+def parse_type_curation(type_path: str, text: str) -> TypeCuration:
+    overview, topics = _parse_curation_body(text)
+    return TypeCuration(type_path=type_path, overview=overview, topics=topics)
 
 
 def parse_article(slug: str, text: str) -> Article:
@@ -130,19 +152,23 @@ def parse_article(slug: str, text: str) -> Article:
     return Article(slug=slug, title=title, body=_to_rest(body_lines))
 
 
-def load_content(content_dir: str, known_modules: set[str]) -> tuple[dict[str, ModuleCuration], list[Article]]:
-    """Load a content directory: (module -> ModuleCuration, [Article]).
+def load_content(content_dir: str, known_modules: set[str],
+                 known_types: set[str] = frozenset()) -> tuple[dict[str, ModuleCuration], dict[str, TypeCuration], list[Article]]:
+    """Load a content directory: (module curations, type curations, articles).
 
-    A ``.md`` whose stem is a documented module is curation; every other ``.md``
-    is an article."""
-    curations: dict[str, ModuleCuration] = {}
+    A ``.md`` whose stem is a documented module is module curation; whose stem is
+    a documented class path is type curation; every other ``.md`` is an article."""
+    module_curations: dict[str, ModuleCuration] = {}
+    type_curations: dict[str, TypeCuration] = {}
     articles: list[Article] = []
     root = Path(content_dir)
     for path in sorted(root.rglob("*.md")):
         text = path.read_text()
         stem = path.stem
         if stem in known_modules:
-            curations[stem] = parse_module_curation(stem, text)
+            module_curations[stem] = parse_module_curation(stem, text)
+        elif stem in known_types:
+            type_curations[stem] = parse_type_curation(stem, text)
         else:
             articles.append(parse_article(stem, text))
-    return curations, articles
+    return module_curations, type_curations, articles
