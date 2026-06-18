@@ -217,6 +217,14 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
         )
+        # The examples/mathx docs pipeline end to end (C++ + Python frontends ->
+        # merge -> render with content). Needs the binary; the Python pipeline
+        # runs the bundled scripts.
+        add_test(NAME apiary_example_mathx
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_example_mathx.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
     endif()
     # apiary_doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,
     # so it needs no apiary binary — it diffs diagnostics for a seeded-drift

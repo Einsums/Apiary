@@ -106,7 +106,12 @@ class Resolver:
 
     def _add_class(self, cls: dict, parent: str | None) -> None:
         path = self._add(self._path(cls, parent), "class", cls.get("symbol_id", ""))
-        for m in cls.get("constructors", []) + cls.get("methods", []):
+        # Constructors are the Python ``__init__``, not a member named after the
+        # class — indexing them under the class name would shadow the class
+        # itself in short-name / suffix resolution.
+        for m in cls.get("constructors", []):
+            self._add(f"{path}.__init__", "method", m.get("symbol_id", ""))
+        for m in cls.get("methods", []):
             self._add(self._path(m, path), "method", m.get("symbol_id", ""))
         for p in cls.get("properties", []):
             self._add(self._path(p, path), "attribute", p.get("symbol_id", ""))

@@ -407,6 +407,54 @@ function(apiary_add_bindings)
     endif()
 endfunction()
 
+# Emit a docs-JSON fragment for a package's hand-written pure-Python layer, via
+# the static Python frontend (apiary_py_extract.py — stdlib ``ast`` only, no
+# import). The fragment is in the same schema as apiary_add_bindings' DOCS_JSON,
+# so it folds into the same merge: pass it to apiary_aggregate_extension as
+# PY_DOCS_JSON alongside the C++ DOCS_JSON.
+#
+#   apiary_add_python_docs(
+#       PACKAGE     <name>        # top package import name (-> document "module")
+#       PACKAGE_DIR <dir>         # the package directory (contains __init__.py)
+#       SOURCE_ROOT <dir>         # optional: record location.file relative to this
+#                                 #           (e.g. the repo root, for clean source links)
+#       OUTPUT      <file>        # fragment path (default <bindir>/<package>.py.docs.json)
+#       OUT_PY_DOCS_JSON <var>    # set to the fragment path in the caller's scope
+#   )
+function(apiary_add_python_docs)
+    cmake_parse_arguments(_A "" "PACKAGE;PACKAGE_DIR;SOURCE_ROOT;OUTPUT;OUT_PY_DOCS_JSON" "" ${ARGN})
+    if(NOT _A_PACKAGE OR NOT _A_PACKAGE_DIR)
+        message(FATAL_ERROR "apiary_add_python_docs: PACKAGE and PACKAGE_DIR are required")
+    endif()
+    if(NOT _A_OUTPUT)
+        set(_A_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${_A_PACKAGE}.py.docs.json")
+    endif()
+    if(NOT Python_EXECUTABLE)
+        find_package(Python COMPONENTS Interpreter REQUIRED)
+    endif()
+
+    set(_root_flag "")
+    if(_A_SOURCE_ROOT)
+        set(_root_flag --source-root "${_A_SOURCE_ROOT}")
+    endif()
+    # Re-extract whenever any .py under the package changes.
+    file(GLOB_RECURSE _py_deps CONFIGURE_DEPENDS "${_A_PACKAGE_DIR}/*.py")
+    get_filename_component(_outdir "${_A_OUTPUT}" DIRECTORY)
+    add_custom_command(
+        OUTPUT ${_A_OUTPUT}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_outdir}"
+        COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_py_extract.py"
+                --package "${_A_PACKAGE}" --package-dir "${_A_PACKAGE_DIR}"
+                ${_root_flag} --output "${_A_OUTPUT}"
+        DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_py_extract.py" ${_py_deps}
+        COMMENT "apiary: extracting Python docs for package ${_A_PACKAGE}"
+        VERBATIM
+    )
+    if(_A_OUT_PY_DOCS_JSON)
+        set(${_A_OUT_PY_DOCS_JSON} "${_A_OUTPUT}" PARENT_SCOPE)
+    endif()
+endfunction()
+
 # Assemble per-module bindings into one Python extension.
 #
 #   apiary_aggregate_extension(
