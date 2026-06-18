@@ -225,6 +225,20 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
         )
+        # Sphinx build-check: the rendered Python API reST must build with
+        # ``sphinx-build -W -n`` (warnings = errors, nitpicky xrefs). Only
+        # registered when sphinx-build is available (CI installs it); skipped
+        # otherwise so the suite still runs without Sphinx.
+        find_program(APIARY_SPHINX_BUILD sphinx-build)
+        if(APIARY_SPHINX_BUILD)
+            add_test(NAME apiary_sphinx_check
+                COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_sphinx_check.sh"
+                        "$<TARGET_FILE:apiary>"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                        "${APIARY_SPHINX_BUILD}"
+                        "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
+            )
+        endif()
     endif()
     # apiary_doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,
     # so it needs no apiary binary — it diffs diagnostics for a seeded-drift
