@@ -468,6 +468,9 @@ endfunction()
 #       # optional .pyi aggregation:
 #       STUBS <pyi...>  STUBS_TARGET <name>  FRAG_DIR <d>  PKG_DIR <d>
 #       PY_HELPERS_DIR <d>  PY_HELPER_DEPENDS <file...>
+#       # optional consumer-provided overlay for runtime-patched members the
+#       # codegen can't see (content + target-class regex are the caller's):
+#       STUB_OVERLAY <file.pyi>  STUB_OVERLAY_CLASS_REGEX <regex>
 #       # optional docs render (built on demand, not part of ALL):
 #       DOCS_JSON <json...>      # C++-frontend docs-JSON fragments
 #       PY_DOCS_JSON <json...>   # static-Python-frontend fragments (apiary_py_extract.py)
@@ -486,7 +489,7 @@ endfunction()
 # (on-demand) targets using Apiary's bundled scripts (APIARY_SCRIPTS_DIR).
 function(apiary_aggregate_extension)
     cmake_parse_arguments(_A ""
-        "NAME;MAIN;REGISTER_PREFIX;MODULES_HEADER;MODULES_INCLUDE_DIR;STUBS_TARGET;FRAG_DIR;PKG_DIR;PY_HELPERS_DIR;DOCS_TARGET;DOCS_OUTDIR;DOCS_CONTENT_DIR"
+        "NAME;MAIN;REGISTER_PREFIX;MODULES_HEADER;MODULES_INCLUDE_DIR;STUBS_TARGET;FRAG_DIR;PKG_DIR;PY_HELPERS_DIR;STUB_OVERLAY;STUB_OVERLAY_CLASS_REGEX;DOCS_TARGET;DOCS_OUTDIR;DOCS_CONTENT_DIR"
         "MODULES;BINDINGS;STUBS;PY_HELPER_DEPENDS;DOCS_JSON;PY_DOCS_JSON" ${ARGN})
 
     foreach(_req NAME MAIN MODULES_HEADER)
@@ -541,14 +544,25 @@ function(apiary_aggregate_extension)
     # 3. .pyi aggregation (ALL) — optional.
     if(_A_STUBS_TARGET)
         set(_stamp "${_A_FRAG_DIR}/.stubs.stamp")
+        # Optional consumer-provided stub overlay (e.g. runtime-patched
+        # ergonomics the C++ codegen can't see). Apiary stays generic: the
+        # overlay content + the target-class regex come from the caller.
+        set(_overlay_args "")
+        if(_A_STUB_OVERLAY)
+            list(APPEND _overlay_args --overlay "${_A_STUB_OVERLAY}")
+        endif()
+        if(_A_STUB_OVERLAY_CLASS_REGEX)
+            list(APPEND _overlay_args --overlay-class-regex "${_A_STUB_OVERLAY_CLASS_REGEX}")
+        endif()
         add_custom_command(
             OUTPUT ${_stamp}
             COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py"
                     --frag-dir "${_A_FRAG_DIR}"
                     --pkg-dir "${_A_PKG_DIR}"
                     --py-helpers-dir "${_A_PY_HELPERS_DIR}"
+                    ${_overlay_args}
             COMMAND ${CMAKE_COMMAND} -E touch ${_stamp}
-            DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py" ${_A_STUBS} ${_A_PY_HELPER_DEPENDS}
+            DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py" ${_A_STUBS} ${_A_PY_HELPER_DEPENDS} ${_A_STUB_OVERLAY}
             COMMENT "apiary: aggregating .pyi stubs into ${_A_PKG_DIR}"
             VERBATIM
         )
