@@ -14,7 +14,7 @@
 #                          ``if(TARGET apiary::apiary)`` before use.
 #   apiary_detect_toolchain() and the other apiary_* helper functions
 #   APIARY_SCRIPTS_DIR   - directory of the bundled Python scripts
-#                          (aggregate_stubs.py, render_cpp_rst.py, render_docs_rst.py)
+#                          (apiary_aggregate_stubs.py, apiary_render_cpp_rst.py, apiary_render_docs_rst.py)
 
 @PACKAGE_INIT@
 

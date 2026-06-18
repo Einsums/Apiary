@@ -217,12 +217,20 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
         )
     endif()
-    # doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,
+    # apiary_doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,
     # so it needs no apiary binary — it diffs diagnostics for a seeded-drift
     # fixture against a golden. Prefer a CMake-found interpreter, else python3.
     find_package(Python COMPONENTS Interpreter QUIET)
     add_test(NAME apiary_doc_lint
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_doc_lint.sh"
+                "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
+    )
+    # Static Python frontend: apiary_py_extract.py -> apiary_merge_docs_json.py ->
+    # apiary_render_docs_rst.py. Pure Python (a committed C++-origin fragment fixture
+    # stands in for the C++ tool), so it runs without the apiary binary. Asserts
+    # on the structured docs.json plus one loose end-to-end .rst presence check.
+    add_test(NAME apiary_py_extract
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_py_extract.sh"
                 "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
     )
 endif()

@@ -1,0 +1,53 @@
+{
+  "schema_version": 3,
+  "module": "einsums",
+  "classes": [],
+  "functions": [
+    {
+      "name": "lu",
+      "origin": "cpp",
+      "py_name": "lu",
+      "hidden": false,
+      "qualified_name": "einsums::linalg::lu",
+      "doc": "LU-decompose a tensor.",
+      "doc_structured": {"brief": "LU-decompose a tensor.", "detail": "", "params": [], "tparams": [], "returns": "", "throws": []},
+      "location": {"file": "libs/Einsums/LinearAlgebra/include/Einsums/LinearAlgebra.hpp", "line": 100, "column": 1},
+      "submodule": "einsums.linalg",
+      "directives": [],
+      "return_type": "Tensor",
+      "return_type_canonical": "einsums::Tensor",
+      "return_py_type": "Tensor",
+      "params": [],
+      "is_template": false,
+      "template_params": [],
+      "template_kwargs": [],
+      "instantiations": [],
+      "python_overloads": []
+    },
+    {
+      "name": "solve",
+      "origin": "cpp",
+      "py_name": "solve",
+      "hidden": false,
+      "qualified_name": "einsums::linalg::solve",
+      "doc": "Solve a linear system (bound C++ overload).",
+      "doc_structured": {"brief": "Solve a linear system (bound C++ overload).", "detail": "", "params": [], "tparams": [], "returns": "", "throws": []},
+      "location": {"file": "libs/Einsums/LinearAlgebra/include/Einsums/LinearAlgebra.hpp", "line": 120, "column": 1},
+      "submodule": "einsums.linalg",
+      "directives": [],
+      "return_type": "Tensor",
+      "return_type_canonical": "einsums::Tensor",
+      "return_py_type": "Tensor",
+      "params": [],
+      "is_template": false,
+      "template_params": [],
+      "template_kwargs": [],
+      "instantiations": [],
+      "python_overloads": []
+    }
+  ],
+  "enums": [],
+  "typedefs": [],
+  "concepts": [],
+  "macros": []
+}

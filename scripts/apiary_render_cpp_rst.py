@@ -15,7 +15,7 @@ work, and the warnings disappear.
 
 Usage::
 
-    render_cpp_rst.py --title "Einsums/BLASVendor/Vendor.hpp" \
+    apiary_render_cpp_rst.py --title "Einsums/BLASVendor/Vendor.hpp" \
                       --output Vendor.rst  module.cpp-docs.json
 """
 

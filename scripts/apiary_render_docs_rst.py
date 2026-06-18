@@ -3,36 +3,37 @@
 # Copyright (c) The Einsums Developers. All rights reserved.
 # Licensed under the MIT License. See LICENSE.txt in the project root for license information.
 # ----------------------------------------------------------------------------------------------
-"""Render the Python API reference (reStructuredText) from apiary docs JSON.
+"""Render the Python API reference (reStructuredText) from the merged docs JSON.
 
-This is the renderer half of "Option 1" of the custom doc-tool plan: the C++
-tool emits a faithful description of the Python-facing surface
-(``apiary --emit-docs-json``); this script turns one or more of those
-JSON documents into Sphinx ``.rst`` reference pages, **grouped by Python
-submodule** (``einsums``, ``einsums.linalg``, ``einsums.graph``, ...).
+This is the pure renderer at the end of the docs pipeline::
 
-The naming authority lives entirely in the C++ tool: every entity already
-carries a resolved ``py_name`` and a ``hidden`` flag, so this renderer never
-re-derives pybind naming rules. It only formats.
+    frontends -> *.docs.json fragments -> apiary_merge_docs_json.py -> apiary_render_docs_rst.py
+
+The merge stage (``apiary_merge_docs_json.py``) has already concatenated every
+frontend's fragments into ONE canonical document, dropped non-surface
+entities, de-duplicated, and resolved cross-origin collisions. This script
+only formats: it buckets the entities by Python submodule (``einsums``,
+``einsums.linalg``, ``einsums.graph``, ...) and writes Sphinx ``.rst`` pages.
+It does NOT re-derive naming, de-dupe, or resolve collisions — every entity
+already carries a resolved ``py_name``, an ``origin``, and a ``location``.
 
 Usage::
 
-    render_docs_rst.py --outdir <dir> module1.docs.json [module2.docs.json ...]
-    apiary --emit-docs-json ... | render_docs_rst.py --outdir <dir> -
+    apiary_render_docs_rst.py --outdir <dir> docs.json
+    apiary_merge_docs_json.py -o - frag1.json frag2.json | apiary_render_docs_rst.py --outdir <dir> -
 
 One ``.rst`` is written per submodule, plus an ``index.rst`` with a toctree.
-The schema this consumes is documented in ``DocsJson.hpp``.
+The schema this consumes is documented in ``docs/docs_json_schema.md``.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+from apiary_docs_schema import DEFAULT_TOP, full_module, load_document
 
 LICENSE_HEADER = """..
     ----------------------------------------------------------------------------------------------
@@ -50,50 +51,59 @@ def log(msg: str) -> None:
     print(f"render_docs_rst: {msg}", file=sys.stderr)
 
 
+# ── Source links ─────────────────────────────────────────────────────────────
+#
+# Populated from CLI in main(): origin ("cpp"/"python") -> a URL template with
+# {file} and {line} placeholders. Source links are synthesized HERE (not in the
+# merge stage) because the link is a render-time string built from location{};
+# the merge layer only carries location{file,line}. Origin-aware: C++ and Python
+# sources can live in different repos, so each origin gets its own template.
+SOURCE_URL_TEMPLATES: dict[str, str] = {}
+
+
+def source_link_lines(entity: dict, indent: str) -> list[str]:
+    """A reST ``[source]`` hyperlink for an entity, or [] when not configured.
+
+    Picks the template by ``origin``; falls back to the ``location.file``
+    extension (``.py`` -> python, else cpp) for entities that don't carry an
+    origin field (e.g. C++ nested methods)."""
+    if not SOURCE_URL_TEMPLATES:
+        return []
+    loc = entity.get("location") or {}
+    file = loc.get("file")
+    if not file:
+        return []
+    tmpl = SOURCE_URL_TEMPLATES.get(entity.get("origin"))
+    if tmpl is None:
+        tmpl = SOURCE_URL_TEMPLATES.get("python" if str(file).endswith(".py") else "cpp")
+    if not tmpl:
+        return []
+    url = tmpl.format(file=file, line=loc.get("line") or 0)
+    return ["", f"{indent}`[source] <{url}>`__", ""]
+
+
 # ── Loading & grouping ──────────────────────────────────────────────────────
+#
+# The heavy lifting (de-dupe, hidden/external dropping, cross-origin collision
+# resolution) happens upstream in apiary_merge_docs_json.py. This renderer expects an
+# already-merged document, so grouping here is pure layout: bucket each entity
+# onto its submodule page. The de-dupe/identity helpers live once in
+# apiary_docs_schema.py.
 
 
 def load_documents(paths: list[str]) -> tuple[str, list[dict]]:
-    """Load every docs-JSON document, returning (top_module, documents)."""
-    docs = []
-    top_module = "einsums"
-    for p in paths:
-        text = sys.stdin.read() if p == "-" else Path(p).read_text()
-        doc = json.loads(text)
-        version = doc.get("schema_version")
-        if version != SCHEMA_VERSION:
-            log(f"warning: {p} has schema_version {version}, expected {SCHEMA_VERSION}")
-        # All modules share the same top-level import name; take the first.
-        top_module = doc.get("module", top_module)
-        docs.append(doc)
+    """Load the merged docs-JSON document(s), returning (top_module, documents).
+
+    Normally a single already-merged file; accepting more than one simply
+    buckets them together (no de-dupe — that is the merge stage's job)."""
+    docs = [load_document(p, prefix="render_docs_rst") for p in paths]
+    top_module = next((d.get("module") for d in docs if d.get("module")), DEFAULT_TOP)
     return top_module, docs
 
 
-def full_module(entity: dict, top: str) -> str:
-    """Resolve the dotted Python module an entity belongs to.
-
-    ``submodule`` is null for the top-level module, or a dotted path that may
-    already include the top module (``einsums.linalg``) or be relative
-    (``linalg``); normalize both forms.
-    """
-    sub = entity.get("submodule")
-    if not sub:
-        return top
-    if sub == top or sub.startswith(top + "."):
-        return sub
-    return f"{top}.{sub}"
-
-
 def group_by_module(top: str, docs: list[dict]) -> dict[str, dict]:
-    """Bucket classes/functions/enums from every document by submodule.
-
-    Skips ``hidden`` entities and ``is_external`` ones (captured from another
-    module's headers purely for name resolution — the owning module's JSON
-    documents them). De-duplicates by ``qualified_name`` so an entity that
-    surfaces in more than one document is described only once.
-    """
+    """Bucket classes/functions/enums onto their submodule pages (layout only)."""
     groups: dict[str, dict] = {}
-    seen: set[tuple[str, str]] = set()
 
     def bucket(mod: str) -> dict:
         return groups.setdefault(mod, {"classes": [], "functions": [], "enums": []})
@@ -101,12 +111,6 @@ def group_by_module(top: str, docs: list[dict]) -> dict[str, dict]:
     for doc in docs:
         for kind in ("classes", "functions", "enums"):
             for ent in doc.get(kind, []):
-                if ent.get("hidden") or ent.get("is_external"):
-                    continue
-                key = (kind, ent.get("qualified_name") or ent.get("name", ""))
-                if key in seen:
-                    continue
-                seen.add(key)
                 bucket(full_module(ent, top))[kind].append(ent)
     return groups
 
@@ -305,6 +309,7 @@ def emit_overload_set(out: list[str], base_indent: str, directive: str, name: st
         out.append(pad + s)
     doc_member = next((m for m in members if entity_has_doc(m)), members[0])
     emit_doc(out, doc_member, base_indent + IND, with_params=True)
+    out.extend(source_link_lines(doc_member, base_indent + IND))
     out.append("")
 
 
@@ -321,6 +326,7 @@ def render_attribute(out: list[str], py_name: str, py_type: str, entity: dict, w
         out.append("")
         out.append(f"{IND}{IND}(read-only)")
         out.append("")
+    out.extend(source_link_lines(entity, IND * 2))
 
 
 def class_py_names(cls: dict) -> list[str]:
@@ -341,6 +347,7 @@ def render_class(out: list[str], cls: dict) -> None:
     for cname in class_py_names(cls):
         out.append(f".. py:class:: {cname}")
         emit_doc(out, cls, IND, with_params=False)
+        out.extend(source_link_lines(cls, IND))
         out.append("")
         ctors = cls.get("constructors", [])
         if ctors:
@@ -371,6 +378,7 @@ def render_enum(out: list[str], en: dict, nested_indent: str = "") -> None:
     name = en.get("py_name") or en["name"]
     out.append(f"{nested_indent}.. py:class:: {name}")
     emit_doc(out, en, nested_indent + IND, with_params=False)
+    out.extend(source_link_lines(en, nested_indent + IND))
     out.append("")
     for v in en.get("enumerators", []):
         out.append(f"{nested_indent}{IND}.. py:attribute:: {v['name']}")
@@ -452,9 +460,20 @@ def render_index(modules: list[str]) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("inputs", nargs="+", help="docs-JSON files (or '-' for stdin)")
+    ap.add_argument("inputs", nargs="+", help="merged docs-JSON file (or '-' for stdin)")
     ap.add_argument("--outdir", required=True, help="directory to write .rst pages into")
+    ap.add_argument("--cpp-source-url-template", default=None,
+                    help="URL template for C++-origin source links, with {file} and {line} "
+                         "placeholders, e.g. 'https://github.com/org/einsums/blob/main/{file}#L{line}'")
+    ap.add_argument("--py-source-url-template", default=None,
+                    help="URL template for Python-origin source links (same placeholders). C++ and "
+                         "Python sources may live in different repos, hence separate templates.")
     args = ap.parse_args()
+
+    if args.cpp_source_url_template:
+        SOURCE_URL_TEMPLATES["cpp"] = args.cpp_source_url_template
+    if args.py_source_url_template:
+        SOURCE_URL_TEMPLATES["python"] = args.py_source_url_template
 
     top, docs = load_documents(args.inputs)
     groups = group_by_module(top, docs)

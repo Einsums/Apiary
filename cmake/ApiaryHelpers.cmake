@@ -421,8 +421,14 @@ endfunction()
 #       STUBS <pyi...>  STUBS_TARGET <name>  FRAG_DIR <d>  PKG_DIR <d>
 #       PY_HELPERS_DIR <d>  PY_HELPER_DEPENDS <file...>
 #       # optional docs render (built on demand, not part of ALL):
-#       DOCS_JSON <json...>  DOCS_TARGET <name>  DOCS_OUTDIR <d>
+#       DOCS_JSON <json...>      # C++-frontend docs-JSON fragments
+#       PY_DOCS_JSON <json...>   # static-Python-frontend fragments (apiary_py_extract.py)
+#       DOCS_TARGET <name>  DOCS_OUTDIR <d>
 #   )
+#
+# The docs pipeline merges all fragments (DOCS_JSON + PY_DOCS_JSON) into one
+# canonical docs.json (apiary_merge_docs_json.py) before rendering, so C++- and
+# Python-origin symbols land on the same submodule pages.
 #
 # Generates the register header, creates the pybind11 module (the consumer
 # configures output name / linkage / packaging afterward), and — when the
@@ -431,7 +437,7 @@ endfunction()
 function(apiary_aggregate_extension)
     cmake_parse_arguments(_A ""
         "NAME;MAIN;REGISTER_PREFIX;MODULES_HEADER;MODULES_INCLUDE_DIR;STUBS_TARGET;FRAG_DIR;PKG_DIR;PY_HELPERS_DIR;DOCS_TARGET;DOCS_OUTDIR"
-        "MODULES;BINDINGS;STUBS;PY_HELPER_DEPENDS;DOCS_JSON" ${ARGN})
+        "MODULES;BINDINGS;STUBS;PY_HELPER_DEPENDS;DOCS_JSON;PY_DOCS_JSON" ${ARGN})
 
     foreach(_req NAME MAIN MODULES_HEADER)
         if(NOT _A_${_req})
@@ -487,12 +493,12 @@ function(apiary_aggregate_extension)
         set(_stamp "${_A_FRAG_DIR}/.stubs.stamp")
         add_custom_command(
             OUTPUT ${_stamp}
-            COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/aggregate_stubs.py"
+            COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py"
                     --frag-dir "${_A_FRAG_DIR}"
                     --pkg-dir "${_A_PKG_DIR}"
                     --py-helpers-dir "${_A_PY_HELPERS_DIR}"
             COMMAND ${CMAKE_COMMAND} -E touch ${_stamp}
-            DEPENDS "${APIARY_SCRIPTS_DIR}/aggregate_stubs.py" ${_A_STUBS} ${_A_PY_HELPER_DEPENDS}
+            DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py" ${_A_STUBS} ${_A_PY_HELPER_DEPENDS}
             COMMENT "apiary: aggregating .pyi stubs into ${_A_PKG_DIR}"
             VERBATIM
         )
@@ -501,15 +507,34 @@ function(apiary_aggregate_extension)
     endif()
 
     # 4. Docs render (on demand, NOT part of ALL) — optional.
+    #
+    #    The pipeline is: per-frontend fragments (DOCS_JSON, from the C++ tool
+    #    and/or the static Python frontend) -> merge stage (one canonical
+    #    docs.json: de-dupe + cross-origin collision resolution) -> renderer
+    #    (pure .rst formatter over the single merged file). PY_DOCS_JSON, when
+    #    given, are Python-frontend fragments folded into the same merge.
     if(_A_DOCS_TARGET)
+        set(_merged "${_A_DOCS_OUTDIR}/docs.json")
+        set(_all_fragments ${_A_DOCS_JSON} ${_A_PY_DOCS_JSON})
+        add_custom_command(
+            OUTPUT ${_merged}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_DOCS_OUTDIR}"
+            COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_merge_docs_json.py"
+                    --output "${_merged}" ${_all_fragments}
+            DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_merge_docs_json.py"
+                    "${APIARY_SCRIPTS_DIR}/apiary_docs_schema.py" ${_all_fragments}
+            COMMENT "apiary: merging docs JSON fragments into ${_merged}"
+            VERBATIM
+        )
         set(_dstamp "${_A_DOCS_OUTDIR}/.docs.stamp")
         add_custom_command(
             OUTPUT ${_dstamp}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_DOCS_OUTDIR}"
-            COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/render_docs_rst.py"
-                    --outdir "${_A_DOCS_OUTDIR}" ${_A_DOCS_JSON}
+            COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_render_docs_rst.py"
+                    --outdir "${_A_DOCS_OUTDIR}" "${_merged}"
             COMMAND ${CMAKE_COMMAND} -E touch ${_dstamp}
-            DEPENDS "${APIARY_SCRIPTS_DIR}/render_docs_rst.py" ${_A_DOCS_JSON}
+            DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_render_docs_rst.py"
+                    "${APIARY_SCRIPTS_DIR}/apiary_docs_schema.py" ${_merged}
             COMMENT "apiary: rendering Python API reference into ${_A_DOCS_OUTDIR}"
             VERBATIM
         )

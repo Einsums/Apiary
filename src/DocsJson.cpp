@@ -188,6 +188,7 @@ Value json_enum(BoundEnum const &e) {
     }
     return Object{
         {"name", e.name},
+        {"origin", "cpp"},
         {"py_name", resolved_py_name(e)},
         {"hidden", is_hidden(e)},
         {"qualified_name", e.qualified_name},
@@ -384,6 +385,7 @@ Value json_class(BoundClass const &c) {
     add_protocol_dunders(c, methods);
     return Object{
         {"name", c.name},
+        {"origin", "cpp"},
         {"py_name", resolved_py_name(c)},
         {"hidden", is_hidden(c)},
         {"qualified_name", c.qualified_name},
@@ -409,6 +411,7 @@ Value json_class(BoundClass const &c) {
 Value json_function(BoundFunction const &f) {
     return Object{
         {"name", f.name},
+        {"origin", "cpp"},
         {"py_name", resolved_py_name(f)},
         {"hidden", is_hidden(f)},
         {"qualified_name", f.qualified_name},
@@ -448,6 +451,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
     for (auto const &t : module_.typedefs) {
         typedefs.push_back(Object{
             {"name", t.name},
+            {"origin", "cpp"},
             {"qualified_name", t.qualified_name},
             {"doc", t.doc},
             {"doc_structured", json_doc_structured(t.doc)},
@@ -460,6 +464,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
     for (auto const &c : module_.concepts) {
         concepts.push_back(Object{
             {"name", c.name},
+            {"origin", "cpp"},
             {"qualified_name", c.qualified_name},
             {"doc", c.doc},
             {"doc_structured", json_doc_structured(c.doc)},
@@ -471,6 +476,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
     for (auto const &m : module_.macros) {
         macros.push_back(Object{
             {"name", m.name},
+            {"origin", "cpp"},
             {"qualified_name", m.qualified_name},
             {"doc", m.doc},
             {"doc_structured", json_doc_structured(m.doc)},

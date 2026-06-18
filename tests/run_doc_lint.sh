@@ -4,7 +4,7 @@
 # Licensed under the MIT License. See LICENSE.txt in the project root for license information.
 # ----------------------------------------------------------------------------------------------
 #
-# doc_lint.py test. Runs the doc-quality validator over a docs-JSON fixture
+# apiary_doc_lint.py test. Runs the doc-quality validator over a docs-JSON fixture
 # seeded with every drift class and diffs the diagnostics against a committed
 # golden, then checks a clean input exits 0.
 #
@@ -18,7 +18,7 @@ set -euo pipefail
 readonly PY="${1:-python3}"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-readonly LINT="${ROOT}/scripts/doc_lint.py"
+readonly LINT="${ROOT}/scripts/apiary_doc_lint.py"
 readonly FIXTURE="${SCRIPT_DIR}/fixtures/doc_lint_drift.json"
 readonly GOLDEN="${SCRIPT_DIR}/golden/doc_lint_drift.txt.golden"
 readonly REGEN="${REGEN:-0}"

@@ -418,7 +418,7 @@ build/gen/mylib_core_pybind.cpp   # bindings
 build/gen/mylib_core.pyi          # stub fragment
 ```
 
-A finalize step (`scripts/aggregate_stubs.py`, located at `APIARY_SCRIPTS_DIR`)
+A finalize step (`scripts/apiary_aggregate_stubs.py`, located at `APIARY_SCRIPTS_DIR`)
 runs as the `STUBS_TARGET` custom target `apiary_aggregate_extension` wires up,
 after the extension is linked.
 It splits each fragment by the `# %%submodule: <name>` sentinels the
@@ -618,7 +618,7 @@ src/
                         for the aggregator to split.
 
 scripts/
-  aggregate_stubs.py    Reads every ``*.pyi`` fragment in
+  apiary_aggregate_stubs.py    Reads every ``*.pyi`` fragment in
                         ``--frag-dir`` and merges by submodule sentinel
                         into per-submodule files in ``--pkg-dir``.
                         Writes a shared header per output and the

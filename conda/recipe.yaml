@@ -58,7 +58,7 @@ tests:
       files:
         - lib/cmake/Apiary/ApiaryConfig.cmake
         - lib/cmake/Apiary/ApiaryHelpers.cmake
-        - share/apiary/scripts/render_cpp_rst.py
+        - share/apiary/scripts/apiary_render_cpp_rst.py
   - script:
       - apiary --help
 

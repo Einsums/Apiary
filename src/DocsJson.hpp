@@ -42,8 +42,13 @@ namespace apiary {
 /// Bump on any incompatible change to the emitted shape so downstream
 /// renderers can guard. v2 adds a per-entity `doc_structured` object
 /// (brief/detail/params/tparams/returns/throws), reST-ready, parsed from the
-/// raw Doxygen `doc`.
-inline constexpr int k_docs_json_schema_version = 2;
+/// raw Doxygen `doc`. v3 adds a per-entity `origin` field ("cpp" | "python")
+/// on every top-level documentable entity (class/function/enum/typedef/
+/// concept/macro), so a second extraction frontend (the static Python `ast`
+/// frontend) can emit fragments in this same schema and a merge stage can
+/// resolve cross-origin collisions. The schema is identical for per-frontend
+/// fragments and the merged document — merging is idempotent.
+inline constexpr int k_docs_json_schema_version = 3;
 
 /// @brief Serialize `module_` to a pretty-printed JSON string per the schema above.
 ///

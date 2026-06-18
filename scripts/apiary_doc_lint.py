@@ -22,7 +22,7 @@ Input is one or more docs-JSON files (the output of ``apiary
 status is non-zero when any error is found (or any warning under --strict).
 
     apiary --emit-cpp-docs-json --module m header.hpp -- <flags> > m.json
-    doc_lint.py m.json
+    apiary_doc_lint.py m.json
 """
 from __future__ import annotations
 

@@ -6,7 +6,7 @@
 """Generate the C++ API reference pages for selected modules (Option 2).
 
 For each public header of each selected ``lib/module``, runs
-``apiary --emit-cpp-docs-json`` and ``render_cpp_rst.py`` to produce a
+``apiary --emit-cpp-docs-json`` and ``apiary_render_cpp_rst.py`` to produce a
 cpp-domain reStructuredText page, replacing Breathe's ``autodoxygenfile``.
 
 Compile flags are taken from a representative ``apiary`` codegen
@@ -16,7 +16,7 @@ re-derive per-module flags here.
 
 Usage::
 
-    gen_cpp_docs.py --source-dir <repo> --build-dir <build> --tool <apiary> \
+    apiary_gen_cpp_docs.py --source-dir <repo> --build-dir <build> --tool <apiary> \
                     --out-dir <dir> --modules Einsums/BLASVendor Einsums/Concepts
 """
 
@@ -125,7 +125,7 @@ def gen_header(tool: str, flags: list[str], header: Path, relheader: str, out_di
     except json.JSONDecodeError:
         pass
     render = subprocess.run(
-        [sys.executable, str(SCRIPTS / "render_cpp_rst.py"), str(json_out),
+        [sys.executable, str(SCRIPTS / "apiary_render_cpp_rst.py"), str(json_out),
          "--title", title, "--output", str(rst_out), "--embed"],
         capture_output=True, text=True)
     if render.returncode != 0:

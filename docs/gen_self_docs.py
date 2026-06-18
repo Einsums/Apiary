@@ -4,7 +4,7 @@
 """Dogfood: run apiary on its own headers to produce the C++ API reST.
 
 For every apiary header, invoke ``apiary --emit-cpp-docs-json`` and render the
-result with scripts/render_cpp_rst.py into docs/api/<name>.rst. The toolchain
+result with scripts/apiary_render_cpp_rst.py into docs/api/<name>.rst. The toolchain
 include paths libtooling needs are probed here (mirrors
 apiary_detect_toolchain) so this runs standalone on macOS and Linux/CI.
 
@@ -91,7 +91,7 @@ def main() -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     flags = toolchain_flags()
-    renderer = SCRIPTS / "render_cpp_rst.py"
+    renderer = SCRIPTS / "apiary_render_cpp_rst.py"
 
     pages: list[tuple[str, str]] = []  # (title, rst-stem)
     for title, rel, src_inc in HEADERS:
