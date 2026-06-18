@@ -424,6 +424,8 @@ endfunction()
 #       DOCS_JSON <json...>      # C++-frontend docs-JSON fragments
 #       PY_DOCS_JSON <json...>   # static-Python-frontend fragments (apiary_py_extract.py)
 #       DOCS_TARGET <name>  DOCS_OUTDIR <d>
+#       DOCS_CONTENT_DIR <d>     # optional authored Markdown: per-module
+#                                # curation (## Topics) + free-standing articles
 #   )
 #
 # The docs pipeline merges all fragments (DOCS_JSON + PY_DOCS_JSON) into one
@@ -436,7 +438,7 @@ endfunction()
 # (on-demand) targets using Apiary's bundled scripts (APIARY_SCRIPTS_DIR).
 function(apiary_aggregate_extension)
     cmake_parse_arguments(_A ""
-        "NAME;MAIN;REGISTER_PREFIX;MODULES_HEADER;MODULES_INCLUDE_DIR;STUBS_TARGET;FRAG_DIR;PKG_DIR;PY_HELPERS_DIR;DOCS_TARGET;DOCS_OUTDIR"
+        "NAME;MAIN;REGISTER_PREFIX;MODULES_HEADER;MODULES_INCLUDE_DIR;STUBS_TARGET;FRAG_DIR;PKG_DIR;PY_HELPERS_DIR;DOCS_TARGET;DOCS_OUTDIR;DOCS_CONTENT_DIR"
         "MODULES;BINDINGS;STUBS;PY_HELPER_DEPENDS;DOCS_JSON;PY_DOCS_JSON" ${ARGN})
 
     foreach(_req NAME MAIN MODULES_HEADER)
@@ -526,15 +528,24 @@ function(apiary_aggregate_extension)
             COMMENT "apiary: merging docs JSON fragments into ${_merged}"
             VERBATIM
         )
+        # Optional authored content: per-module curation (## Topics) + articles.
+        set(_content_flag "")
+        set(_content_deps "")
+        if(_A_DOCS_CONTENT_DIR)
+            set(_content_flag --content-dir "${_A_DOCS_CONTENT_DIR}")
+            file(GLOB_RECURSE _content_deps CONFIGURE_DEPENDS "${_A_DOCS_CONTENT_DIR}/*.md")
+        endif()
         set(_dstamp "${_A_DOCS_OUTDIR}/.docs.stamp")
         add_custom_command(
             OUTPUT ${_dstamp}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_DOCS_OUTDIR}"
             COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_render_docs_rst.py"
-                    --outdir "${_A_DOCS_OUTDIR}" "${_merged}"
+                    --outdir "${_A_DOCS_OUTDIR}" ${_content_flag} "${_merged}"
             COMMAND ${CMAKE_COMMAND} -E touch ${_dstamp}
             DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_render_docs_rst.py"
-                    "${APIARY_SCRIPTS_DIR}/apiary_docs_schema.py" ${_merged}
+                    "${APIARY_SCRIPTS_DIR}/apiary_docs_schema.py"
+                    "${APIARY_SCRIPTS_DIR}/apiary_docs_resolve.py"
+                    "${APIARY_SCRIPTS_DIR}/apiary_curation.py" ${_merged} ${_content_deps}
             COMMENT "apiary: rendering Python API reference into ${_A_DOCS_OUTDIR}"
             VERBATIM
         )

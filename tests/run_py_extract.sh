@@ -226,4 +226,28 @@ assert_contains "${WORK}/links.out" "unresolved reference '\[\[NoSuchSymbol\]\]'
 assert_absent   "${WORK}/links.out" "factor"
 echo "ok: unresolved-reference diagnostics"
 
+# ── 7. Curation + articles (Phase 3) ─────────────────────────────────────────
+RST_CUR="${WORK}/rst_curated"
+"${PY}" "${SCRIPTS_DIR}/apiary_render_docs_rst.py" --outdir "${RST_CUR}" \
+    --content-dir "${FIXTURE_DIR}/pypkg_content" "${MERGED}" 2> "${WORK}/coverage.err"
+# Module overview prose, with its [[ ]] links resolved to py-domain xrefs.
+assert_contains "${RST_CUR}/einsums.linalg.rst" "linear-algebra convenience layer"
+assert_contains "${RST_CUR}/einsums.linalg.rst" ":py:class:.~einsums.linalg.Decomposition."
+# Curated topic-group headings, in authored order.
+assert_contains "${RST_CUR}/einsums.linalg.rst" "^Decompositions$"
+assert_contains "${RST_CUR}/einsums.linalg.rst" "^Solvers$"
+# Uncurated symbols still render, under a by-kind fallback section.
+assert_contains "${RST_CUR}/einsums.linalg.rst" "^Functions$"
+assert_contains "${RST_CUR}/einsums.linalg.rst" "py:function:: norm"
+# Free-standing article: its own page, an MD heading converted to reST, and a
+# resolved [[ ]] link; listed in the index toctree under a Guides caption.
+assert_contains "${RST_CUR}/getting-started.rst" "Getting Started"
+assert_contains "${RST_CUR}/getting-started.rst" "^Installation$"
+assert_contains "${RST_CUR}/getting-started.rst" ":py:func:.~einsums.linalg.solve."
+assert_contains "${RST_CUR}/index.rst" ":caption: Guides"
+assert_contains "${RST_CUR}/index.rst" "getting-started"
+# Coverage diagnostic: an uncurated documented symbol is reported.
+assert_contains "${WORK}/coverage.err" "'norm' is documented but not curated"
+echo "ok: curation + articles + coverage"
+
 echo "PASS: run_py_extract"

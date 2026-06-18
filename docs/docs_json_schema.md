@@ -194,6 +194,26 @@ resolve). It is the single source of truth shared by:
   docs.json so the resolver sees the whole graph), which reports every
   unresolved link as `file:line: unresolved reference '[[token]]'`.
 
+## Authored content & curation (Phase 3)
+
+A documentation set is more than a symbol reference. An optional
+``--content-dir`` of authored Markdown (parsed by ``scripts/apiary_curation.py``)
+layers two things on top of the generated pages:
+
+- **Module curation** — a file whose stem is a documented dotted module
+  (``einsums.linalg.md``). Prose before its ``## Topics`` section becomes the
+  module page's overview; each ``### Group`` under ``## Topics`` is a curated
+  group whose ``[[ ]]`` links name the symbols to render there, in order.
+  Symbols no topic lists still render, auto-grouped by kind, so nothing
+  silently disappears.
+- **Articles** — any other ``.md`` file: a free-standing page (overview, guide)
+  added to the index toctree under a *Guides* caption.
+
+Both may use the `[[ ]]` symbol links above. The renderer (`--content-dir`)
+warns about curation gaps — a documented symbol no topic lists, or a curated
+link that resolves to nothing. Curation is authored content, not part of the
+docs-JSON schema; it consumes the same graph the JSON describes.
+
 ## Merge & collisions
 
 The merge stage (`scripts/apiary_merge_docs_json.py`):
