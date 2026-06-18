@@ -109,9 +109,23 @@ Common to every documentable entity:
   },
   "location": { "file": "...", "line": 0, "column": 0 },
   "submodule": "einsums.linalg" | null,
-  "directives": [ {"name","args":[...]}... ]   // [] for Python origin
+  "directives": [ {"name","args":[...]}... ],  // [] for Python origin
+  "availability": {                            // v4 — see "Availability"
+    "since": "1.2.0" | null,
+    "deprecated": false,
+    "deprecated_note": "..." | null
+  }
 }
 ```
+
+### Availability
+
+`availability` is filled from `@since` / `@deprecated` (C++ Doxygen) and from a
+`@deprecated` decorator + `.. versionadded::` / `.. deprecated::` directives
+(Python). Both frontends produce the same shape, so the renderer emits identical
+badges: a `.. versionadded::` for `since` and a *Deprecated* admonition (with the
+migration note) for `deprecated`. The producing frontend strips the lifted
+directive from the prose so it is not rendered twice.
 
 - **function**: adds `return_type`, `return_type_canonical`, `return_py_type`,
   `params[]`, `is_template`, `template_params[]`, `template_kwargs[]`,

@@ -454,7 +454,7 @@ DocComment parse_doc_comment(std::string const &raw) {
         }
     }
 
-    enum class Sink : std::uint8_t { Detail, Brief, Param, TParam, Return, Throw };
+    enum class Sink : std::uint8_t { Detail, Brief, Param, TParam, Return, Throw, Deprecated };
     Sink    sink = Sink::Detail;
     Pending pending;
     bool    saw_brief = false;
@@ -489,6 +489,9 @@ DocComment parse_doc_comment(std::string const &raw) {
             if (!doc.throws_.empty()) {
                 doc.throws_.back().description = trim(doc.throws_.back().description + " " + t);
             }
+            break;
+        case Sink::Deprecated:
+            doc.deprecated_note = trim(doc.deprecated_note + " " + t);
             break;
         case Sink::Detail:
             if (is_bullet_item(t)) {
@@ -566,6 +569,15 @@ DocComment parse_doc_comment(std::string const &raw) {
                 note += brace_arg;
                 append_paragraph(doc.detail, note);
                 sink = Sink::Detail;
+            } else if (cmd == "since") {
+                // Structured availability — captured as a field (and rendered
+                // as a ``.. versionadded::`` badge), not folded into detail.
+                doc.since = trim(!brace_arg.empty() ? brace_arg : rest);
+                sink      = Sink::Detail;
+            } else if (cmd == "deprecated") {
+                doc.deprecated      = true;
+                doc.deprecated_note = trim(!brace_arg.empty() ? brace_arg : rest);
+                sink                = Sink::Deprecated; // continuation lines extend the note
             } else if (cmd == "versionaddeddesc" || cmd == "versionchangeddesc" || cmd == "versionremoveddesc") {
                 pending.active    = true;
                 pending.directive = cmd.substr(0, cmd.size() - 4); // strip "desc"

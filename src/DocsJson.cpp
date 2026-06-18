@@ -74,6 +74,19 @@ Value json_doc_structured(std::string const &raw) {
     };
 }
 
+// Structured availability for an entity, parsed from the same raw doc as
+// doc_structured: { since, deprecated, deprecated_note }. The renderer turns
+// this into ``.. versionadded::`` / ``.. deprecated::`` directives, so the
+// C++ and Python frontends drive identical badges.
+Value json_availability(std::string const &raw) {
+    DocComment const dc = parse_doc_comment(raw);
+    return Object{
+        {"since", dc.since.empty() ? Value(nullptr) : Value(dc.since)},
+        {"deprecated", dc.deprecated},
+        {"deprecated_note", dc.deprecated_note.empty() ? Value(nullptr) : Value(dc.deprecated_note)},
+    };
+}
+
 Value opt_string(std::optional<std::string> const &s) {
     // NB: do not use a braced return here — `{*s}` / `{nullptr}` select
     // json::Value's Array constructor and wrap the scalar in `[ ... ]`.
@@ -134,6 +147,7 @@ Value json_method(BoundMethod const &m) {
         {"qualified_name", m.qualified_name},
         {"doc", m.doc},
         {"doc_structured", json_doc_structured(m.doc)},
+        {"availability", json_availability(m.doc)},
         {"location", json_location(m.location)},
         {"submodule", opt_string(m.submodule)},
         {"return_type", m.return_type},
@@ -174,6 +188,7 @@ Value json_field(BoundField const &f) {
         {"py_type", f.py_type},
         {"is_static", f.is_static},
         {"doc_structured", json_doc_structured(f.doc)},
+        {"availability", json_availability(f.doc)},
         {"directives", json_directives(f.directives)},
     };
 }
@@ -197,6 +212,7 @@ Value json_enum(BoundEnum const &e) {
         {"qualified_name", e.qualified_name},
         {"doc", e.doc},
         {"doc_structured", json_doc_structured(e.doc)},
+        {"availability", json_availability(e.doc)},
         {"location", json_location(e.location)},
         {"submodule", opt_string(e.submodule)},
         {"is_scoped", e.is_scoped},
@@ -214,6 +230,7 @@ Value json_property(BoundProperty const &p) {
         {"py_type", p.py_type},
         {"doc", p.doc},
         {"doc_structured", json_doc_structured(p.doc)},
+        {"availability", json_availability(p.doc)},
         {"writable", p.has_setter},
     };
 }
@@ -396,6 +413,7 @@ Value json_class(BoundClass const &c) {
         {"qualified_name", c.qualified_name},
         {"doc", c.doc},
         {"doc_structured", json_doc_structured(c.doc)},
+        {"availability", json_availability(c.doc)},
         {"location", json_location(c.location)},
         {"submodule", opt_string(c.submodule)},
         {"is_template", c.is_template},
@@ -423,6 +441,7 @@ Value json_function(BoundFunction const &f) {
         {"qualified_name", f.qualified_name},
         {"doc", f.doc},
         {"doc_structured", json_doc_structured(f.doc)},
+        {"availability", json_availability(f.doc)},
         {"location", json_location(f.location)},
         {"submodule", opt_string(f.submodule)},
         {"return_type", f.return_type},
@@ -530,6 +549,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
             {"qualified_name", t.qualified_name},
             {"doc", t.doc},
             {"doc_structured", json_doc_structured(t.doc)},
+            {"availability", json_availability(t.doc)},
             {"location", json_location(t.location)},
             {"underlying_type", t.underlying_type},
             {"template_params", json_string_list(t.template_param_names)},
@@ -544,6 +564,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
             {"qualified_name", c.qualified_name},
             {"doc", c.doc},
             {"doc_structured", json_doc_structured(c.doc)},
+            {"availability", json_availability(c.doc)},
             {"location", json_location(c.location)},
             {"template_params", json_string_list(c.template_param_names)},
         });
@@ -557,6 +578,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
             {"qualified_name", m.qualified_name},
             {"doc", m.doc},
             {"doc_structured", json_doc_structured(m.doc)},
+            {"availability", json_availability(m.doc)},
             {"location", json_location(m.location)},
             {"is_function_like", m.is_function_like},
             {"params", json_string_list(m.params)},

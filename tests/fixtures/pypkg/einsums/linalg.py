@@ -11,7 +11,16 @@ alongside any C++-origin ``einsums.linalg`` symbols.
 
 from __future__ import annotations
 
-from typing import overload
+from typing import deprecated, overload
+
+
+@deprecated("Use solve() instead.")
+def gesv(a, b):
+    """Solve a linear system (legacy LAPACK-style name).
+
+    .. versionadded:: 0.1.0
+    """
+    return solve(a, b)
 
 
 @overload

@@ -60,11 +60,19 @@ struct DocComment {
     std::string           returns;
     /// @throws / @throw / @exception entries (name = exception type).
     std::vector<DocEntry> throws_;
+    /// Version a symbol became available, from ``@since`` (docs-graph
+    /// availability). Empty when unstated.
+    std::string           since;
+    /// True when the symbol carries a ``@deprecated`` tag.
+    bool                  deprecated = false;
+    /// The ``@deprecated`` note (migration guidance), or empty.
+    std::string           deprecated_note;
 
     /// @brief Whether every field is empty.
-    /// @return `true` if brief, detail, params, tparams, returns, and throws are all empty.
+    /// @return `true` if brief, detail, params, tparams, returns, throws, and availability are all empty.
     [[nodiscard]] bool empty() const {
-        return brief.empty() && detail.empty() && params.empty() && tparams.empty() && returns.empty() && throws_.empty();
+        return brief.empty() && detail.empty() && params.empty() && tparams.empty() && returns.empty() &&
+               throws_.empty() && since.empty() && !deprecated && deprecated_note.empty();
     }
 };
 

@@ -73,6 +73,22 @@ def log(msg: str) -> None:
 SOURCE_URL_TEMPLATES: dict[str, str] = {}
 
 
+def availability_lines(entity: dict, indent: str) -> list[str]:
+    """reST for an entity's availability: a ``.. versionadded::`` for ``since``
+    and a Deprecated admonition (with the migration note) for ``deprecated``.
+    Both frontends populate the same shape, so the badges render identically."""
+    a = entity.get("availability") or {}
+    out: list[str] = []
+    if a.get("since"):
+        out += ["", f"{indent}.. versionadded:: {a['since']}", ""]
+    if a.get("deprecated"):
+        out += ["", f"{indent}.. admonition:: Deprecated", f"{indent}{IND}:class: warning", ""]
+        note = (a.get("deprecated_note") or "").strip()
+        if note:
+            out += [f"{indent}{IND}{md(note)}", ""]
+    return out
+
+
 def source_link_lines(entity: dict, indent: str) -> list[str]:
     """A reST ``[source]`` hyperlink for an entity, or [] when not configured.
 
@@ -321,6 +337,9 @@ def emit_overload_set(out: list[str], base_indent: str, directive: str, name: st
         out.append(pad + s)
     doc_member = next((m for m in members if entity_has_doc(m)), members[0])
     emit_doc(out, doc_member, base_indent + IND, with_params=True)
+    # Availability from any member of the set (overloads share a symbol).
+    avail_member = next((m for m in members if m.get("availability")), doc_member)
+    out.extend(availability_lines(avail_member, base_indent + IND))
     out.extend(source_link_lines(doc_member, base_indent + IND))
     out.append("")
 
@@ -338,6 +357,7 @@ def render_attribute(out: list[str], py_name: str, py_type: str, entity: dict, w
         out.append("")
         out.append(f"{IND}{IND}(read-only)")
         out.append("")
+    out.extend(availability_lines(entity, IND * 2))
     out.extend(source_link_lines(entity, IND * 2))
 
 
@@ -359,6 +379,7 @@ def render_class(out: list[str], cls: dict) -> None:
     for cname in class_py_names(cls):
         out.append(f".. py:class:: {cname}")
         emit_doc(out, cls, IND, with_params=False)
+        out.extend(availability_lines(cls, IND))
         out.extend(source_link_lines(cls, IND))
         out.append("")
         ctors = cls.get("constructors", [])
@@ -390,6 +411,7 @@ def render_enum(out: list[str], en: dict, nested_indent: str = "") -> None:
     name = en.get("py_name") or en["name"]
     out.append(f"{nested_indent}.. py:class:: {name}")
     emit_doc(out, en, nested_indent + IND, with_params=False)
+    out.extend(availability_lines(en, nested_indent + IND))
     out.extend(source_link_lines(en, nested_indent + IND))
     out.append("")
     for v in en.get("enumerators", []):

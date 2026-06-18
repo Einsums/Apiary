@@ -14,6 +14,7 @@
 namespace einsums::fixture {
 
 /// A minimal tensor base.
+/// @since 1.0.0
 class APIARY_EXPOSE Tensor {
   public:
     /// Default-construct an empty tensor.
@@ -23,6 +24,7 @@ class APIARY_EXPOSE Tensor {
     APIARY_EXPOSE virtual double norm() const;
 
     /// Number of stored elements.
+    /// @deprecated Use ``len(tensor)`` instead.
     APIARY_EXPOSE virtual int size() const;
 };
 

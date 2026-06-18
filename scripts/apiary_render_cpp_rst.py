@@ -154,7 +154,9 @@ def emit_doc(out: list[str], entity: dict, indent: str) -> None:
     tparams = ds.get("tparams", [])
     returns = (ds.get("returns") or "").strip()
     throws = ds.get("throws", [])
-    if not (brief or detail or params or returns or throws or tparams):
+    avail = entity.get("availability") or {}
+    has_avail = bool(avail.get("since") or avail.get("deprecated"))
+    if not (brief or detail or params or returns or throws or tparams or has_avail):
         return
     out.append("")
     if brief:
@@ -174,6 +176,19 @@ def emit_doc(out: list[str], entity: dict, indent: str) -> None:
             out.append(f"{indent}:throws {t['name']}: {(t.get('description') or '').strip()}".rstrip())
         if returns:
             out.append(f"{indent}:returns: {returns}".rstrip())
+    # Availability badges (from @since / @deprecated), mirroring the
+    # Python-facing renderer so the C++ reference keeps these tags.
+    if avail.get("since"):
+        out.append("")
+        out.append(f"{indent}.. versionadded:: {avail['since']}")
+    if avail.get("deprecated"):
+        out.append("")
+        out.append(f"{indent}.. admonition:: Deprecated")
+        out.append(f"{indent}{IND}:class: warning")
+        note = (avail.get("deprecated_note") or "").strip()
+        if note:
+            out.append("")
+            out.append(f"{indent}{IND}{note}")
     out.append("")
 
 

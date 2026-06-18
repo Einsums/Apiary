@@ -154,6 +154,15 @@ assert_eq "memberOf edge" "$(jget "${PY_FRAG}" "any(e['kind']=='memberOf' and e[
 assert_eq "inheritsFrom edge" "$(jget "${PY_FRAG}" "any(e['kind']=='inheritsFrom' and e['source']=='py:einsums.linalg.LUDecomposition' and e['target']=='Decomposition' for e in d['edges'])")" "True"
 echo "ok: symbol IDs + relationship edges"
 
+# ── 1f. Availability (since / deprecated) ────────────────────────────────────
+gesv="[f for f in d['functions'] if f['name']=='gesv'][0]"
+assert_eq "gesv since"      "$(jget "${PY_FRAG}" "${gesv}['availability']['since']")" "0.1.0"
+assert_eq "gesv deprecated" "$(jget "${PY_FRAG}" "${gesv}['availability']['deprecated']")" "True"
+assert_eq "gesv note"       "$(jget "${PY_FRAG}" "${gesv}['availability']['deprecated_note']")" "Use solve() instead."
+# The lifted directive is removed from the prose (rendered from the field instead).
+assert_eq "versionadded stripped from detail" "$(jget "${PY_FRAG}" "'versionadded' in ${gesv}['doc_structured']['detail']")" "False"
+echo "ok: availability (since / deprecated)"
+
 # ── 2. Merge (cross-origin co-location + collision resolution) ───────────────
 "${PY}" "${SCRIPTS_DIR}/apiary_merge_docs_json.py" -o "${MERGED}" "${CPP_FRAG}" "${PY_FRAG}" 2> "${WORK}/merge.err"
 
@@ -201,7 +210,12 @@ assert_contains "${RST_DIR}/einsums.linalg.rst" "ord: int"
 assert_contains "${RST_DIR}/einsums.linalg.rst" "py:meth:.~einsums.linalg.Decomposition.factor."
 assert_contains "${RST_DIR}/einsums.linalg.rst" "NoSuchSymbol"
 assert_absent   "${RST_DIR}/einsums.linalg.rst" "\[\["
-echo "ok: end-to-end render presence + cross-ref + decorator shapes + symbol links"
+# Phase-4 availability badges (rendered once, from the structured field).
+assert_contains "${RST_DIR}/einsums.linalg.rst" "versionadded:: 0.1.0"
+assert_contains "${RST_DIR}/einsums.linalg.rst" "admonition:: Deprecated"
+assert_contains "${RST_DIR}/einsums.linalg.rst" "Use solve\(\) instead\."
+[[ "$(grep -c "versionadded:: 0.1.0" "${RST_DIR}/einsums.linalg.rst")" == "1" ]] || fail "versionadded rendered more than once"
+echo "ok: end-to-end render presence + cross-ref + decorator shapes + symbol links + availability"
 
 # ── 5. Source links (.rst layer, origin-aware .py vs .hpp) ───────────────────
 RST_LINKS="${WORK}/rst_links"

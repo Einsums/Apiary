@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -274,6 +275,66 @@ def _location(file: Path, node: ast.AST) -> dict:
     return {"file": str(file), "line": getattr(node, "lineno", 0), "column": getattr(node, "col_offset", 0) + 1}
 
 
+# Sphinx availability directives in a docstring.
+_VERSIONADDED_RE = re.compile(r"^\s*\.\.\s+versionadded::\s*(\S+)", re.M)
+_DEPRECATED_RE = re.compile(r"^\s*\.\.\s+deprecated::", re.M)
+_AVAIL_DIRECTIVE_RE = re.compile(r"^(\s*)\.\.\s+(versionadded|deprecated)::.*$")
+
+
+def strip_availability_directives(text: str | None) -> str:
+    """Remove ``.. versionadded::`` / ``.. deprecated::`` directive blocks from
+    docstring prose — they are lifted into the structured ``availability`` field
+    and rendered from there, so leaving them in the detail double-renders."""
+    lines = (text or "").split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _AVAIL_DIRECTIVE_RE.match(lines[i])
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        base = len(m.group(1))
+        i += 1
+        # Drop the directive's own body (blank or more-indented lines).
+        while i < len(lines) and (not lines[i].strip() or (len(lines[i]) - len(lines[i].lstrip())) > base):
+            i += 1
+    return "\n".join(out)
+
+
+def _deprecated_decorator(node) -> tuple[bool, str | None]:
+    """Detect a ``@deprecated`` / ``@warnings.deprecated`` / ``@typing.deprecated``
+    decorator (PEP 702) and its message argument, if any."""
+    for d in getattr(node, "decorator_list", []):
+        target = d.func if isinstance(d, ast.Call) else d
+        if ast.unparse(target).split(".")[-1] != "deprecated":
+            continue
+        if isinstance(d, ast.Call):
+            for a in d.args:
+                if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                    return True, a.value
+        return True, None
+    return False, None
+
+
+def availability(node, raw: str | None) -> dict:
+    """Structured availability for a Python entity, in the shared schema shape.
+
+    Sources: a ``@deprecated`` decorator (with its message) and the Sphinx
+    ``.. versionadded::`` / ``.. deprecated::`` directives in the docstring. The
+    C++ frontend fills the same shape from ``@since`` / ``@deprecated``."""
+    deprecated, note = _deprecated_decorator(node)
+    text = raw or ""
+    if _DEPRECATED_RE.search(text):
+        deprecated = True
+    added = _VERSIONADDED_RE.search(text)
+    return {
+        "since": added.group(1) if added else None,
+        "deprecated": bool(deprecated),
+        "deprecated_note": note,
+    }
+
+
 def _common(node: ast.AST, name: str, module: str, qualified: str, file: Path) -> dict:
     raw = ast.get_docstring(node) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else None
     return {
@@ -287,7 +348,8 @@ def _common(node: ast.AST, name: str, module: str, qualified: str, file: Path) -
         "hidden": False,
         "qualified_name": qualified,
         "doc": raw or "",
-        "doc_structured": doc_structured(raw),
+        "doc_structured": doc_structured(strip_availability_directives(raw)),
+        "availability": availability(node, raw),
         "location": _location(file, node),
         "submodule": module,
         "directives": [],
@@ -358,7 +420,8 @@ def property_entity(node, module: str, file: Path, qualprefix: str) -> dict:
         "type": "",
         "py_type": _unparse(node.returns) or "",
         "doc": raw or "",
-        "doc_structured": doc_structured(raw),
+        "doc_structured": doc_structured(strip_availability_directives(raw)),
+        "availability": availability(node, raw),
         "writable": False,
     }
 

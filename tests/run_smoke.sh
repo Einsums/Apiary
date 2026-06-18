@@ -112,5 +112,9 @@ assert_contains inheritance '"symbol_id": "c\+\+:c:@N@einsums@N@fixture@S@BlockT
 assert_contains inheritance '"kind": "inheritsFrom"'                                    "${djson}"
 assert_contains inheritance '"kind": "overrides"'                                       "${djson}"
 assert_contains inheritance '"kind": "memberOf"'                                        "${djson}"
+# Availability: @since on the class, @deprecated + note on a method.
+assert_contains inheritance '"since": "1.0.0"'                                          "${djson}"
+assert_contains inheritance '"deprecated": true'                                        "${djson}"
+assert_contains inheritance 'Use ``len\(tensor\)`` instead\.'                           "${djson}"
 
 echo "OK: all Phase-2 fixtures pass"
