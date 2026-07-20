@@ -56,15 +56,26 @@ def universal_flags(build_dir: Path, source_dir: Path) -> list[str]:
         raise SystemExit(f"gen_cpp_docs: {ninja_file} not found - flags are read from the Ninja "
                          "build graph, so the build must be configured with -G Ninja")
     ninja = ninja_file.read_text(encoding="utf-8")
-    m = re.search(r"apiary --register-function apiary_register_Tensor [^\n]*", ninja)
-    if not m:
-        raise SystemExit("gen_cpp_docs: no Tensor pybind command in build.ninja (need EINSUMS_BUILD_PYTHON)")
-    # POSIX lexing treats the backslashes in a Windows path as escapes and eats
-    # them, silently corrupting every -I flag. Non-POSIX mode preserves them but
-    # leaves quotes attached to the token, so strip those back off.
-    toks = shlex.split(m.group(0), posix=(os.name != "nt"))
-    if os.name == "nt":
-        toks = [t.strip('"') for t in toks]
+    # apiary is invoked through the ApiaryRun.cmake wrapper, so its argv reaches
+    # build.ninja as a semicolon-joined CMake list: -DAPIARY_COMMAND=<exe>;<arg>;...
+    # (ApiaryRun guarantees no argument contains a semicolon). Splitting on ';'
+    # gives clean tokens and preserves Windows backslashes verbatim. Fall back to
+    # the older space-separated direct invocation for builds that don't wrap.
+    m = re.search(r'-DAPIARY_COMMAND=([^"\n]*apiary_register_Tensor[^"\n]*)', ninja)
+    if m:
+        toks = m.group(1).split(";")
+    else:
+        m = re.search(r"apiary --register-function apiary_register_Tensor [^\n]*", ninja)
+        if not m:
+            raise SystemExit("gen_cpp_docs: no Tensor pybind command in build.ninja (need EINSUMS_BUILD_PYTHON)")
+        # POSIX lexing treats the backslashes in a Windows path as escapes and
+        # eats them, silently corrupting every -I flag. Non-POSIX mode preserves
+        # them but leaves quotes attached to the token, so strip those back off.
+        toks = shlex.split(m.group(0), posix=(os.name != "nt"))
+        if os.name == "nt":
+            toks = [t.strip('"') for t in toks]
+    if "--" not in toks:
+        raise SystemExit("gen_cpp_docs: Tensor pybind command has no '--' compile-flags separator")
     flags = toks[toks.index("--"):]
     seen = {f for f in flags if f.startswith("-I")}
     for base in (source_dir / "libs", build_dir / "libs"):
