@@ -54,8 +54,13 @@ Backend make_backend(Target t) {
         b.ns              = "py";
         b.ns_full         = "pybind11";
         b.module_macro    = "PYBIND11_MODULE";
+        // pybind11/stl.h does NOT pull in the std::filesystem::path caster: it
+        // lives in the separate stl/filesystem.h header. Without it a bound
+        // function returning a path compiles fine and then fails at call time
+        // with "Unregistered type ... filesystem::path".
         b.headers         = {"<pybind11/pybind11.h>", "<pybind11/complex.h>",   "<pybind11/functional.h>",
-                             "<pybind11/numpy.h>",    "<pybind11/operators.h>", "<pybind11/stl.h>"};
+                             "<pybind11/numpy.h>",    "<pybind11/operators.h>", "<pybind11/stl.h>",
+                             "<pybind11/stl/filesystem.h>"};
         b.rvp_prefix      = "py::return_value_policy::";
         b.supports_buffer = true;
     }
