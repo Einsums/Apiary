@@ -288,6 +288,8 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                             "${Python_EXECUTABLE}"
                             "${CMAKE_GENERATOR}"
                             "$<IF:$<BOOL:${CMAKE_BUILD_TYPE}>,${CMAKE_BUILD_TYPE},Release>"
+                            "${CMAKE_C_COMPILER}"
+                            "${CMAKE_CXX_COMPILER}"
                 )
                 # Builds two extensions from scratch; well past the 1500s default
                 # on a cold CI runner is unlikely, but the codegen is not fast.

@@ -15,12 +15,14 @@
 # nothing about whether the extension actually loads.
 #
 # Invocation:
-#     run_examples.sh <source-dir> <build-dir> <cmake> <python> <generator> <build-type>
+#     run_examples.sh <source-dir> <build-dir> <cmake> <python> <generator> \
+#                     <build-type> <c-compiler> <cxx-compiler>
 
 set -euo pipefail
 
-if [[ $# -ne 6 ]]; then
-    echo "usage: $0 <source-dir> <build-dir> <cmake> <python> <generator> <build-type>" >&2
+if [[ $# -ne 8 ]]; then
+    echo "usage: $0 <source-dir> <build-dir> <cmake> <python> <generator>" \
+         "<build-type> <c-compiler> <cxx-compiler>" >&2
     exit 64
 fi
 
@@ -30,6 +32,8 @@ readonly CMAKE="$3"
 readonly PY="$4"
 readonly GENERATOR="$5"
 readonly BUILD_TYPE="$6"
+readonly CC_="$7"
+readonly CXX_="$8"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
@@ -78,9 +82,17 @@ for case in "${CASES[@]}"; do
     ex="${SRC}/examples/${name}"
     bin="${WORK}/build-${name}"
 
+    # The compiler must be inherited, not left to CMake's default. Apiary probes
+    # CMAKE_CXX_COMPILER for the include paths libtooling needs, and a compiler
+    # it cannot probe (MSVC cl.exe, whose driver emits no search-list banner)
+    # yields an empty include set - so the headers parse to nothing and apiary
+    # emits a *valid but empty* module that still compiles and links. Letting the
+    # example pick its own compiler silently tested nothing on Windows.
     "${CMAKE}" -S "$(native "${ex}")" -B "$(native "${bin}")" \
         -G "${GENERATOR}" \
         -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+        -DCMAKE_C_COMPILER="${CC_}" \
+        -DCMAKE_CXX_COMPILER="${CXX_}" \
         -DCMAKE_PREFIX_PATH="$(native "${PREFIX}");${pybind11_dir}" \
         -DPython_EXECUTABLE="${PY}" \
         >"${WORK}/${name}.configure.log" 2>&1 \
@@ -89,6 +101,15 @@ for case in "${CASES[@]}"; do
     "${CMAKE}" --build "$(native "${bin}")" \
         >"${WORK}/${name}.build.log" 2>&1 \
         || { cat "${WORK}/${name}.build.log" >&2; dump_tree "${bin}"; fail "${name}: build"; }
+
+    # Apiary emits a structurally valid but *empty* module when the parse finds
+    # no declarations - which compiles, links, and imports, so every downstream
+    # check passes while binding nothing. Assert the generated TU actually
+    # contains bindings, or a broken toolchain probe looks like success.
+    tu="$(find "${bin}" -name '*_pybind*.cpp' | head -1)"
+    [[ -n "${tu}" ]] || fail "${name}: no binding TU generated"
+    grep -qE '\.def|py::class_' "${tu}" \
+        || { dump_tree "${bin}"; fail "${name}: generated TU binds nothing (empty module)"; }
 
     # A built extension that cannot be imported is still a broken example.
     PYTHONPATH="$(native "${bin}")" "${PY}" "${ex}/${script}" \
