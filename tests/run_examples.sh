@@ -50,6 +50,13 @@ dump_tree() {
         -printf '%p (%s bytes)\n' 2>/dev/null \
         || find "${dir}" \( -name '*.pyi' -o -name '*_pybind*.cpp' -o -name '*.docs.json' \) 2>/dev/null \
         || echo "(nothing matched)" >&2
+    # Sizes alone cannot distinguish "apiary bound nothing" from "apiary bound
+    # the wrong thing", and the generated files are small. Show them.
+    local f
+    for f in $(find "${dir}" -name '*_pybind*.cpp' -o -name '*.pyi' 2>/dev/null); do
+        echo "--- ${f} ---" >&2
+        cat "${f}" >&2
+    done
 }
 
 # Under Git Bash the shell's POSIX view (/tmp/...) is not what a native cmake.exe
@@ -98,9 +105,21 @@ for case in "${CASES[@]}"; do
         >"${WORK}/${name}.configure.log" 2>&1 \
         || { cat "${WORK}/${name}.configure.log" >&2; fail "${name}: configure"; }
 
-    "${CMAKE}" --build "$(native "${bin}")" \
+    # --verbose so a failure log carries the actual apiary invocation. What
+    # flags the codegen ran with is the first thing anyone needs, and ninja's
+    # default one-line-per-edge output hides exactly that.
+    "${CMAKE}" --build "$(native "${bin}")" --verbose \
         >"${WORK}/${name}.build.log" 2>&1 \
-        || { cat "${WORK}/${name}.build.log" >&2; dump_tree "${bin}"; fail "${name}: build"; }
+        || {
+            # The configure log holds apiary_detect_toolchain's probe results
+            # (resource-dir, C++ include dirs). A build failure is very often a
+            # probe that came back empty, so surface it here too.
+            echo "--- ${name} configure log ---" >&2
+            grep -E "apiary:|Found Python|pybind11" "${WORK}/${name}.configure.log" >&2 || true
+            cat "${WORK}/${name}.build.log" >&2
+            dump_tree "${bin}"
+            fail "${name}: build"
+        }
 
     # Apiary emits a structurally valid but *empty* module when the parse finds
     # no declarations - which compiles, links, and imports, so every downstream
