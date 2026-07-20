@@ -61,6 +61,26 @@ if(APIARY_BUILD_TOOL)
 find_package(Clang REQUIRED CONFIG)
 find_package(LLVM REQUIRED CONFIG)
 
+# Apiary's emitted text is LLVM-version-dependent: Clang's type printer changed
+# how it qualifies names, so LLVM 19 emits "Box<float>" where 22 emits
+# "einsums::fixture::Box<float>". The unqualified form does not compile in the
+# generated TU, and the golden suites encode the 22 spelling, so building
+# against an older major produces silently wrong bindings rather than a build
+# error. Fail at configure time instead.
+#
+# The floor is the major conda/recipe.yaml pins and CI tests. Majors between
+# this and the known-bad 19 are simply unverified - raise or lower it only
+# alongside a golden run on that version.
+set(APIARY_LLVM_VERSION_MIN 22)
+if(LLVM_VERSION_MAJOR VERSION_LESS APIARY_LLVM_VERSION_MIN)
+    message(FATAL_ERROR
+        "apiary: LLVM ${LLVM_VERSION} is too old (need >= ${APIARY_LLVM_VERSION_MIN}).\n"
+        "Clang's type printer qualifies names differently before ${APIARY_LLVM_VERSION_MIN}, "
+        "which yields generated bindings that do not compile.\n"
+        "Point CMAKE_PREFIX_PATH at an LLVM ${APIARY_LLVM_VERSION_MIN}+ install "
+        "(conda-forge: clangdev=${APIARY_LLVM_VERSION_MIN} llvmdev=${APIARY_LLVM_VERSION_MIN}).")
+endif()
+
 message(STATUS "apiary: using LLVM ${LLVM_VERSION} from ${LLVM_DIR}")
 message(STATUS "apiary: using Clang from ${Clang_DIR}")
 

@@ -76,6 +76,23 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     /// @return The count of distinct undocumented public entities.
     [[nodiscard]] int undocumented_count() const { return static_cast<int>(_undocumented_seen.size()); }
 
+    /// @brief Number of APIARY_*-annotated declarations seen anywhere in the
+    /// translation unit, before the module-header filter is applied.
+    ///
+    /// Paired with ``annotated_filtered_out()`` this separates the two ways a
+    /// run can legitimately produce nothing, which are otherwise
+    /// indistinguishable in the output: the parse saw no annotations at all
+    /// (wrong header, or the annotation macros expanded to nothing), versus it
+    /// saw them and the header filter rejected every one (a ``--source-include``
+    /// that does not match where the declarations actually live).
+    /// @return The count of annotated declarations encountered.
+    [[nodiscard]] int annotated_seen() const { return _annotated_seen; }
+
+    /// @brief Number of annotated declarations rejected by the module-header
+    /// filter. See ``annotated_seen()`` for why this is tracked separately.
+    /// @return The count of annotated declarations the filter rejected.
+    [[nodiscard]] int annotated_filtered_out() const { return _annotated_filtered_out; }
+
     // Override the *Traverse* hooks for class-like records so we can push
     // and pop the scope stack around the recursive descent into members.
     // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
@@ -137,12 +154,24 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     Module                    _module;
     std::vector<BoundClass *> _class_stack; // current containing class chain (top = innermost)
     int                       _error_count = 0;
+    // Diagnostic tallies. Not part of the IR - they exist so an empty result
+    // can explain itself rather than surfacing as a valid but empty module.
+    int                       _annotated_seen         = 0;
+    int                       _annotated_filtered_out = 0;
 
     [[nodiscard]] BoundClass *current_class() const { return _class_stack.empty() ? nullptr : _class_stack.back(); }
 
     // Returns false if the decl carries no apiary annotation, in
     // which case visitors should leave it alone.
     [[nodiscard]] bool has_any_pybind_annotation(clang::Decl const *decl) const;
+
+    /// @brief Whether a declaration is annotated AND lives in a module header.
+    ///
+    /// Records why a declaration was rejected, so a run that binds nothing can
+    /// say which of the two conditions failed. Non-const because it tallies.
+    /// @param decl The declaration under consideration.
+    /// @return True when the declaration should be bound here.
+    [[nodiscard]] bool binds_here(clang::Decl const *decl);
 
     // Docs-mode gate for top-level entities (free functions, classes,
     // typedefs, enums): in a module header, not internal, has a doc comment.

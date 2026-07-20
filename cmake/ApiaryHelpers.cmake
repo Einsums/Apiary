@@ -290,7 +290,11 @@ endfunction()
 # EXTRA_FLAGS + -std, and sets the requested OUT_* variables in the caller's
 # scope. Requires apiary_detect_toolchain() to have run.
 function(apiary_add_bindings)
-    cmake_parse_arguments(_A "BINDING;DOCS_JSON"
+    # ALLOW_EMPTY: opt out of the "a module that binds nothing is an error"
+    # check. Only for a module whose annotations are genuinely all behind a
+    # disabled configuration - reach for it after confirming that, not to
+    # silence a failure.
+    cmake_parse_arguments(_A "BINDING;DOCS_JSON;ALLOW_EMPTY"
         "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;MAX_DEFS_PER_TU;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON"
         "HEADERS;SOURCE_INCLUDES;DEPENDS_TARGETS;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
 
@@ -404,8 +408,14 @@ function(apiary_add_bindings)
         # Built as a list first: unquoted expansion drops empty variables
         # (_max_defs_flag and _source_includes are often unset), which keeps
         # empty arguments out of the command.
+        set(_allow_empty_flag "")
+        if(_A_ALLOW_EMPTY)
+            set(_allow_empty_flag --allow-empty)
+        endif()
+
         set(_apiary_argv
             ${_max_defs_flag}
+            ${_allow_empty_flag}
             --register-function ${_A_REGISTER_FUNCTION}
             --output ${_binding}
             --stub-output ${_stub}

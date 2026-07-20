@@ -145,4 +145,35 @@ if [[ "${fwd_body}" != "${bwd_body}" ]]; then
     exit 1
 fi
 
+# ---- an empty module is an error, and writes nothing ----------------------
+# A module that binds nothing still compiles, links, and imports, so it passes
+# every downstream check while exposing nothing. It must fail loudly instead,
+# and must not leave a plausible-looking artifact behind for the next build step
+# to consume. A --source-include that matches no declaration is the shortest way
+# to provoke it - and is exactly how this manifested on Windows.
+empty_out="$(mktemp)"
+rm -f "${empty_out}"
+if "${TOOL}" --register-function reg --module einsums --output "${empty_out}" \
+        --source-include 'NO/Such.hpp' "${FIXTURE_DIR}/simple_class.hpp" \
+        -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" >/dev/null 2>"${empty_out}.err"; then
+    echo "FAIL: empty module should exit non-zero" >&2
+    exit 1
+fi
+[[ -f "${empty_out}" ]] && { echo "FAIL: empty module must not write an output file" >&2; exit 1; }
+assert_contains empty_module 'no bindings were generated'                 "$(cat "${empty_out}.err")"
+# The diagnostic has to name the cause, not just the symptom: this is the line
+# that turns "no .pyi fragments found" into a one-read diagnosis.
+assert_contains empty_module 'rejected by the --source-include filter'    "$(cat "${empty_out}.err")"
+assert_contains empty_module 'NO/Such\.hpp'                               "$(cat "${empty_out}.err")"
+
+# --allow-empty is the documented escape hatch and must still emit.
+if ! "${TOOL}" --register-function reg --module einsums --output "${empty_out}" --allow-empty \
+        --source-include 'NO/Such.hpp' "${FIXTURE_DIR}/simple_class.hpp" \
+        -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" >/dev/null 2>&1; then
+    echo "FAIL: --allow-empty should succeed on an empty module" >&2
+    exit 1
+fi
+[[ -f "${empty_out}" ]] || { echo "FAIL: --allow-empty should still write the TU" >&2; exit 1; }
+rm -f "${empty_out}" "${empty_out}.err"
+
 echo "OK: all Phase-2 fixtures pass"

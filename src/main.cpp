@@ -61,6 +61,12 @@ llvm::cl::opt<std::string> g_stub_output("stub-output",
 llvm::cl::opt<bool> g_dump_ir("dump-ir", llvm::cl::desc("Dump the parsed IR instead of emitting pybind11 (Phase 2 mode)"),
                               llvm::cl::cat(g_tool_category), llvm::cl::init(false));
 
+llvm::cl::opt<bool> g_allow_empty("allow-empty",
+                                  llvm::cl::desc("Emit a binding TU even when no declarations were bound. Without this "
+                                                 "an empty result is an error: a module that binds nothing still "
+                                                 "compiles, links, and imports, so it would otherwise pass unnoticed."),
+                                  llvm::cl::cat(g_tool_category), llvm::cl::init(false));
+
 llvm::cl::opt<bool> g_emit_cpp_docs_json("emit-cpp-docs-json",
                                          llvm::cl::desc("Emit a documentation JSON of the full PUBLIC C++ API of the "
                                                         "module headers (Option 2 — replaces Doxygen/Breathe). Walks all "
@@ -145,6 +151,8 @@ std::unordered_set<std::string> g_seen_concepts;
 std::unordered_set<std::string> g_seen_macros;
 int                             g_error_count        = 0;
 int                             g_undocumented_count = 0;
+int                             g_annotated_seen         = 0;
+int                             g_annotated_filtered_out = 0;
 
 class IrConsumer : public ASTConsumer {
   public:
@@ -166,6 +174,8 @@ class IrConsumer : public ASTConsumer {
         apiary::Module local = std::move(visitor).take();
         g_error_count += visitor.error_count();
         g_undocumented_count += visitor.undocumented_count();
+        g_annotated_seen += visitor.annotated_seen();
+        g_annotated_filtered_out += visitor.annotated_filtered_out();
         for (auto &c : local.classes) {
             if (g_seen_classes.insert(c.qualified_name).second) {
                 g_module.classes.push_back(std::move(c));
@@ -290,6 +300,43 @@ int main(int argc, char const **argv) {
                      << rep.unit_count << " emit unit(s); largest single unit = " << rep.max_unit_defs
                      << " (a shard can never be smaller than this).\n";
         return g_error_count > 0 ? 1 : (rc != 0 ? rc : 0);
+    }
+
+    // Measured on the *emitted* binding statements, not the IR entity counts.
+    // Those differ: an entity can survive into the IR and still contribute no
+    // binding (an exposed class whose members were all filtered out), so the IR
+    // counts would call such a module non-empty when the generated TU binds
+    // nothing at all.
+    apiary::DefReport const report = apiary::report_defs(g_module, opts);
+
+    // A tally on every run, not just on failure. An empty module is otherwise
+    // indistinguishable from a healthy one in a build log, and this line is
+    // what makes the difference visible.
+    llvm::errs() << "apiary: module '" << g_module_name << "': " << report.total_defs << " binding statement(s) from "
+                 << g_module.classes.size() << " class(es), " << g_module.functions.size() << " function(s), "
+                 << g_module.enums.size() << " enum(s)\n";
+
+    // Binding nothing is an error by default. Such a module still compiles,
+    // links, and imports, so every downstream check passes while it exposes
+    // nothing - the failure is invisible exactly where it matters. The counters
+    // separate the two causes, which need opposite fixes.
+    if (report.total_defs == 0 && !g_allow_empty) {
+        llvm::errs() << "apiary: no bindings were generated.\n";
+        if (g_annotated_seen == 0) {
+            llvm::errs() << "apiary:   no APIARY_* annotations were found. Check that the header includes "
+                            "<apiary/Annotations.hpp> and that declarations carry APIARY_EXPOSE.\n";
+        } else if (g_annotated_filtered_out > 0) {
+            llvm::errs() << "apiary:   " << g_annotated_filtered_out
+                         << " annotated declaration(s) were rejected by the --source-include filter, so the paths "
+                            "below do not match where those declarations actually live:\n";
+            for (std::string const &p : g_source_includes) {
+                llvm::errs() << "apiary:     --source-include " << p << "\n";
+            }
+        }
+        llvm::errs() << "apiary: refusing to write an empty module; pass --allow-empty if this is intentional.\n";
+        // Deliberately writes nothing. An empty-but-valid TU on disk is worse
+        // than no file at all: the next build step consumes it happily.
+        return 1;
     }
 
     // Sharding: when --max-defs-per-tu is set, the binding body is split

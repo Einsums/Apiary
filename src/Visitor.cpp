@@ -583,6 +583,18 @@ bool Visitor::has_any_pybind_annotation(clang::Decl const *decl) const {
     return false;
 }
 
+bool Visitor::binds_here(clang::Decl const *decl) {
+    if (!has_any_pybind_annotation(decl)) {
+        return false;
+    }
+    ++_annotated_seen;
+    if (!decl_in_module_headers(decl)) {
+        ++_annotated_filtered_out;
+        return false;
+    }
+    return true;
+}
+
 bool Visitor::passes_docs_filter(clang::NamedDecl const *decl) const {
     if (!decl_in_module_headers(decl)) {
         return false;
@@ -761,6 +773,18 @@ bool Visitor::TraverseCXXRecordDecl(clang::CXXRecordDecl *decl) {
         return clang::RecursiveASTVisitor<Visitor>::TraverseCXXRecordDecl(decl);
     }
 
+    // Tallied here rather than via binds_here(): this path applies the two
+    // checks separately, because an annotated class from outside the module
+    // headers is still captured below as an external record for name
+    // resolution. Without this the empty-module diagnostic would report "no
+    // annotations found" for a header whose class was annotated but filtered.
+    if (!_docs_mode) {
+        ++_annotated_seen;
+        if (!decl_in_module_headers(decl)) {
+            ++_annotated_filtered_out;
+        }
+    }
+
     // Out-of-module annotated classes: capture a minimal record purely
     // for cross-module name resolution in the .pyi emitter (so a runtime
     // signature mentioning ``GeneralRuntimeTensor<float, ...>`` from
@@ -824,7 +848,7 @@ bool Visitor::VisitCXXMethodDecl(clang::CXXMethodDecl *decl) {
     if (cls == nullptr) {
         return true; // method outside an exposed class — nothing to attach to
     }
-    if (_docs_mode ? !passes_member_filter(decl) : (!has_any_pybind_annotation(decl) || !decl_in_module_headers(decl))) {
+    if (_docs_mode ? !passes_member_filter(decl) : !binds_here(decl)) {
         return true;
     }
 
@@ -890,7 +914,7 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
     if (decl->isImplicit() || decl->isTemplateInstantiation()) {
         return true;
     }
-    if (_docs_mode ? !passes_docs_filter(decl) : (!has_any_pybind_annotation(decl) || !decl_in_module_headers(decl))) {
+    if (_docs_mode ? !passes_docs_filter(decl) : !binds_here(decl)) {
         return true;
     }
 
@@ -1005,7 +1029,7 @@ bool Visitor::VisitFieldDecl(clang::FieldDecl *decl) {
     if (decl->isImplicit()) {
         return true;
     }
-    if (_docs_mode ? !passes_member_filter(decl) : (!has_any_pybind_annotation(decl) || !decl_in_module_headers(decl))) {
+    if (_docs_mode ? !passes_member_filter(decl) : !binds_here(decl)) {
         return true;
     }
 
@@ -1024,7 +1048,7 @@ bool Visitor::VisitEnumDecl(clang::EnumDecl *decl) {
     }
     bool const member = current_class() != nullptr;
     if (_docs_mode ? !(member ? passes_member_filter(decl) : passes_docs_filter(decl))
-                   : (!has_any_pybind_annotation(decl) || !decl_in_module_headers(decl))) {
+                   : !binds_here(decl)) {
         return true;
     }
 
