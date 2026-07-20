@@ -44,10 +44,48 @@ readonly CASES=(
     "fixture_enum_nttp|enum_nttp.hpp|enum_nttp.cpp.golden"
 )
 
+# Run apiary over one fixture, writing the generated TU to $1.
+#
+# stderr is captured rather than discarded, and both a non-zero exit and empty
+# output are hard failures. Previously this swallowed stderr and ended in
+# `|| true`, so a tool that could not run at all (bad include dir, missing
+# binary, a parse error in a fixture) produced an empty file and the script
+# carried on. Under REGEN=1 that silently overwrote every golden with an empty
+# file and then reported "OK: all pass", because it was comparing empty to
+# empty. Fail loudly instead.
 run_tool() {
-    local module="$1" fixture="$2"
+    local out="$1" module="$2" fixture="$3"
+    local err status
+    err="$(mktemp)"
+
+    set +e
     "${TOOL}" --module "${module}" "${FIXTURE_DIR}/${fixture}" \
-        -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>/dev/null || true
+        -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" > "${out}" 2> "${err}"
+    status=$?
+    set -e
+
+    if (( status != 0 )); then
+        echo "ERROR ${fixture}: apiary exited ${status}" >&2
+        cat "${err}" >&2
+        rm -f "${err}"
+        return 1
+    fi
+
+    if [[ ! -s "${out}" ]]; then
+        echo "ERROR ${fixture}: apiary exited 0 but produced no output." >&2
+        echo "  tool:    ${TOOL}" >&2
+        echo "  include: ${INCLUDE_DIR}" >&2
+        echo "  (both arguments must be ABSOLUTE paths - this script cds to" >&2
+        echo "   its own directory, so relative paths resolve elsewhere.)" >&2
+        if [[ -s "${err}" ]]; then
+            echo "--- apiary stderr ---" >&2
+            cat "${err}" >&2
+        fi
+        rm -f "${err}"
+        return 1
+    fi
+
+    rm -f "${err}"
 }
 
 tmp_actual="$(mktemp)"
@@ -69,7 +107,10 @@ cd "${SCRIPT_DIR}"
 failures=0
 for case in "${CASES[@]}"; do
     IFS='|' read -r module fixture golden <<<"${case}"
-    run_tool "${module}" "${fixture}" > "${tmp_actual}"
+    if ! run_tool "${tmp_actual}" "${module}" "${fixture}"; then
+        failures=$((failures + 1))
+        continue
+    fi
     golden_path="${GOLDEN_DIR}/${golden}"
 
     if [[ "${REGEN}" == "1" ]]; then
@@ -90,4 +131,10 @@ if (( failures != 0 )); then
     exit 1
 fi
 
-echo "OK: all Phase-3 golden tests pass"
+if [[ "${REGEN}" == "1" ]]; then
+    # Not a pass: nothing was verified. Say so, so a regen is never mistaken
+    # for a green run.
+    echo "REGEN complete: ${#CASES[@]} golden(s) rewritten. Review 'git diff' before committing."
+else
+    echo "OK: all Phase-3 golden tests pass"
+fi
