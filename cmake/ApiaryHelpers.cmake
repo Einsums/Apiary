@@ -20,6 +20,18 @@
 
 include_guard(GLOBAL)
 
+# Directory holding this file, so the codegen custom commands can locate the
+# ApiaryRun.cmake stderr-filter wrapper in both add_subdirectory and
+# find_package(Apiary) modes.
+#
+# CACHE INTERNAL, not a plain set: consumers call apiary_add_bindings() from a
+# different directory scope than the one that included this file (Einsums does
+# so from root scope), and a directory-scoped variable is empty there - which
+# silently produces "-P /ApiaryRun.cmake". Must be captured at include time;
+# CMAKE_CURRENT_LIST_DIR inside a function resolves to the *caller's* file.
+set(APIARY_HELPERS_DIR "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL
+    "Directory containing ApiaryHelpers.cmake and ApiaryRun.cmake")
+
 # Probe ``CMAKE_CXX_COMPILER`` (or a conda clang++) for the include paths
 # libtooling needs and cache them as:
 #   APIARY_RESOURCE_DIR        - clang -resource-dir (builtin headers)
@@ -362,17 +374,28 @@ function(apiary_add_bindings)
             endif()
         endif()
 
+        # Built as a list first: unquoted expansion drops empty variables
+        # (_max_defs_flag and _source_includes are often unset), which keeps
+        # empty arguments out of the command.
+        set(_apiary_argv
+            ${_max_defs_flag}
+            --register-function ${_A_REGISTER_FUNCTION}
+            --output ${_binding}
+            --stub-output ${_stub}
+            ${_source_includes}
+            ${_A_HEADERS}
+            -- ${_compile_flags}
+        )
+
         add_custom_command(
             OUTPUT ${_binding_outputs} ${_stub}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_OUTPUT_DIR}"
-            COMMAND $<TARGET_FILE:apiary::apiary>
-                    ${_max_defs_flag}
-                    --register-function ${_A_REGISTER_FUNCTION}
-                    --output ${_binding}
-                    --stub-output ${_stub}
-                    ${_source_includes}
-                    ${_A_HEADERS}
-                    -- ${_compile_flags}
+            # Routed through ApiaryRun.cmake so libtooling's per-file
+            # "[n/m] Processing file ..." chatter is stripped from stderr while
+            # real diagnostics and the exit status pass through.
+            COMMAND ${CMAKE_COMMAND}
+                    "-DAPIARY_COMMAND=$<TARGET_FILE:apiary::apiary>;${_apiary_argv}"
+                    -P "${APIARY_HELPERS_DIR}/ApiaryRun.cmake"
             DEPENDS ${_A_HEADERS} apiary::apiary ${_A_EXTRA_DEPENDS}
             VERBATIM
             COMMENT "apiary: generating ${_A_OUTPUT_NAME} bindings + .pyi"
@@ -387,16 +410,21 @@ function(apiary_add_bindings)
 
     if(_A_DOCS_JSON)
         set(_docs "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}.docs.json")
+        set(_apiary_docs_argv
+            --emit-docs-json
+            --module ${_A_MODULE}
+            --output ${_docs}
+            ${_source_includes}
+            ${_A_HEADERS}
+            -- ${_compile_flags}
+        )
         add_custom_command(
             OUTPUT ${_docs}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_OUTPUT_DIR}"
-            COMMAND $<TARGET_FILE:apiary::apiary>
-                    --emit-docs-json
-                    --module ${_A_MODULE}
-                    --output ${_docs}
-                    ${_source_includes}
-                    ${_A_HEADERS}
-                    -- ${_compile_flags}
+            # See the binding command above on the stderr filter.
+            COMMAND ${CMAKE_COMMAND}
+                    "-DAPIARY_COMMAND=$<TARGET_FILE:apiary::apiary>;${_apiary_docs_argv}"
+                    -P "${APIARY_HELPERS_DIR}/ApiaryRun.cmake"
             DEPENDS ${_A_HEADERS} apiary::apiary ${_A_EXTRA_DEPENDS}
             VERBATIM
             COMMENT "apiary: emitting docs JSON for ${_A_OUTPUT_NAME}"
