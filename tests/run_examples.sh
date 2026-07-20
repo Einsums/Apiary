@@ -36,6 +36,18 @@ trap 'rm -rf "${WORK}"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# A build failure here is usually about a file the codegen was expected to
+# produce and didn't, and the ninja log alone never shows what actually landed
+# on disk. Dump the generated tree so the next CI run carries its own evidence.
+dump_tree() {
+    local dir="$1"
+    echo "--- generated tree under ${dir} ---" >&2
+    find "${dir}" \( -name '*.pyi' -o -name '*_pybind*.cpp' -o -name '*.docs.json' \) \
+        -printf '%p (%s bytes)\n' 2>/dev/null \
+        || find "${dir}" \( -name '*.pyi' -o -name '*_pybind*.cpp' -o -name '*.docs.json' \) 2>/dev/null \
+        || echo "(nothing matched)" >&2
+}
+
 # Under Git Bash the shell's POSIX view (/tmp/...) is not what a native cmake.exe
 # or python.exe understands. MSYS rewrites path-looking *arguments*, but never
 # environment variables, so PYTHONPATH below would silently point nowhere.
@@ -76,7 +88,7 @@ for case in "${CASES[@]}"; do
 
     "${CMAKE}" --build "$(native "${bin}")" \
         >"${WORK}/${name}.build.log" 2>&1 \
-        || { cat "${WORK}/${name}.build.log" >&2; fail "${name}: build"; }
+        || { cat "${WORK}/${name}.build.log" >&2; dump_tree "${bin}"; fail "${name}: build"; }
 
     # A built extension that cannot be imported is still a broken example.
     PYTHONPATH="$(native "${bin}")" "${PY}" "${ex}/${script}" \

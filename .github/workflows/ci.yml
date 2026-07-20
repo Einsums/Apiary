@@ -19,14 +19,20 @@ jobs:
       # packages find_package(Clang/LLVM CONFIG) needs. pybind11 is what the
       # apiary_examples suite builds the generated extensions against; without
       # it that suite skips itself.
+      #
+      # The LLVM major is pinned to match conda/recipe.yaml's llvm_major. Left
+      # unpinned the solver picks a different major per platform, and apiary's
+      # emitted type names are version-sensitive: LLVM 19 prints them
+      # unqualified where 22 fully qualifies them, so the goldens can only match
+      # one major at a time.
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: apiary-dev
           create-args: >-
             cmake
             ninja
-            clangdev
-            llvmdev
+            clangdev=22
+            llvmdev=22
             cxx-compiler
             zlib
             python
@@ -55,15 +61,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # NOT cxx-compiler here, unlike the Linux job. On osx-arm64 that
+      # metapackage pulls clang_osx-arm64, which drags clangdev down to the
+      # compiler's own major - that is how this job silently ended up on LLVM
+      # 19 while Linux ran 22. Naming the clang drivers directly keeps the whole
+      # toolchain on one pinned major.
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: apiary-dev
           create-args: >-
             cmake
             ninja
-            clangdev
-            llvmdev
-            cxx-compiler
+            clangdev=22
+            llvmdev=22
+            clang
+            clangxx
             zlib
             python
             pybind11
@@ -106,8 +118,8 @@ jobs:
           create-args: >-
             cmake
             ninja
-            clangdev
-            llvmdev
+            clangdev=22
+            llvmdev=22
             clang
             clangxx
             zlib
