@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -47,11 +48,23 @@ def universal_flags(build_dir: Path, source_dir: Path) -> list[str]:
     only covers Tensor's transitive deps, so headers of modules Tensor
     doesn't depend on (ComputeGraph, Comm, GPU, ...) wouldn't resolve their
     own includes and would parse to nothing."""
-    ninja = (build_dir / "build.ninja").read_text(encoding="utf-8")
+    # Reading the build graph directly ties this to the Ninja generator. Say so
+    # plainly rather than surfacing a bare FileNotFoundError, which under a
+    # Visual Studio or Makefile build looks like a missing build dir.
+    ninja_file = build_dir / "build.ninja"
+    if not ninja_file.is_file():
+        raise SystemExit(f"gen_cpp_docs: {ninja_file} not found - flags are read from the Ninja "
+                         "build graph, so the build must be configured with -G Ninja")
+    ninja = ninja_file.read_text(encoding="utf-8")
     m = re.search(r"apiary --register-function apiary_register_Tensor [^\n]*", ninja)
     if not m:
         raise SystemExit("gen_cpp_docs: no Tensor pybind command in build.ninja (need EINSUMS_BUILD_PYTHON)")
-    toks = shlex.split(m.group(0))
+    # POSIX lexing treats the backslashes in a Windows path as escapes and eats
+    # them, silently corrupting every -I flag. Non-POSIX mode preserves them but
+    # leaves quotes attached to the token, so strip those back off.
+    toks = shlex.split(m.group(0), posix=(os.name != "nt"))
+    if os.name == "nt":
+        toks = [t.strip('"') for t in toks]
     flags = toks[toks.index("--"):]
     seen = {f for f in flags if f.startswith("-I")}
     for base in (source_dir / "libs", build_dir / "libs"):

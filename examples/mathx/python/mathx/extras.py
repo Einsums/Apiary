@@ -10,7 +10,8 @@ only by Apiary's static ``ast`` frontend — never by the C++ binding pass.
 
 from __future__ import annotations
 
-from typing import deprecated
+# PEP 702's decorator lives in ``warnings`` (3.13+), not ``typing``.
+from warnings import deprecated
 
 # apiary's static frontend ignores imports (it only walks def/class), so this
 # runtime import of the bound type does not create a duplicate symbol.

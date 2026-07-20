@@ -16,7 +16,9 @@ jobs:
 
       # Apiary links against the Clang/LLVM development libraries (libTooling).
       # The conda-forge clangdev/llvmdev packages provide the CMake config
-      # packages find_package(Clang/LLVM CONFIG) needs.
+      # packages find_package(Clang/LLVM CONFIG) needs. pybind11 is what the
+      # apiary_examples suite builds the generated extensions against; without
+      # it that suite skips itself.
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: apiary-dev
@@ -28,6 +30,43 @@ jobs:
             cxx-compiler
             zlib
             python
+            pybind11
+
+      - name: Configure
+        run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # macOS is the primary development platform, which makes it the least-covered
+  # target rather than the most: it is verified only by whatever a maintainer
+  # happens to run locally, so a Linux-only change can break it and CI stays
+  # green. It is also the only job exercising the APPLE branch of
+  # apiary_detect_toolchain (forward the whole probed include list, because the
+  # conda libc++ collides with the SDK's under -isysroot) and the only arm64 one.
+  macos:
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: apiary-dev
+          create-args: >-
+            cmake
+            ninja
+            clangdev
+            llvmdev
+            cxx-compiler
+            zlib
+            python
+            pybind11
 
       - name: Configure
         run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
@@ -74,6 +113,7 @@ jobs:
             zlib
             zstd
             python
+            pybind11
 
       # Windows conda packages install under %CONDA_PREFIX%\Library, so that -
       # not the env root - is where find_package(Clang/LLVM CONFIG) has to look.

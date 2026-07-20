@@ -169,7 +169,15 @@ install(EXPORT ApiaryTargets
 # Bundled Python scripts (stub aggregation + doc rendering) the helper
 # functions invoke; consumers locate them via APIARY_SCRIPTS_DIR.
 install(DIRECTORY scripts/ DESTINATION ${CMAKE_INSTALL_DATADIR}/apiary/scripts)
-install(FILES cmake/ApiaryHelpers.cmake DESTINATION ${_apiary_cmakedir})
+# ApiaryRun.cmake ships alongside the helpers, not as an afterthought: the
+# codegen custom commands invoke it by path (see APIARY_HELPERS_DIR), so an
+# install missing it leaves every find_package(Apiary) consumer failing at
+# build time with "Not a file: .../ApiaryRun.cmake".
+install(FILES
+    cmake/ApiaryHelpers.cmake
+    cmake/ApiaryRun.cmake
+    DESTINATION ${_apiary_cmakedir}
+)
 
 set(APIARY_SCRIPTS_DIR "${CMAKE_INSTALL_DATADIR}/apiary/scripts")
 configure_package_config_file(
@@ -197,6 +205,14 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
     # Probed up front: several suites below take the interpreter as an argument,
     # and a bare ``python3`` fallback does not exist on Windows.
+    #
+    # Point the search at the active conda env first. Without this hint CMake
+    # can pick up the *base* env's interpreter while the developer is working in
+    # a named env, so the tests would run against a different Python (and a
+    # different set of installed packages) than the one on PATH.
+    if(DEFINED ENV{CONDA_PREFIX} AND NOT DEFINED Python_ROOT_DIR)
+        set(Python_ROOT_DIR "$ENV{CONDA_PREFIX}")
+    endif()
     find_package(Python COMPONENTS Interpreter QUIET)
     # The smoke/golden/pyi suites drive the executable, so they only register
     # when it was built. doc_lint below is pure Python and runs either way.
@@ -249,6 +265,36 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                         "${APIARY_SPHINX_BUILD}"
                         "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
             )
+        endif()
+
+        # examples/ built against the *install tree*, as a consumer would. This
+        # is the only coverage of apiary_detect_toolchain / apiary_add_bindings /
+        # apiary_aggregate_extension - the suites above all drive the binary
+        # directly and exercise none of the CMake plumbing. Needs pybind11 and a
+        # Python with development headers, so it registers only when both are
+        # present and skips quietly otherwise.
+        if(Python_EXECUTABLE)
+            execute_process(
+                COMMAND "${Python_EXECUTABLE}" -c "import pybind11"
+                RESULT_VARIABLE _apiary_no_pybind11
+                OUTPUT_QUIET ERROR_QUIET
+            )
+            if(_apiary_no_pybind11 EQUAL 0)
+                add_test(NAME apiary_examples
+                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_examples.sh"
+                            "${CMAKE_CURRENT_SOURCE_DIR}"
+                            "${CMAKE_CURRENT_BINARY_DIR}"
+                            "${CMAKE_COMMAND}"
+                            "${Python_EXECUTABLE}"
+                            "${CMAKE_GENERATOR}"
+                            "$<IF:$<BOOL:${CMAKE_BUILD_TYPE}>,${CMAKE_BUILD_TYPE},Release>"
+                )
+                # Builds two extensions from scratch; well past the 1500s default
+                # on a cold CI runner is unlikely, but the codegen is not fast.
+                set_tests_properties(apiary_examples PROPERTIES TIMEOUT 900)
+            else()
+                message(STATUS "apiary: pybind11 not importable - skipping apiary_examples test")
+            endif()
         endif()
     endif()
     # apiary_doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,
