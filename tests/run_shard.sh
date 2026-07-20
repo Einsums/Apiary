@@ -62,8 +62,13 @@ done < <(ls "${workdir}"/out_pybind.shard*.cpp 2>/dev/null | sort -V)
 
 (( ${#planned[@]} > 1 )) || fail "expected >1 shard at max-defs-per-tu=${MAX_DEFS}, planned ${#planned[@]}"
 (( ${#planned[@]} == ${#emitted[@]} )) || fail "plan listed ${#planned[@]} files, emit wrote ${#emitted[@]}"
+# --plan prints each path as the *binary* sees it, which under Git Bash is the
+# native C:\... form, while the ``ls`` above yields the shell's POSIX view of
+# the very same files. Reduce both to a basename so the existence check is
+# comparing like with like on every platform.
 for f in "${planned[@]}"; do
-    [[ -f "${f}" ]] || fail "planned shard not emitted: ${f}"
+    name="$(basename "${f//\\//}")"
+    [[ -f "${workdir}/${name}" ]] || fail "planned shard not emitted: ${f}"
 done
 echo "ok: plan and emit agree on ${#planned[@]} shard(s)"
 

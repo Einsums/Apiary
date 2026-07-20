@@ -779,7 +779,7 @@ def main() -> int:
     for module in modules:
         g = groups[module]
         page = render_page(module, g, curations.get(module))
-        (outdir / f"{module}.rst").write_text(page)
+        (outdir / f"{module}.rst").write_text(page, encoding="utf-8", newline="\n")
         log(f"wrote {module}.rst ({len(g['classes'])} classes, "
             f"{len(g['functions'])} functions, {len(g['enums'])} enums)")
         # Index summary line: the authored overview's first sentence, else counts.
@@ -790,10 +790,10 @@ def main() -> int:
             ", ".join(f"{n} {label}" for n, label in _counts if n)
 
     for article in articles:
-        (outdir / f"{article.slug}.rst").write_text(render_article(article))
+        (outdir / f"{article.slug}.rst").write_text(render_article(article), encoding="utf-8", newline="\n")
         log(f"wrote article {article.slug}.rst")
 
-    (outdir / "index.rst").write_text(render_index(modules, articles, module_briefs))
+    (outdir / "index.rst").write_text(render_index(modules, articles, module_briefs), encoding="utf-8", newline="\n")
     log(f"wrote index.rst with {len(modules)} module(s), {len(articles)} article(s)")
     return 0
 

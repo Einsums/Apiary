@@ -117,7 +117,7 @@ def render_py_helpers(py_path: Path) -> str:
     names (leading underscore) are dropped — they're implementation detail
     of the runtime shim, not part of the module's documented surface.
     """
-    source = py_path.read_text()
+    source = py_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     keep: list[ast.stmt] = []
     for node in tree.body:
@@ -147,7 +147,7 @@ def render_py_helpers(py_path: Path) -> str:
 
 def parse_fragment(path: Path) -> dict[str, str]:
     """Return {submodule_name: body} for each ``# %%submodule:`` block."""
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     blocks: dict[str, list[str]] = {}
     current: str | None = None
     for line in text.splitlines(keepends=True):
@@ -176,7 +176,7 @@ def load_overlay(overlay_path: Path) -> tuple[str, str]:
     caller's ``--overlay-class-regex``. Imports / other top-level statements are
     ignored — the shared header already supplies typing + numpy.
     """
-    tree = ast.parse(overlay_path.read_text())
+    tree = ast.parse(overlay_path.read_text(encoding="utf-8"))
     funcs: list[ast.stmt] = []
     methods: list[str] = []
     for node in tree.body:
@@ -261,12 +261,12 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
         # Attach the overlay's runtime-patched methods to matching _core classes.
         if sub == "" and overlay_class_re is not None:
             text = inject_class_methods(text, overlay_methods, overlay_class_re)
-        out_path.write_text(text)
+        out_path.write_text(text, encoding="utf-8", newline="\n")
         written[sub] = out_path
 
     # PEP 561: empty marker file telling type-checkers this package
     # ships its own stubs.
-    (pkg_dir / "py.typed").write_text("")
+    (pkg_dir / "py.typed").write_text("", encoding="utf-8", newline="\n")
 
     # __init__.pyi: re-export everything from _core so ``import einsums``
     # gives pyright the full top-level surface, plus an explicit
@@ -295,7 +295,8 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
                     sub_dir = pkg_dir / child.name
                     sub_dir.mkdir(parents=True, exist_ok=True)
                     (sub_dir / "__init__.pyi").write_text(
-                        SHARED_HEADER + helper_stub.rstrip() + "\n"
+                        SHARED_HEADER + helper_stub.rstrip() + "\n",
+                        encoding="utf-8", newline="\n"
                     )
     all_sub_names = sorted(set(submodule_names) | set(pkg_helper_names))
     init_pyi = pkg_dir / "__init__.pyi"
@@ -307,7 +308,7 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
     # Overlay module-level functions (runtime-patched; not in _core).
     if overlay_funcs:
         init_body += "\n# Overlay module-level functions (runtime-patched)\n" + overlay_funcs.rstrip() + "\n"
-    init_pyi.write_text(init_body)
+    init_pyi.write_text(init_body, encoding="utf-8", newline="\n")
 
     return written
 

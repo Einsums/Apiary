@@ -344,7 +344,7 @@ def params_from_args(args: ast.arguments, *, drop_first: bool = False) -> list[d
 
 
 def _location(file: Path, node: ast.AST) -> dict:
-    return {"file": str(file), "line": getattr(node, "lineno", 0), "column": getattr(node, "col_offset", 0) + 1}
+    return {"file": file.as_posix(), "line": getattr(node, "lineno", 0), "column": getattr(node, "col_offset", 0) + 1}
 
 
 # Sphinx availability directives in a docstring.
@@ -735,7 +735,7 @@ def extract_file(file: Path, package: str, package_dir: Path,
     """Return (classes, functions, enums) for one ``.py`` file."""
     module = dotted_module(file, package, package_dir)
     recorded = _recorded_path(file, source_root)
-    source = file.read_text()
+    source = file.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(file))
     # Index this file's comments so data assignments can pick up #: / # docs.
     _CTX["comments"], _CTX["code_rows"] = index_comments(source)
@@ -804,6 +804,10 @@ def iter_py_files(package_dir: Path) -> list[Path]:
 
 
 def main() -> int:
+    # The emitted JSON is byte-compared against golden files, so stdout must stay
+    # LF-only - Windows would otherwise translate every "\n" into "\r\n".
+    sys.stdout.reconfigure(newline="\n")
+
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--package", required=True, help="top-level package import name (recorded as the document 'module')")
     ap.add_argument("--package-dir", required=True, help="filesystem directory of the package (contains __init__.py)")
@@ -859,7 +863,7 @@ def main() -> int:
     if args.output == "-":
         sys.stdout.write(text)
     else:
-        Path(args.output).write_text(text)
+        Path(args.output).write_text(text, encoding="utf-8", newline="\n")
         skipped_note = f", skipped {skipped} unparseable file(s)" if skipped else ""
         log(f"wrote {args.output} ({len(classes)} classes, {len(functions)} functions, "
             f"{len(enums)} enums, {len(variables)} variables) from {len(files)} file(s){skipped_note}")

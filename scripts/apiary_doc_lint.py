@@ -177,6 +177,10 @@ def lint_module(doc: dict, findings: list[Finding]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Findings are captured and diffed by the shell tests, so stdout must stay
+    # LF-only - Windows would otherwise translate every "\n" into "\r\n".
+    sys.stdout.reconfigure(newline="\n")
+
     ap = argparse.ArgumentParser(description="Cross-check apiary docs JSON for doc/signature drift.")
     ap.add_argument("files", nargs="+", help="docs-JSON files (apiary --emit-cpp-docs-json output)")
     ap.add_argument("--format", choices=("text", "json"), default="text")
@@ -196,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     docs: list[dict] = []
     for path in args.files:
         try:
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 doc = json.load(fh)
         except (OSError, json.JSONDecodeError) as e:
             print(f"doc_lint: cannot read {path}: {e}", file=sys.stderr)

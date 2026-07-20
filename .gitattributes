@@ -1,0 +1,20 @@
+# Line-ending policy.
+#
+# GitHub's Windows runner images ship with core.autocrlf=true. Without the rules
+# below that setting breaks the test suite in two independent ways:
+#
+#   * every tests/*.sh is checked out with CRLF, so bash fails on the shebang
+#     line with "$'\r': command not found" before running a single assertion;
+#   * every tests/golden/* fixture is checked out with CRLF while apiary writes
+#     its output through llvm::raw_fd_ostream in binary (LF) mode, so each
+#     golden diff fails with a whole-file mismatch that reads like a codegen
+#     regression but is purely a checkout artifact.
+#
+# Normalizing to LF in the index and on checkout everywhere avoids both.
+* text=auto eol=lf
+
+# Byte-exactness matters most for these two categories, so state it explicitly
+# rather than relying on text=auto's heuristic.
+*.sh                text eol=lf
+tests/golden/**     text eol=lf
+*.golden            text eol=lf

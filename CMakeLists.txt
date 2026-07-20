@@ -117,7 +117,14 @@ set_target_properties(apiary PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
-target_compile_options(apiary PRIVATE -fno-rtti)
+# MSVC-style drivers (clang-cl, cl) spell this /GR-. The conda-forge win-64
+# clangdev libs are built against the MSVC ABI, so clang-cl is the supported
+# Windows compiler: it links those libs while keeping the clang frontend.
+if(MSVC)
+    target_compile_options(apiary PRIVATE /GR-)
+else()
+    target_compile_options(apiary PRIVATE -fno-rtti)
+endif()
 
 # Namespaced alias so add_subdirectory consumers use the same apiary::apiary
 # they would get from find_package(Apiary).
@@ -188,6 +195,9 @@ install(FILES
 # golden-output diffs once the emitter output stabilizes.
 if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
+    # Probed up front: several suites below take the interpreter as an argument,
+    # and a bare ``python3`` fallback does not exist on Windows.
+    find_package(Python COMPONENTS Interpreter QUIET)
     # The smoke/golden/pyi suites drive the executable, so they only register
     # when it was built. doc_lint below is pure Python and runs either way.
     if(APIARY_BUILD_TOOL)
@@ -224,6 +234,7 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
             COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_example_mathx.sh"
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                    "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
         )
         # Sphinx build-check: the rendered Python API reST must build with
         # ``sphinx-build -W -n`` (warnings = errors, nitpicky xrefs). Only
@@ -243,7 +254,6 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # apiary_doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,
     # so it needs no apiary binary — it diffs diagnostics for a seeded-drift
     # fixture against a golden. Prefer a CMake-found interpreter, else python3.
-    find_package(Python COMPONENTS Interpreter QUIET)
     add_test(NAME apiary_doc_lint
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_doc_lint.sh"
                 "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"

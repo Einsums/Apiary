@@ -49,11 +49,17 @@ function(apiary_detect_toolchain)
     # clang -resource-dir carries Clang's builtin headers (stddef.h, stdarg.h,
     # the x86 intrinsics, ...). Prefer the project compiler if it is clang,
     # else fall back to a conda clang++.
+    # Windows conda envs put executables under Library/bin, not bin/, and carry
+    # the .exe suffix; check both layouts before giving up.
     set(_clang "")
     if(CMAKE_CXX_COMPILER MATCHES "clang")
         set(_clang "${CMAKE_CXX_COMPILER}")
-    elseif(DEFINED ENV{CONDA_PREFIX} AND EXISTS "$ENV{CONDA_PREFIX}/bin/clang++")
-        set(_clang "$ENV{CONDA_PREFIX}/bin/clang++")
+    elseif(DEFINED ENV{CONDA_PREFIX})
+        foreach(_cand "bin/clang++" "Library/bin/clang++.exe" "Library/bin/clang-cl.exe")
+            if(NOT _clang AND EXISTS "$ENV{CONDA_PREFIX}/${_cand}")
+                set(_clang "$ENV{CONDA_PREFIX}/${_cand}")
+            endif()
+        endforeach()
     endif()
     set(_resource_dir "")
     if(_clang)
@@ -83,9 +89,30 @@ function(apiary_detect_toolchain)
     # macOS: forward the WHOLE probed list (and rely on it instead of
     # -isysroot): the conda libc++ is newer than the SDK's, and mixing both
     # via -isysroot yields a dual-libc++ include_next collision.
+    #
+    # Windows (clang-cl): forward the WHOLE probed list for the same reason as
+    # macOS - the MSVC STL lives in paths that carry no ``/c++`` segment, so the
+    # Linux filter below would discard everything.
     set(_cxx_dirs "")
+    # Both the null input and the driver's flag spelling are platform-specific.
+    # MSVC-style drivers take /std: and /TP, and the null device is NUL. Note
+    # this is execute_process, not a shell, so there is no MSYS path rescue.
+    if(WIN32)
+        set(_null_device "NUL")
+    else()
+        set(_null_device "/dev/null")
+    endif()
+    if(MSVC)
+        # clang-cl is still clang underneath, so it emits the same GCC-style
+        # search-list banner parsed below; only the driver syntax differs. Real
+        # cl.exe never emits it, so the probe simply comes back empty and falls
+        # through to the warning.
+        set(_probe_flags "/std:c++${_A_CXX_STANDARD}" "/EP" "/TP" "-v")
+    else()
+        set(_probe_flags "-std=c++${_A_CXX_STANDARD}" "-E" "-x" "c++" "-v")
+    endif()
     execute_process(
-        COMMAND "${CMAKE_CXX_COMPILER}" -std=c++${_A_CXX_STANDARD} -E -x c++ -v /dev/null
+        COMMAND "${CMAKE_CXX_COMPILER}" ${_probe_flags} "${_null_device}"
         OUTPUT_QUIET
         ERROR_VARIABLE _verbose
         RESULT_VARIABLE _rc
@@ -106,7 +133,7 @@ function(apiary_detect_toolchain)
                 if(NOT _dir OR NOT EXISTS "${_dir}")
                     continue()
                 endif()
-                if(APPLE)
+                if(APPLE OR MSVC)
                     list(APPEND _cxx_dirs "${_dir}")
                 elseif(_dir MATCHES "/c\\+\\+")
                     list(APPEND _cxx_dirs "${_dir}")

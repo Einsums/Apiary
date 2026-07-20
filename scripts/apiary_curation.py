@@ -163,7 +163,7 @@ def load_content(content_dir: str, known_modules: set[str],
     articles: list[Article] = []
     root = Path(content_dir)
     for path in sorted(root.rglob("*.md")):
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         stem = path.stem
         if stem in known_modules:
             module_curations[stem] = parse_module_curation(stem, text)

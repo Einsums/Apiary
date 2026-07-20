@@ -153,6 +153,10 @@ def merge(docs: list[dict]) -> dict:
 
 
 def main() -> int:
+    # The emitted JSON is byte-compared against golden files, so stdout must stay
+    # LF-only - Windows would otherwise translate every "\n" into "\r\n".
+    sys.stdout.reconfigure(newline="\n")
+
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="+", help="docs-JSON fragments (or '-' for stdin)")
     ap.add_argument("--output", "-o", required=True, help="path to write the merged docs.json (or '-' for stdout)")
@@ -165,7 +169,7 @@ def main() -> int:
     if args.output == "-":
         sys.stdout.write(text)
     else:
-        Path(args.output).write_text(text)
+        Path(args.output).write_text(text, encoding="utf-8", newline="\n")
         counts = ", ".join(f"{len(merged.get(k, []))} {k}" for k in TOP_LEVEL_KINDS if merged.get(k))
         log(f"wrote {args.output} (module '{merged['module']}'; {counts or 'empty'})")
     return 0

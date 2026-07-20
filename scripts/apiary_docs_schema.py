@@ -37,7 +37,7 @@ def log(prefix: str, msg: str) -> None:
 
 def load_document(path: str, *, prefix: str = "apiary_docs") -> dict:
     """Load and lightly validate one docs-JSON document (fragment or merged)."""
-    text = sys.stdin.read() if path == "-" else Path(path).read_text()
+    text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
     doc = json.loads(text)
     version = doc.get("schema_version")
     if version != SCHEMA_VERSION:

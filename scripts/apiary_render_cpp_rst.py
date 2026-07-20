@@ -370,8 +370,8 @@ def main() -> int:
     ap.add_argument("--embed", action="store_true", help="omit title/label for ``.. include::``")
     args = ap.parse_args()
 
-    doc = json.loads(Path(args.input).read_text())
-    Path(args.output).write_text(render_page(args.title, doc, embed=args.embed))
+    doc = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    Path(args.output).write_text(render_page(args.title, doc, embed=args.embed), encoding="utf-8", newline="\n")
     log(f"wrote {args.output} ({len(doc.get('functions', []))} functions)")
     return 0
 

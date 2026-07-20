@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  build-and-test:
+  linux:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -35,5 +35,61 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # clang-cl is the supported Windows compiler: conda-forge's win-64
+      # clangdev static libs are built against the MSVC ABI, so clang-cl links
+      # them while keeping the clang frontend. A GNU-driver clang++ targets the
+      # MinGW ABI and would fail to link against those same libs.
+      #
+      # clang-cl still needs the MSVC STL, import libs, and Windows SDK on
+      # INCLUDE/LIB; this action exports them to every step that follows, so it
+      # has to run before the build.
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      # Same package set as the Linux job, minus cxx-compiler (msvc-dev-cmd
+      # supplies the platform toolchain) and plus the clang drivers, which on
+      # win-64 ship separately from the clangdev libraries. zstd is explicit
+      # here because the static LLVM libs link it directly.
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: apiary-dev
+          init-shell: powershell
+          create-args: >-
+            cmake
+            ninja
+            clangdev
+            llvmdev
+            clang
+            clangxx
+            zlib
+            zstd
+            python
+
+      # Windows conda packages install under %CONDA_PREFIX%\Library, so that -
+      # not the env root - is where find_package(Clang/LLVM CONFIG) has to look.
+      - name: Configure
+        run: |
+          cmake -S . -B build -GNinja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER=clang-cl `
+            -DCMAKE_CXX_COMPILER=clang-cl `
+            -DCMAKE_PREFIX_PATH="$env:CONDA_PREFIX/Library"
+
+      - name: Build
+        run: cmake --build build
+
+      # The suites are bash scripts; ctest spawns the Git Bash that ships in the
+      # runner image directly, so no shell wrapper is needed here. .gitattributes
+      # keeps them (and the golden fixtures) checked out with LF endings.
       - name: Test
         run: ctest --test-dir build --output-on-failure

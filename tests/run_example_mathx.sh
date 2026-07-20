@@ -11,22 +11,22 @@
 # shadow the class in [[ ]] resolution).
 #
 # Invocation:
-#     run_example_mathx.sh <apiary-binary> <apiary-include-dir>
+#     run_example_mathx.sh <apiary-binary> <apiary-include-dir> <python>
 
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-    echo "usage: $0 <apiary-binary> <apiary-include-dir>" >&2
+if [[ $# -ne 3 ]]; then
+    echo "usage: $0 <apiary-binary> <apiary-include-dir> <python>" >&2
     exit 64
 fi
 
 readonly TOOL="$1"
 readonly INCLUDE_DIR="$2"
+readonly PY="$3"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly SCRIPTS_DIR="${REPO_DIR}/scripts"
 readonly EX="${REPO_DIR}/examples/mathx"
-readonly PY="${Python_EXECUTABLE:-python3}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT

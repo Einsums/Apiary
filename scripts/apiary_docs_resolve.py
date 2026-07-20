@@ -249,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--check", required=True, help="merged docs.json to scan for unresolved [[ ]] references")
     args = ap.parse_args(argv)
 
-    with open(args.check) as fh:
+    with open(args.check, encoding="utf-8") as fh:
         doc = json.load(fh)
     resolver = build_resolver(doc)
     findings = unresolved_references(doc, resolver)

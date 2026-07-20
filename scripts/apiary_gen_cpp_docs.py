@@ -47,7 +47,7 @@ def universal_flags(build_dir: Path, source_dir: Path) -> list[str]:
     only covers Tensor's transitive deps, so headers of modules Tensor
     doesn't depend on (ComputeGraph, Comm, GPU, ...) wouldn't resolve their
     own includes and would parse to nothing."""
-    ninja = (build_dir / "build.ninja").read_text()
+    ninja = (build_dir / "build.ninja").read_text(encoding="utf-8")
     m = re.search(r"apiary --register-function apiary_register_Tensor [^\n]*", ninja)
     if not m:
         raise SystemExit("gen_cpp_docs: no Tensor pybind command in build.ninja (need EINSUMS_BUILD_PYTHON)")
@@ -117,7 +117,7 @@ def gen_header(tool: str, flags: list[str], header: Path, relheader: str, out_di
         for ln in res.stderr.splitlines():
             if ": undocumented " in ln:
                 undoc.add(ln.strip())
-    json_out.write_text(res.stdout)
+    json_out.write_text(res.stdout, encoding="utf-8", newline="\n")
     if not res.stdout.strip():
         return False
     try:
@@ -180,11 +180,11 @@ def main() -> int:
         log(f"{mod}: generated pages")
     # The collected template-parameter names — the docs build adds these to
     # nitpick_ignore (they are never cpp cross-reference targets).
-    (out_dir / "template_params.txt").write_text("\n".join(sorted(tparams)) + "\n")
+    (out_dir / "template_params.txt").write_text("\n".join(sorted(tparams)) + "\n", encoding="utf-8", newline="\n")
     log(f"wrote {total} header pages + {len(tparams)} template-param names into {out_dir}")
     if undoc is not None:
         report = "\n".join(sorted(undoc))
-        (out_dir / "undocumented.txt").write_text(report + ("\n" if report else ""))
+        (out_dir / "undocumented.txt").write_text(report + ("\n" if report else ""), encoding="utf-8", newline="\n")
         if report:
             print(report)
         log(f"{len(undoc)} undocumented public entit{'y' if len(undoc) == 1 else 'ies'} "
