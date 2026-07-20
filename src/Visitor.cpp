@@ -644,6 +644,14 @@ bool Visitor::passes_member_filter(clang::NamedDecl const *decl) const {
     return doc.find("@internal") == std::string::npos && doc.find("\\internal") == std::string::npos;
 }
 
+/// @brief Path with every backslash rewritten to a forward slash.
+/// @note Only for comparing paths as strings; do not hand the result to the OS.
+static std::string to_forward_slashes(llvm::StringRef path) {
+    std::string out = path.str();
+    std::replace(out.begin(), out.end(), '\\', '/');
+    return out;
+}
+
 bool Visitor::decl_in_module_headers(clang::Decl const *decl) const {
     if (_module_headers.empty()) {
         return true; // no filter → bind everything (legacy behaviour)
@@ -657,12 +665,19 @@ bool Visitor::decl_in_module_headers(clang::Decl const *decl) const {
     if (filename.empty()) {
         return false;
     }
+    // Compare on forward slashes. --source-include always carries the logical,
+    // forward-slash form ("Einsums/Tensor/RuntimeTensor.hpp"), but the name the
+    // SourceManager reports is normalized to the platform's native separator -
+    // backslashes on Windows. Comparing the two raw strings there matches
+    // nothing, so every declaration is filtered out and apiary emits a valid
+    // but empty module: a clean parse, exit 0, and no bindings.
+    std::string const filename_slash = to_forward_slashes(filename);
     for (auto const &header : _module_headers) {
         // Match relative-suffix: the codegen passes paths like
         // "Einsums/Tensor/RuntimeTensor.hpp" via --source-include; the
         // decl's filename is absolute. Compare via ends_with so we
         // match without depending on the absolute-path layout.
-        if (filename.ends_with(header)) {
+        if (llvm::StringRef{filename_slash}.ends_with(to_forward_slashes(header))) {
             return true;
         }
     }

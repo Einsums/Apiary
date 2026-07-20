@@ -117,4 +117,32 @@ assert_contains inheritance '"since": "1.0.0"'                                  
 assert_contains inheritance '"deprecated": true'                                        "${djson}"
 assert_contains inheritance 'Use ``len\(tensor\)`` instead\.'                           "${djson}"
 
+# ---- --source-include is separator-insensitive -----------------------------
+# The module-header filter compares the SourceManager's filename against the
+# --source-include value. That name is normalized to the platform's native
+# separator, so on Windows it comes back with backslashes while the flag always
+# carries the forward-slash form. Comparing raw strings matched nothing there,
+# and apiary emitted a valid but EMPTY module - a clean parse, exit 0, and no
+# bindings, which compiles and imports so nothing downstream notices.
+#
+# Both spellings must select the same declarations. This reproduces on any
+# platform (the mismatch is what matters, not which side has the backslash), so
+# it guards the Windows behavior from Linux and macOS too.
+fwd="$("${TOOL}" --module einsums --register-function reg --source-include 'fixtures/simple_class.hpp' \
+    "${FIXTURE_DIR}/simple_class.hpp" -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>/dev/null || true)"
+bwd="$("${TOOL}" --module einsums --register-function reg --source-include 'fixtures\simple_class.hpp' \
+    "${FIXTURE_DIR}/simple_class.hpp" -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>/dev/null || true)"
+assert_contains source_include_fwd 'py::class_' "${fwd}"
+assert_contains source_include_bwd 'py::class_' "${bwd}"
+# Compare the binding bodies only. The generated #include line echoes the
+# --source-include spelling verbatim, so the two outputs differ there by
+# design; what must agree is which declarations got bound.
+fwd_body="$(grep -v '^#include' <<<"${fwd}")"
+bwd_body="$(grep -v '^#include' <<<"${bwd}")"
+if [[ "${fwd_body}" != "${bwd_body}" ]]; then
+    echo "FAIL: --source-include is separator-sensitive; forward- and back-slash forms bound different declarations" >&2
+    diff <(printf '%s\n' "${fwd_body}") <(printf '%s\n' "${bwd_body}") >&2 || true
+    exit 1
+fi
+
 echo "OK: all Phase-2 fixtures pass"
