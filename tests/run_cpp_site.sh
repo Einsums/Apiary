@@ -100,7 +100,18 @@ fi
 # incremental rebuild off, so a renderer that rewrites unconditionally forces a
 # full re-read of the API reference on every build. Easy to regress, invisible
 # without a test.
-snapshot() { for f in "${SITE}"/*.rst; do echo "$(basename "$f") $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")"; done | sort; }
+#
+# ``stat`` is the wrong tool for this: BSD spells the mtime format ``-f %m``
+# while GNU reads ``-f`` as --file-system and ignores the format entirely, so
+# a BSD-first fallback chain reports free block and inode counts on Linux.
+# Those drift with unrelated disk activity, which under a parallel ctest turns
+# the comparison below into a coin flip. Ask Python for the mtime instead; it
+# is already a hard dependency of this script.
+snapshot() {
+    "${PY}" -c 'import os, sys
+print("\n".join(sorted("%s %d" % (os.path.basename(p), os.stat(p).st_mtime_ns) for p in sys.argv[1:])))' \
+        "${SITE}"/*.rst
+}
 before="$(snapshot)"
 sleep 1.1   # coarser-than-1s mtime granularity would mask a rewrite
 "${PY}" "${SCRIPTS_DIR}/apiary_render_cpp_site.py" --outdir "${SITE}" \
