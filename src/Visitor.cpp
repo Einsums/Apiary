@@ -1104,6 +1104,13 @@ bool Visitor::VisitTypedefNameDecl(clang::TypedefNameDecl *decl) {
     if (current_class() != nullptr) {
         return true;
     }
+    // Function-local aliases (``using U = BiggestTypeT<T, TOther>;`` inside a
+    // template body) are implementation detail, carry no namespace, and
+    // collide across headers when rendered; only file-context (namespace or
+    // translation-unit scope) aliases are part of the API surface.
+    if (!decl->getDeclContext()->isFileContext()) {
+        return true;
+    }
     std::string const doc = extract_doc(decl, _context);
     if (doc.find("@internal") != std::string::npos || doc.find("\\internal") != std::string::npos) {
         return true;
