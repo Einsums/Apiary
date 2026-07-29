@@ -34,6 +34,7 @@
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace clang;
@@ -239,19 +240,39 @@ class IrAction : public ASTFrontendAction {
     }
 };
 
+/// True when @p path already holds exactly @p content.
+///
+/// Generation is deterministic, so re-running on unchanged headers produces a
+/// byte-identical file. Writing it anyway only updates the mtime - which is
+/// what every build system downstream actually reads, so an unconditional
+/// write turns "nothing changed" into a recompile of the generated TU and a
+/// relink of everything it feeds. Comparing first costs one read of a file we
+/// were about to overwrite.
+bool file_has_content(std::string const &path, std::string const &content) {
+    auto buf = llvm::MemoryBuffer::getFile(path, /*IsText=*/false, /*RequiresNullTerminator=*/false);
+    return buf && (*buf)->getBuffer() == content;
+}
+
+int write_file(std::string const &path, std::string const &content) {
+    if (file_has_content(path, content)) {
+        return 0;
+    }
+    std::error_code      ec;
+    llvm::raw_fd_ostream out(path, ec);
+    if (ec) {
+        llvm::errs() << "apiary: cannot open output '" << path << "': " << ec.message() << "\n";
+        return 1;
+    }
+    out << content;
+    return 0;
+}
+
 int write_output(std::string const &content) {
     if (g_output_path.empty()) {
         llvm::outs() << content;
         return 0;
     }
-    std::error_code      ec;
-    llvm::raw_fd_ostream out(g_output_path, ec);
-    if (ec) {
-        llvm::errs() << "apiary: cannot open output '" << g_output_path << "': " << ec.message() << "\n";
-        return 1;
-    }
-    out << content;
-    return 0;
+    return write_file(g_output_path, content);
 }
 
 } // namespace
@@ -360,13 +381,9 @@ int main(int argc, char const **argv) {
             return g_error_count > 0 ? 1 : (rc != 0 ? rc : 0);
         }
         for (apiary::ShardFile const &shard : apiary::emit_shards(g_module, opts, g_max_defs_per_tu, g_output_path)) {
-            std::error_code      ec;
-            llvm::raw_fd_ostream out(shard.path, ec);
-            if (ec) {
-                llvm::errs() << "apiary: cannot open shard output '" << shard.path << "': " << ec.message() << "\n";
-                return 1;
+            if (int const shard_rc = write_file(shard.path, shard.content); shard_rc != 0) {
+                return shard_rc;
             }
-            out << shard.content;
         }
     } else {
         std::string const generated = apiary::emit(g_module, opts);
@@ -382,14 +399,10 @@ int main(int argc, char const **argv) {
     if (!g_stub_output.empty()) {
         apiary::PyiOptions stub_opts;
         stub_opts.banner          = "module: " + std::string{g_module_name};
-        std::string const    stub = apiary::emit_pyi(g_module, stub_opts);
-        std::error_code      ec;
-        llvm::raw_fd_ostream out(g_stub_output, ec);
-        if (ec) {
-            llvm::errs() << "apiary: cannot open stub output '" << g_stub_output << "': " << ec.message() << "\n";
-            return 1;
+        std::string const stub = apiary::emit_pyi(g_module, stub_opts);
+        if (int const stub_rc = write_file(g_stub_output, stub); stub_rc != 0) {
+            return stub_rc;
         }
-        out << stub;
     }
 
     if (g_report_undocumented) {

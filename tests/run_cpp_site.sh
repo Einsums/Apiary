@@ -94,6 +94,31 @@ if grep -qE "^\.\. cpp:(class|function|enum|type|concept)::" "${SITE}/index.rst"
     fail "index.rst declares an entity; it must only link"
 fi
 
+# ---- rerunning is a no-op on disk ------------------------------------------
+# Generation is deterministic, so a second run with the same input must not
+# touch a single page. This is not cosmetic: the mtime is what Sphinx keys its
+# incremental rebuild off, so a renderer that rewrites unconditionally forces a
+# full re-read of the API reference on every build. Easy to regress, invisible
+# without a test.
+snapshot() { for f in "${SITE}"/*.rst; do echo "$(basename "$f") $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")"; done | sort; }
+before="$(snapshot)"
+sleep 1.1   # coarser-than-1s mtime granularity would mask a rewrite
+"${PY}" "${SCRIPTS_DIR}/apiary_render_cpp_site.py" --outdir "${SITE}" \
+    --module-title geom --index-label geom_api --backlink-label geom_narrative \
+    "${WORK}/Shapes.json" "${WORK}/Ops.json" 2>/dev/null
+after="$(snapshot)"
+[[ "${before}" == "${after}" ]] || fail "re-render rewrote unchanged pages:
+$(diff <(echo "${before}") <(echo "${after}") || true)"
+
+# ...but pruning still has to work, which is why the pages are not simply
+# cleared up front. An entity that disappears must take its page with it.
+touch "${SITE}/geom.Ghost.rst"
+"${PY}" "${SCRIPTS_DIR}/apiary_render_cpp_site.py" --outdir "${SITE}" \
+    --module-title geom --index-label geom_api --backlink-label geom_narrative \
+    "${WORK}/Shapes.json" "${WORK}/Ops.json" 2>/dev/null
+[[ ! -f "${SITE}/geom.Ghost.rst" ]] || fail "stale page survived the re-render"
+assert_file "${SITE}/geom.Circle.rst"
+
 # ---- the pages build under -W -n ------------------------------------------
 if [[ -n "${SPHINX}" ]]; then
     cat > "${WORK}/src/conf.py" <<'CONF'

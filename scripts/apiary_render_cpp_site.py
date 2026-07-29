@@ -44,6 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import apiary_render_cpp_rst as base  # noqa: E402  (signature lowering + directive rendering)
+from apiary_io import write_if_changed  # noqa: E402
 
 IND = base.IND
 LICENSE_HEADER = base.LICENSE_HEADER
@@ -353,16 +354,18 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
             operator_sets.append(e)
     by_slug = assign_slugs(paged)
 
-    # The renderer owns this directory: clear previous pages so a renamed or
-    # deleted entity cannot leave its old page behind.
+    # The renderer owns this directory: a renamed or deleted entity must not
+    # leave its old page behind. Pruning happens AFTER the writes, against the
+    # set actually produced, rather than by clearing the directory up front --
+    # clearing first would make every write_if_changed() see a missing file and
+    # rewrite it, which resets the mtime of every page and costs Sphinx a full
+    # re-read of the reference on a build where nothing changed.
     outdir.mkdir(parents=True, exist_ok=True)
-    for old in outdir.glob("*.rst"):
-        old.unlink()
     written: list[Path] = []
 
     def write(name: str, text: str) -> None:
         p = outdir / name
-        p.write_text(text, encoding="utf-8", newline="\n")
+        write_if_changed(p, text)
         written.append(p)
 
     sections: dict[str, list[tuple[str, str, str]]] = {
@@ -411,6 +414,15 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
     ordered_sections = [(h, sections[h]) for h in
                         ("Classes", "Concepts", "Functions", "Operators", "Enumerations", "Types", "Macros")]
     write("index.rst", render_index(module_title, index_label, backlink_label, ordered_sections, toctree))
+
+    # Prune pages this run did not produce: an entity that was renamed or
+    # removed would otherwise keep a page that still builds and still resolves
+    # references to something that no longer exists.
+    keep = {p.name for p in written}
+    for old in outdir.glob("*.rst"):
+        if old.name not in keep:
+            old.unlink()
+
     return written
 
 

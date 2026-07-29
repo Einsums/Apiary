@@ -27,6 +27,8 @@ import re
 import sys
 from pathlib import Path
 
+from apiary_io import write_if_changed
+
 LICENSE_HEADER = """..
     ----------------------------------------------------------------------------------------------
      Copyright (c) The Einsums Developers. All rights reserved.
@@ -409,7 +411,7 @@ def main() -> int:
     args = ap.parse_args()
 
     doc = json.loads(Path(args.input).read_text(encoding="utf-8"))
-    Path(args.output).write_text(render_page(args.title, doc, embed=args.embed), encoding="utf-8", newline="\n")
+    write_if_changed(Path(args.output), render_page(args.title, doc, embed=args.embed))
     log(f"wrote {args.output} ({len(doc.get('functions', []))} functions)")
     return 0
 

@@ -43,6 +43,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from apiary_io import write_if_changed
+
 SCRIPTS = Path(__file__).resolve().parent
 
 
@@ -153,7 +155,7 @@ def gen_header(tool: str, flags: list[str], header: Path, relheader: str, out_di
         for ln in res.stderr.splitlines():
             if ": undocumented " in ln:
                 undoc.add(ln.strip())
-    json_out.write_text(res.stdout, encoding="utf-8", newline="\n")
+    write_if_changed(json_out, res.stdout)
     if not res.stdout.strip():
         return False
     try:
@@ -237,7 +239,7 @@ def write_root_index(rst_dir: Path, modules: list[tuple[str, str, list[Path]]],
     for lib, module, _ in modules:
         out.append(f"{ind}{lib}/{module}/index")
     out.append("")
-    (rst_dir / "index.rst").write_text("\n".join(out), encoding="utf-8", newline="\n")
+    write_if_changed(rst_dir / "index.rst", "\n".join(out))
 
 
 def prune_stale(rst_dir: Path, rendered: set[tuple[str, str]]) -> None:
@@ -325,11 +327,11 @@ def main() -> int:
         prune_stale(rst_dir, {(lib, module) for lib, module, _ in site_modules})
     # The collected template-parameter names — the docs build adds these to
     # nitpick_ignore (they are never cpp cross-reference targets).
-    (out_dir / "template_params.txt").write_text("\n".join(sorted(tparams)) + "\n", encoding="utf-8", newline="\n")
+    write_if_changed(out_dir / "template_params.txt", "\n".join(sorted(tparams)) + "\n")
     log(f"wrote {total} header pages + {len(tparams)} template-param names into {out_dir}")
     if undoc is not None:
         report = "\n".join(sorted(undoc))
-        (out_dir / "undocumented.txt").write_text(report + ("\n" if report else ""), encoding="utf-8", newline="\n")
+        write_if_changed(out_dir / "undocumented.txt", report + ("\n" if report else ""))
         if report:
             print(report)
         log(f"{len(undoc)} undocumented public entit{'y' if len(undoc) == 1 else 'ies'} "

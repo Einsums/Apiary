@@ -33,6 +33,8 @@ import re
 import sys
 from pathlib import Path
 
+from apiary_io import write_if_changed
+
 from apiary_curation import load_content
 from apiary_docs_schema import DEFAULT_TOP, full_module, load_document
 from apiary_docs_resolve import build_resolver, rewrite_links
@@ -779,7 +781,7 @@ def main() -> int:
     for module in modules:
         g = groups[module]
         page = render_page(module, g, curations.get(module))
-        (outdir / f"{module}.rst").write_text(page, encoding="utf-8", newline="\n")
+        write_if_changed(outdir / f"{module}.rst", page)
         log(f"wrote {module}.rst ({len(g['classes'])} classes, "
             f"{len(g['functions'])} functions, {len(g['enums'])} enums)")
         # Index summary line: the authored overview's first sentence, else counts.
@@ -790,10 +792,10 @@ def main() -> int:
             ", ".join(f"{n} {label}" for n, label in _counts if n)
 
     for article in articles:
-        (outdir / f"{article.slug}.rst").write_text(render_article(article), encoding="utf-8", newline="\n")
+        write_if_changed(outdir / f"{article.slug}.rst", render_article(article))
         log(f"wrote article {article.slug}.rst")
 
-    (outdir / "index.rst").write_text(render_index(modules, articles, module_briefs), encoding="utf-8", newline="\n")
+    write_if_changed(outdir / "index.rst", render_index(modules, articles, module_briefs))
     log(f"wrote index.rst with {len(modules)} module(s), {len(articles)} article(s)")
     return 0
 
