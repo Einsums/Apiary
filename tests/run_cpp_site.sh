@@ -70,6 +70,11 @@ done
 # const/non-const overload pair renders two distinct signatures.
 assert_grep "Real radius() const" "${SITE}/geom.Circle.rst"
 assert_grep "void radius(Real r)" "${SITE}/geom.Circle.rst"
+# Ref-qualified overloads stay distinct for the same reason: without the
+# qualifier all three collapse onto ``center()`` and Sphinx reports duplicates.
+assert_grep "Real & center() &" "${SITE}/geom.Circle.rst"
+assert_grep "Real && center() &&" "${SITE}/geom.Circle.rst"
+assert_grep "const Real & center() const &" "${SITE}/geom.Circle.rst"
 # The overload set merged across both headers and says so.
 assert_grep "geom/Ops.hpp" "${SITE}/geom.scale.rst"
 assert_grep "geom/Shapes.hpp" "${SITE}/geom.scale.rst"

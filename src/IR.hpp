@@ -130,6 +130,12 @@ struct BoundMethod : BoundEntityCommon {
     std::vector<BoundParam>  params;
     /// True for const-qualified methods.
     bool                     is_const    = false;
+    /// Ref-qualifier of the method: empty, `"&"`, or `"&&"`.
+    ///
+    /// Load-bearing for the same reason @ref is_const is: `T &value() &` and
+    /// `T &&value() &&` are distinct overloads that collapse onto one signature
+    /// without it, which reads as a duplicate declaration downstream.
+    std::string              ref_qualifier;
     /// True for static methods.
     bool                     is_static   = false;
     /// True for virtual methods.

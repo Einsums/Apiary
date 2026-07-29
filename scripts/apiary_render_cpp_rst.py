@@ -146,14 +146,18 @@ def function_signature(fn: dict) -> str | None:
     else:
         ret = _clean_typeparams((fn.get("return_type") or "void").strip())
         sig = f"{tmpl}{ret} {name}({params})"
-    # Method qualifiers. ``const`` is load-bearing: a const/non-const overload
-    # pair renders to the SAME signature without it, and the second directive
-    # is a duplicate declaration the build must not have to suppress.
+    # Method qualifiers. ``const`` and the ref-qualifier are both load-bearing:
+    # a const/non-const pair, or an ``&``/``&&`` pair, renders to the SAME
+    # signature without them, and the second directive is a duplicate
+    # declaration the build must not have to suppress. They must also come out
+    # in source order, ``const`` then ``&``/``&&``.
     # ``static`` goes AFTER any template clause (``template <...> static ...``).
     if fn.get("is_static"):
         sig = tmpl + "static " + sig[len(tmpl):] if tmpl else "static " + sig
     if fn.get("is_const"):
         sig += " const"
+    if ref := fn.get("ref_qualifier"):
+        sig += " " + ref
     return relativize(_clean_typeparams(sig), namespace_of(fn.get("qualified_name", name)))
 
 

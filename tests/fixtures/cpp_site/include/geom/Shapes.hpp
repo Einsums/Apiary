@@ -41,6 +41,17 @@ class Circle {
 
     /// The enclosed area.
     Real area() const;
+
+    /// The center, as an lvalue. The ``&``/``&&`` pair below collapses onto one
+    /// signature if the renderer drops the ref-qualifier, exactly the way a
+    /// const/non-const pair does without ``const``.
+    Real &center() &;
+
+    /// The center, moved out of an expiring circle.
+    Real &&center() &&;
+
+    /// The center of a const circle.
+    Real const &center() const &;
 };
 
 /// Uniformly scale a circle. Defined in Ops.hpp; this forward declaration

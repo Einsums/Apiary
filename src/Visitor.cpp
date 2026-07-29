@@ -859,6 +859,16 @@ bool Visitor::VisitCXXMethodDecl(clang::CXXMethodDecl *decl) {
     method.return_py_type        = translate_python_type(decl->getReturnType(), _context);
     method.params                = build_params(decl, _context);
     method.is_const              = decl->isConst();
+    switch (decl->getRefQualifier()) {
+    case clang::RQ_LValue:
+        method.ref_qualifier = "&";
+        break;
+    case clang::RQ_RValue:
+        method.ref_qualifier = "&&";
+        break;
+    case clang::RQ_None:
+        break;
+    }
     method.is_static             = decl->isStatic();
     method.is_virtual            = decl->isVirtual();
     method.is_pure_virtual       = decl->isPureVirtual();
