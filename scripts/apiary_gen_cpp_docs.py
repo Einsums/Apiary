@@ -6,8 +6,17 @@
 """Generate the C++ API reference pages for selected modules (Option 2).
 
 For each public header of each selected ``lib/module``, runs
-``apiary --emit-cpp-docs-json`` and ``apiary_render_cpp_rst.py`` to produce a
-cpp-domain reStructuredText page, replacing Breathe's ``autodoxygenfile``.
+``apiary --emit-cpp-docs-json``, then renders reStructuredText in one of two
+layouts:
+
+* ``--layout header`` (default): one page per header via
+  ``apiary_render_cpp_rst.py --embed``, replacing Breathe's
+  ``autodoxygenfile``. Unchanged legacy behavior.
+* ``--layout entity``: one page per entity via
+  ``apiary_render_cpp_site.py`` — a page per class/concept/function
+  overload set plus per-module catch-alls and index pages, and a global
+  landing page — written under ``<out-dir>/rst/<lib>/<module>/``. A
+  ``.site.manifest`` prunes pages whose entity disappeared.
 
 Compile flags are taken from a representative ``apiary`` codegen
 command already present in the build's ``build.ninja`` (the Tensor module's,
@@ -17,7 +26,9 @@ re-derive per-module flags here.
 Usage::
 
     apiary_gen_cpp_docs.py --source-dir <repo> --build-dir <build> --tool <apiary> \
-                    --out-dir <dir> --modules Einsums/BLASVendor Einsums/Concepts
+                    --out-dir <dir> --modules Einsums/BLASVendor Einsums/Concepts \
+                    [--layout entity --index-label-template "modules_{lib}_{module}_api" \
+                     --backlink-label-template "modules_{lib}_{module}"]
 """
 
 from __future__ import annotations
@@ -27,6 +38,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -124,7 +136,7 @@ def collect_template_params(doc: dict, out: set[str]) -> None:
 
 
 def gen_header(tool: str, flags: list[str], header: Path, relheader: str, out_dir: Path,
-               tparams: set[str], undoc: set[str] | None = None) -> bool:
+               tparams: set[str], undoc: set[str] | None = None, render_page: bool = True) -> bool:
     title = relheader
     json_out = out_dir / (sanitized(relheader) + ".json")
     rst_out = out_dir / (sanitized(relheader) + ".rst")
@@ -148,6 +160,8 @@ def gen_header(tool: str, flags: list[str], header: Path, relheader: str, out_di
         collect_template_params(json.loads(res.stdout), tparams)
     except json.JSONDecodeError:
         pass
+    if not render_page:
+        return True
     render = subprocess.run(
         [sys.executable, str(SCRIPTS / "apiary_render_cpp_rst.py"), str(json_out),
          "--title", title, "--output", str(rst_out), "--embed"],
@@ -156,6 +170,87 @@ def gen_header(tool: str, flags: list[str], header: Path, relheader: str, out_di
         log(f"render failed for {relheader}: {render.stderr.strip()[:200]}")
         return False
     return True
+
+
+def render_module_site(lib: str, module: str, jsons: list[Path], rst_dir: Path,
+                       index_label_tpl: str, backlink_label_tpl: str) -> None:
+    """Render one module's per-entity pages under ``<rst-dir>/<lib>/<module>/``."""
+    outdir = rst_dir / lib / module
+    cmd = [sys.executable, str(SCRIPTS / "apiary_render_cpp_site.py"),
+           "--outdir", str(outdir), "--module-title", module,
+           "--index-label", index_label_tpl.format(lib=lib, module=module)]
+    backlink = backlink_label_tpl.format(lib=lib, module=module) if backlink_label_tpl else ""
+    if backlink:
+        cmd += ["--backlink-label", backlink]
+    cmd += [str(j) for j in jsons]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise SystemExit(f"gen_cpp_docs: site render failed for {lib}/{module}: "
+                         f"{res.stderr.strip()[:500]}")
+
+
+def entity_counts(jsons: list[Path]) -> tuple[int, int]:
+    """(classes+concepts, free functions) documented in a module, for the
+    landing page's one-line brief."""
+    classes = set()
+    functions = set()
+    for j in jsons:
+        text = j.read_text(encoding="utf-8")
+        if not text.strip():
+            continue
+        try:
+            doc = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        for cl in doc.get("classes", []):
+            if not cl.get("is_external"):
+                classes.add(cl.get("qualified_name") or cl["name"])
+        for c in doc.get("concepts", []):
+            classes.add(c.get("qualified_name") or c["name"])
+        for fn in doc.get("functions", []):
+            functions.add(fn.get("qualified_name") or fn["name"])
+    return len(classes), len(functions)
+
+
+def write_root_index(rst_dir: Path, modules: list[tuple[str, str, list[Path]]],
+                     root_title: str, root_label: str, index_label_tpl: str) -> None:
+    # Alphabetical regardless of the order the caller wired the modules in.
+    modules = sorted(modules, key=lambda m: (m[0].lower(), m[1].lower()))
+    ind = "   "
+    out = [f".. _{root_label}:", "", "=" * len(root_title), root_title, "=" * len(root_title), "",
+           ".. note::",
+           f"{ind}Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.",
+           "",
+           "The C++ API reference is organized per module.", "",
+           "Modules", "-------", ""]
+    for lib, module, jsons in modules:
+        label = index_label_tpl.format(lib=lib, module=module)
+        ntypes, nfuncs = entity_counts(jsons)
+        parts = []
+        if ntypes:
+            parts.append(f"{ntypes} type{'s' if ntypes != 1 else ''}")
+        if nfuncs:
+            parts.append(f"{nfuncs} function{'s' if nfuncs != 1 else ''}")
+        brief = ", ".join(parts) if parts else "no documented public API yet"
+        out.append(f"- :ref:`{module} <{label}>` - {brief}")
+    out += ["", ".. toctree::", f"{ind}:maxdepth: 1", f"{ind}:hidden:", ""]
+    for lib, module, _ in modules:
+        out.append(f"{ind}{lib}/{module}/index")
+    out.append("")
+    (rst_dir / "index.rst").write_text("\n".join(out), encoding="utf-8", newline="\n")
+
+
+def prune_stale(rst_dir: Path, rendered: set[tuple[str, str]]) -> None:
+    """Delete module directories a previous run rendered that this run did
+    not (a module was dropped or renamed). Stale pages WITHIN a re-rendered
+    module are cleared by the site renderer itself, which owns its
+    directory."""
+    for lib_dir in sorted(p for p in rst_dir.iterdir() if p.is_dir()):
+        for mod_dir in sorted(p for p in lib_dir.iterdir() if p.is_dir()):
+            if (lib_dir.name, mod_dir.name) not in rendered:
+                shutil.rmtree(mod_dir)
+        if not any(lib_dir.iterdir()):
+            lib_dir.rmdir()
 
 
 def main() -> int:
@@ -172,6 +267,18 @@ def main() -> int:
                     help="Also collect a deduplicated punch-list of public C++ entities missing a "
                          "doc comment. Prints the sorted list to stdout and writes it to "
                          "<out-dir>/undocumented.txt. Does not change the generated pages.")
+    ap.add_argument("--layout", choices=("header", "entity"), default="header",
+                    help="'header': one page per header (legacy). 'entity': one page per "
+                         "class/concept/function overload set under <out-dir>/rst/.")
+    ap.add_argument("--index-label-template", default="modules_{lib}_{module}_api",
+                    help="entity layout: Sphinx label for each module index page")
+    ap.add_argument("--backlink-label-template", default="",
+                    help="entity layout: label of each module's narrative page for a "
+                         "'See ... for the narrative documentation' link; empty for none")
+    ap.add_argument("--root-title", default="C++ API Reference",
+                    help="entity layout: title of the landing page at <out-dir>/rst/index.rst")
+    ap.add_argument("--root-label", default="api_cpp",
+                    help="entity layout: Sphinx label of the landing page")
     args = ap.parse_args()
 
     source = Path(args.source_dir)
@@ -186,6 +293,9 @@ def main() -> int:
                          for inc in (source / "libs").glob("*/*/include"))
         log(f"auto-discovered {len(modules)} modules under {source / 'libs'}")
 
+    entity_layout = args.layout == "entity"
+    rst_dir = out_dir / "rst"
+    site_modules: list[tuple[str, str, list[Path]]] = []
     total = 0
     tparams: set[str] = set()
     undoc: set[str] | None = set() if args.report_undocumented else None
@@ -195,13 +305,24 @@ def main() -> int:
         if not inc.is_dir():
             log(f"skip {mod}: no include dir")
             continue
+        module_jsons: list[Path] = []
         for header in sorted(inc.rglob("*.hpp")):
             rel = header_relpath(header)
             if rel is None:
                 continue
-            if gen_header(args.tool, flags, header, rel, out_dir, tparams, undoc):
+            if gen_header(args.tool, flags, header, rel, out_dir, tparams, undoc,
+                          render_page=not entity_layout):
                 total += 1
+                module_jsons.append(out_dir / (sanitized(rel) + ".json"))
+        if entity_layout:
+            render_module_site(lib, module, module_jsons, rst_dir,
+                               args.index_label_template, args.backlink_label_template)
+            site_modules.append((lib, module, module_jsons))
         log(f"{mod}: generated pages")
+    if entity_layout:
+        write_root_index(rst_dir, site_modules, args.root_title, args.root_label,
+                         args.index_label_template)
+        prune_stale(rst_dir, {(lib, module) for lib, module, _ in site_modules})
     # The collected template-parameter names — the docs build adds these to
     # nitpick_ignore (they are never cpp cross-reference targets).
     (out_dir / "template_params.txt").write_text("\n".join(sorted(tparams)) + "\n", encoding="utf-8", newline="\n")

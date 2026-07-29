@@ -286,6 +286,17 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                         "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
             )
         endif()
+        # Per-entity C++ site renderer (apiary_render_cpp_site.py): page
+        # inventory, overload-set merge, const/non-const distinctness, and a
+        # ``sphinx-build -W -n`` build when Sphinx is available (the script
+        # skips the build step when the sphinx-build argument is empty).
+        add_test(NAME apiary_cpp_site
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_cpp_site.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                    "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
+                    "$<IF:$<BOOL:${APIARY_SPHINX_BUILD}>,${APIARY_SPHINX_BUILD},>"
+        )
 
         # examples/ built against the *install tree*, as a consumer would. This
         # is the only coverage of apiary_detect_toolchain / apiary_add_bindings /
