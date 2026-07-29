@@ -51,15 +51,21 @@ def lower_template(params: list[str]) -> str:
     forms are lowered to plain ``typename`` — the cpp domain rejects concept
     constraints, so we keep the parameter name and document the real
     constraint in prose.
+
+    Parameters clang spells ``name:auto`` are INVENTED by an abbreviated
+    function template (``f(auto... xs)``); the ``auto`` in the parameter list
+    already implies the template head, and emitting both makes the cpp domain
+    register the declaration twice (a duplicate against itself). Skip them.
     """
-    if not params:
-        return ""
-    # Sanitize each name to a bare identifier: clang spells auto-NTTP packs
-    # oddly (``chars:auto``), and we only ever emit ``typename <name>``.
     names = []
     for p in params:
-        m = re.match(r"[A-Za-z_]\w*", p.strip())
+        p = p.strip()
+        if re.fullmatch(r"[A-Za-z_]\w*:auto", p):
+            continue
+        m = re.match(r"[A-Za-z_]\w*", p)
         names.append(m.group(0) if m else "T")
+    if not names:
+        return ""
     return "template <" + ", ".join(f"typename {n}" for n in names) + "> "
 
 
@@ -140,6 +146,14 @@ def function_signature(fn: dict) -> str | None:
     else:
         ret = _clean_typeparams((fn.get("return_type") or "void").strip())
         sig = f"{tmpl}{ret} {name}({params})"
+    # Method qualifiers. ``const`` is load-bearing: a const/non-const overload
+    # pair renders to the SAME signature without it, and the second directive
+    # is a duplicate declaration the build must not have to suppress.
+    # ``static`` goes AFTER any template clause (``template <...> static ...``).
+    if fn.get("is_static"):
+        sig = tmpl + "static " + sig[len(tmpl):] if tmpl else "static " + sig
+    if fn.get("is_const"):
+        sig += " const"
     return relativize(_clean_typeparams(sig), namespace_of(fn.get("qualified_name", name)))
 
 
@@ -264,12 +278,27 @@ def render_class(out: list[str], cls: dict, base: str = "") -> None:
     out.append(f"{base}.. cpp:class:: {class_signature(cls)}")
     emit_doc(out, cls, base + IND)
     out.append("")
-    # Members nest under the class directive via indentation.
+    # Members nest under the class directive via indentation. Distinct C++
+    # overloads can lower to the SAME cpp-domain signature (concept-constrained
+    # overload sets lose their requires clauses); emit each rendered signature
+    # once — keeping the first documented occurrence — so the class body never
+    # declares a duplicate.
     inner = base + IND
-    for ctor in cls.get("constructors", []):
-        render_function(out, _relativize_member(ctor, scope), base=inner)
-    for m in cls.get("methods", []):
-        render_function(out, _relativize_member(m, scope), base=inner)
+    seen_sigs: dict[str, dict] = {}
+    members: list[dict] = []
+    for m in cls.get("constructors", []) + cls.get("methods", []):
+        rel = _relativize_member(m, scope)
+        sig = function_signature(rel)
+        if sig is None:
+            continue
+        if sig not in seen_sigs:
+            seen_sigs[sig] = rel
+            members.append(rel)
+        elif _has_doc(m) and not _has_doc(seen_sigs[sig]):
+            members[members.index(seen_sigs[sig])] = rel
+            seen_sigs[sig] = rel
+    for m in members:
+        render_function(out, m, base=inner)
     for f in cls.get("fields", []):
         ftype = relativize((f.get("type") or "").strip(), scope)
         out.append(f"{inner}.. cpp:member:: {declarator(ftype, f['name'])}")
@@ -284,6 +313,11 @@ def render_class(out: list[str], cls: dict, base: str = "") -> None:
             continue
         render_class(out, nc, base=inner)
     out.append("")
+
+
+def _has_doc(entity: dict) -> bool:
+    ds = entity.get("doc_structured") or {}
+    return bool((ds.get("brief") or "").strip() or (ds.get("detail") or "").strip())
 
 
 def _relativize_member(m: dict, scope: str) -> dict:
