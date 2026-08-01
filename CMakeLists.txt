@@ -271,6 +271,7 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
             COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_pyi_golden.sh"
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                    "${_apiary_test_py}"
         )
         # Sharded emission (--max-defs-per-tu / --plan): asserts plan==emit,
         # multiple balanced shards, the dispatcher wiring, and that no binding

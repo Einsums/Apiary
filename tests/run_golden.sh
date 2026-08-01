@@ -42,6 +42,14 @@ readonly CASES=(
     "fixture_dtype_dispatcher|dtype_dispatcher.hpp|dtype_dispatcher.cpp.golden"
     "fixture_member_template|member_template.hpp|member_template.cpp.golden"
     "fixture_enum_nttp|enum_nttp.hpp|enum_nttp.cpp.golden"
+    "fixture_qualifiers|qualifiers.hpp|qualifiers.cpp.golden"
+    "fixture_default_args|default_args.hpp|default_args.cpp.golden"
+    "fixture_signatures_modern|signatures_modern.hpp|signatures_modern.cpp.golden"
+    "fixture_operators|operators.hpp|operators.cpp.golden"
+    "fixture_std_types|std_types.hpp|std_types.cpp.golden"
+    # variadic_pack is NOT in run_pyi_golden.sh: its stub does not parse as
+    # Python (Finding 10b). The header says why.
+    "fixture_variadic_pack|variadic_pack.hpp|variadic_pack.cpp.golden"
 )
 
 # Run apiary over one fixture, writing the generated TU to $1.
