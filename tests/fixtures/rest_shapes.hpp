@@ -78,10 +78,12 @@ APIARY_EXPOSE void par_with_bullets();
 /**
  * @brief An inline command at the start of a continuation line.
  *
- * KNOWN BAD (apiary_robustness_plan.md, Finding 1): a line whose first token
- * starts with ``@`` is taken for a block-level command, so the line below
- * neither joins its bullet nor passes through inline conversion. The item
- * dedents to column 0 and the ``@ref`` loses its markup.
+ * An author wrapping a sentence has no control over which token lands first on
+ * a line. A line whose first token starts with a command marker used to be
+ * taken for a block-level command, so the line below neither joined its bullet
+ * nor passed through inline conversion: the item dedented to column 0 (which is
+ * what Sphinx reported, about a generated file) and the reference lost its
+ * markup. It must stay one joined item with a literal-formatted reference.
  *
  * - A bullet whose continuation line begins with an inline command, such as
  *   @ref einsums::fixture::wrapped_bullets, and then continues with prose that
@@ -93,7 +95,10 @@ APIARY_EXPOSE void inline_command_at_line_start();
 /**
  * @brief Every inline command, each opening a continuation line.
  *
- * KNOWN BAD (Finding 1): the same defect for the rest of the closed set.
+ * The rest of the closed set, in a plain paragraph rather than a list. Nothing
+ * about the reST is invalid here, so the markup check cannot see it: the text
+ * golden is the only thing that catches an inline command silently losing its
+ * markup.
  *
  * A paragraph that wraps so that
  * @c std::complex<double> starts a line, and another that wraps so that

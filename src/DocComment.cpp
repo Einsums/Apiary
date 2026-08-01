@@ -214,6 +214,23 @@ std::unordered_set<std::string> const &drop_commands() {
     return s;
 }
 
+// Commands that mark up a *word*, not a block. The distinction matters at the
+// start of a line: the block-command loop below claims any line whose first
+// token begins with `@`, but an author who wraps a sentence has no control over
+// which token lands first, and an inline command there is still inline. Claimed
+// as a block it would be stripped of its markup by convert_inline never seeing
+// it, and - worse - would break the enclosing bullet item, because the loop
+// treats a command line as the end of a list.
+//
+// The set is exactly what convert_inline handles, and must stay that way: a
+// command listed here and not converted there would survive into the output as
+// a literal `@cmd`. match_command lowercases and takes the maximal run of
+// letters, so both the `@` and `\` spellings arrive here, and `@brief` is never
+// mistaken for `@b`.
+bool is_inline_command(std::string const &cmd) {
+    return cmd == "c" || cmd == "p" || cmd == "ref" || cmd == "a" || cmd == "b" || cmd == "e";
+}
+
 // Admonition mapping for @note-style commands → reST directive name.
 std::string admonition_for(std::string const &cmd) {
     if (cmd == "note" || cmd == "remark" || cmd == "remarks") {
@@ -537,7 +554,10 @@ DocComment parse_doc_comment(std::string const &raw) {
         std::string cmd;
         std::string brace_arg;
         std::string rest;
-        if (match_command(stripped, cmd, brace_arg, rest)) {
+        // An inline command opening a line is prose, not a block: fall through
+        // to the continuation path so it joins its bullet item and reaches
+        // convert_inline.
+        if (match_command(stripped, cmd, brace_arg, rest) && !is_inline_command(cmd)) {
             // A new command always terminates a pending directive body.
             flush_pending(doc.detail, pending);
             in_bullet = false;

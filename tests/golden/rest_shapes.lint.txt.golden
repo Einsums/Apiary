@@ -1,2 +1,1 @@
-rest_shapes.hpp:91:20: error: einsums::fixture::inline_command_at_line_start: malformed reST in detail line 7: Bullet list ends without a blank line; unexpected unindent. [malformed-rest]
-rest_shapes.hpp:154:20: error: einsums::fixture::embedded_rst: malformed reST in detail line 7: Content block expected for the "note" directive; none found. [malformed-rest]
+rest_shapes.hpp:159:20: error: einsums::fixture::embedded_rst: malformed reST in detail line 7: Content block expected for the "note" directive; none found. [malformed-rest]
