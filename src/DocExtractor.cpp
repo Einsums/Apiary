@@ -96,6 +96,16 @@ std::string clean_raw_comment(llvm::StringRef text) {
     while (!lines.empty() && lines.back().empty()) {
         lines.pop_back();
     }
+    // ``///<`` / ``/**<`` / ``//!<`` document the PRECEDING member. The ``<``
+    // is Doxygen's marker for that, never content, so drop it here - at the
+    // one place both consumers read from. parse_doc_comment strips it too,
+    // which is why docs mode always looked right while the binding emitter,
+    // which uses this raw text as the docstring, emitted "< C order.".
+    if (!lines.empty() && !lines.front().empty() && lines.front().front() == '<') {
+        lines.front().erase(0, 1);
+        std::size_t const first = lines.front().find_first_not_of(" \t");
+        lines.front().erase(0, first == std::string::npos ? lines.front().size() : first);
+    }
     std::string out;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         if (i != 0) {

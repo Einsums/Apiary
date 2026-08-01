@@ -14,12 +14,12 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(fixture_default_args, m) {
     py::enum_<einsums::fixture::Layout>(m, "Layout", R"einsums(A scoped enum at namespace scope, for the non-nested comparison.)einsums")
-        .value("RowMajor", einsums::fixture::Layout::RowMajor, R"einsums(< C order.)einsums")
-        .value("ColMajor", einsums::fixture::Layout::ColMajor, R"einsums(< Fortran order.)einsums");
+        .value("RowMajor", einsums::fixture::Layout::RowMajor, R"einsums(C order.)einsums")
+        .value("ColMajor", einsums::fixture::Layout::ColMajor, R"einsums(Fortran order.)einsums");
 
     py::enum_<einsums::fixture::Solver::Mode>(m, "Mode", R"einsums(How aggressively to converge.)einsums")
-        .value("Fast", einsums::fixture::Solver::Mode::Fast, R"einsums(< Stop early.)einsums")
-        .value("Exact", einsums::fixture::Solver::Mode::Exact, R"einsums(< Run to convergence.)einsums");
+        .value("Fast", einsums::fixture::Solver::Mode::Fast, R"einsums(Stop early.)einsums")
+        .value("Exact", einsums::fixture::Solver::Mode::Exact, R"einsums(Run to convergence.)einsums");
 
     py::class_<einsums::fixture::Solver>(m, "Solver", R"einsums(Owns a nested enum used as a default argument below.)einsums")
         .def(py::init<>())
