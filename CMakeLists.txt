@@ -308,6 +308,23 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                 string(REPLACE "\n" ";" _apiary_cc_list "${_apiary_cc_includes}")
                 list(GET _apiary_cc_list 0 _apiary_pybind_include)
                 list(GET _apiary_cc_list 1 _apiary_python_include)
+                # Fuzz suite: random-but-valid annotated headers held to the same
+                # three assertions as the corpus (emits, compiles, stub parses).
+                # The corpus is what someone thought to write down; this covers
+                # the combinations nobody would enumerate. Fixed seed so ctest
+                # is stable and any red run is reproducible - override with
+                # APIARY_FUZZ_SEED / APIARY_FUZZ_COUNT to search.
+                add_test(NAME apiary_fuzz
+                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_fuzz.sh"
+                            "$<TARGET_FILE:apiary>"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                            "${_apiary_test_py}"
+                            "${CMAKE_CXX_COMPILER}"
+                            "${_apiary_pybind_include}"
+                            "${_apiary_python_include}"
+                )
+                # Three clang invocations per header, each pulling in pybind11.
+                set_tests_properties(apiary_fuzz PROPERTIES TIMEOUT 900)
                 add_test(NAME apiary_compile_check
                     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_compile_check.sh"
                             "$<TARGET_FILE:apiary>"

@@ -47,6 +47,20 @@ enum class APIARY_EXPOSE Layout {
 /// Default argument naming a namespace-scope enumerator.
 APIARY_EXPOSE void arrange(Layout layout = Layout::ColMajor);
 
+/// An UNSCOPED enum, whose enumerators live in the enclosing namespace and are
+/// therefore written bare.
+enum APIARY_EXPOSE Order {
+    Ascending, ///< Smallest first.
+    Descending ///< Largest first.
+};
+
+/// Default argument naming an unscoped enumerator - which is spelled `Ascending`
+/// with no qualification at all. Every enum fixture used the scoped form, whose
+/// written spelling already carries its enum, so nothing caught that the bare
+/// name was emitted verbatim into a generated TU at global scope, where it is
+/// simply undeclared. Found by the fuzz generator on its first run.
+APIARY_EXPOSE void sort_by(Order order = Ascending);
+
 template <typename T>
 struct Point {
     T x;

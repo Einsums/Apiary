@@ -68,6 +68,20 @@ std::vector<BoundParam> build_params(clang::FunctionDecl const *fn, clang::ASTCo
                 policy.FullyQualifiedName     = true;
                 policy.SuppressUnwrittenScope = false;
                 def->printPretty(os, nullptr, policy);
+                // An UNSCOPED enum's enumerator is written bare (`V0`), and
+                // printPretty keeps the written form - FullyQualifiedName
+                // governs type printing, not this. The generated TU is at
+                // global scope, so a bare `V0` is an undeclared identifier
+                // there and the binding does not compile. Ask the declaration
+                // for its qualified name instead; since C++11 an unscoped
+                // enumerator may be qualified by its enum, so the same spelling
+                // works for both kinds and scoped enums (already qualified)
+                // come out unchanged.
+                if (auto const *ref = llvm::dyn_cast<clang::DeclRefExpr>(def->IgnoreParenImpCasts())) {
+                    if (auto const *enumerator = llvm::dyn_cast<clang::EnumConstantDecl>(ref->getDecl())) {
+                        printed = enumerator->getQualifiedNameAsString();
+                    }
+                }
                 bp.default_value    = printed;
                 bp.default_value_py = translate_python_default(printed);
             }

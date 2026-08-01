@@ -14,6 +14,10 @@ class Layout(enum.IntEnum):
     RowMajor = 0
     ColMajor = 1
 
+class Order(enum.IntEnum):
+    Ascending = 0
+    Descending = 1
+
 class Mode(enum.IntEnum):
     Fast = 0
     Exact = 1
@@ -29,6 +33,14 @@ class Solver:
 
 def arrange(layout: Layout = ...) -> None:
     """Default argument naming a namespace-scope enumerator."""
+    ...
+def sort_by(order: Order = ...) -> None:
+    """Default argument naming an unscoped enumerator - which is spelled `Ascending`
+    with no qualification at all. Every enum fixture used the scoped form, whose
+    written spelling already carries its enum, so nothing caught that the bare
+    name was emitted verbatim into a generated TU at global scope, where it is
+    simply undeclared. Found by the fuzz generator on its first run.
+    """
     ...
 def translate(p: Any, delta: Any = ...) -> None:
     """Default argument that is a template instantiation with a braced initializer.
