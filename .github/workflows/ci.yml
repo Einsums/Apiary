@@ -20,7 +20,10 @@ jobs:
       # apiary_examples suite builds the generated extensions against; without
       # it that suite skips itself. docutils backs the malformed-rest check, so
       # without it apiary_doc_markup skips too - and that suite is the gate that
-      # catches a doc comment converting to invalid reST.
+      # catches a doc comment converting to invalid reST. sphinx is the same
+      # story one level up: apiary_sphinx_check only registers when sphinx-build
+      # is on PATH, so without it the "the rendered reST must actually build"
+      # check was never running in CI at all.
       #
       # The LLVM major is pinned to match conda/recipe.yaml's llvm_major. Left
       # unpinned the solver picks a different major per platform, and apiary's
@@ -40,12 +43,20 @@ jobs:
             python
             pybind11
             docutils
+            sphinx
 
       - name: Configure
         run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
 
       - name: Build
         run: cmake --build build
+
+      # Every optional suite registers only when its dependency is importable,
+      # and CMake says so with a STATUS line nobody reads. A suite that never
+      # registered is indistinguishable from one that passed, which is how the
+      # sphinx check sat un-run in CI. Assert the full set instead.
+      - name: Assert every suite registered
+        run: bash devtools/assert_tests_registered.sh build
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
@@ -83,12 +94,20 @@ jobs:
             python
             pybind11
             docutils
+            sphinx
 
       - name: Configure
         run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
 
       - name: Build
         run: cmake --build build
+
+      # Every optional suite registers only when its dependency is importable,
+      # and CMake says so with a STATUS line nobody reads. A suite that never
+      # registered is indistinguishable from one that passed, which is how the
+      # sphinx check sat un-run in CI. Assert the full set instead.
+      - name: Assert every suite registered
+        run: bash devtools/assert_tests_registered.sh build
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
@@ -131,6 +150,7 @@ jobs:
             python
             pybind11
             docutils
+            sphinx
 
       # Windows conda packages install under %CONDA_PREFIX%\Library, so that -
       # not the env root - is where find_package(Clang/LLVM CONFIG) has to look.
@@ -145,8 +165,67 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      # Same registration guard as the other jobs; bash is the Git Bash the
+      # runner image ships.
+      - name: Assert every suite registered
+        run: bash devtools/assert_tests_registered.sh build
+
       # The suites are bash scripts; ctest spawns the Git Bash that ships in the
       # runner image directly, so no shell wrapper is needed here. .gitattributes
       # keeps them (and the golden fixtures) checked out with LF endings.
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # LLVM drift detector. Everything above pins clangdev/llvmdev to 22 because
+  # apiary's emitted text is version-dependent: Clang's type printer changed how
+  # it qualifies names, and the goldens can only encode one major at a time.
+  # That pin is correct, and it is also why an LLVM bump is currently discovered
+  # by whoever attempts it, at the worst possible moment.
+  #
+  # This job resolves the newest clangdev the solver offers and is allowed to
+  # fail. A red X here means the next major changed something apiary depends on
+  # - usually a type spelling, visible as a golden diff - and it says so weeks
+  # before anyone needs to do the bump.
+  #
+  # Deliberately NOT an older major: CMakeLists floors at LLVM 22 with a
+  # FATAL_ERROR, because below that the emitted type names do not compile. There
+  # is no older configuration to test, only one the project refuses.
+  llvm-drift:
+    name: LLVM drift (unpinned, allowed to fail)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: apiary-drift
+          create-args: >-
+            cmake
+            ninja
+            clangdev
+            llvmdev
+            cxx-compiler
+            zlib
+            python
+            pybind11
+            docutils
+            sphinx
+
+      - name: Report the resolved LLVM
+        run: micromamba list | grep -E "^\s*(clangdev|llvmdev)" || true
+
+      - name: Configure
+        run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Assert every suite registered
+        run: bash devtools/assert_tests_registered.sh build
+
       - name: Test
         run: ctest --test-dir build --output-on-failure
