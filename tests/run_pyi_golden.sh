@@ -10,12 +10,14 @@
 # instantiation type resolution, docstring extraction, property merge,
 # and dtype-/template-kwargs-dispatcher emission.
 #
-# Every generated stub is also parsed as Python before it is compared. A golden
-# only says the output has not CHANGED; it cannot say the output was ever
-# valid, and a stub that does not parse is worthless to the type checker it
-# exists to feed. The two checks answer different questions and a stub needs
-# both. (A C++ name that is not a Python identifier - a free `operator*` - is
-# exactly how an unparseable stub gets emitted, silently.)
+# Every generated stub is also parsed as Python before it is compared, with
+# SyntaxWarning promoted to an error. A golden only says the output has not
+# CHANGED; it cannot say the output was ever valid, and a stub that does not
+# parse is worthless to the type checker it exists to feed. The two checks
+# answer different questions and a stub needs both. (A C++ name that is not a
+# Python identifier - a free `operator*` - is exactly how an unparseable stub
+# gets emitted, silently; LaTeX in a docstring is how a stub that parses today
+# stops parsing on a later Python.)
 #
 # Updating goldens:
 #     REGEN=1 run_pyi_golden.sh <tool> <annotations-include-dir>
@@ -93,7 +95,11 @@ for case in "${CASES[@]}"; do
     # Validate BEFORE the golden comparison, and before REGEN gets a chance to
     # bless it: an invalid stub must never become a committed golden.
     if [[ "${can_parse}" == "1" ]]; then
-        if ! "${PY}" -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "${tmp_actual}" 2> "${tmp_diff}"; then
+        # SyntaxWarning is promoted to an error: an unknown escape sequence
+        # (LaTeX in a docstring is full of them) is only a warning today, and
+        # Python says it "will not work in the future" - i.e. this stub is on a
+        # path to not parsing at all. Catch it while it is still cheap.
+        if ! "${PY}" -W error::SyntaxWarning -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "${tmp_actual}" 2> "${tmp_diff}"; then
             echo "FAIL ${golden}: generated stub is not valid Python" >&2
             cat "${tmp_diff}" >&2
             failures=$((failures + 1))

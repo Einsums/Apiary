@@ -76,6 +76,14 @@ void emit_docstring(std::ostringstream &os, std::string const &raw, std::string 
         return;
     }
     char const *q = (doc.find("\"\"\"") == std::string::npos) ? "\"\"\"" : "'''";
+    // A docstring carrying LaTeX - which @f$ ... @f$ math becomes - is full of
+    // sequences like ``\sum`` that Python reads as string escapes. Since 3.12
+    // that is a SyntaxWarning saying it "will not work in the future", so the
+    // stub is on a path to not parsing at all. A raw string literal is the fix,
+    // except that a raw literal may not END in a backslash; in that (pathological)
+    // case leave it alone rather than emit something that does not parse today.
+    bool const needs_raw = doc.find('\\') != std::string::npos && doc.back() != '\\';
+    char const *prefix   = needs_raw ? "r" : "";
 
     auto lines = split_lines(doc);
     while (!lines.empty() && lines.back().empty()) {
@@ -85,10 +93,10 @@ void emit_docstring(std::ostringstream &os, std::string const &raw, std::string 
         return;
     }
     if (lines.size() == 1) {
-        os << indent << q << lines[0] << q << "\n";
+        os << indent << prefix << q << lines[0] << q << "\n";
         return;
     }
-    os << indent << q << lines[0] << "\n";
+    os << indent << prefix << q << lines[0] << "\n";
     for (std::size_t i = 1; i < lines.size(); ++i) {
         if (lines[i].empty()) {
             os << "\n";

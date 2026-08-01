@@ -90,5 +90,25 @@ def rest_in_prose(x: float) -> float:
         The value.
     """
     ...
+def with_math(x: float) -> float:
+    r"""Math, which is LaTeX, which is backslashes.
+
+    A docstring is a Python string literal, so `\sum` in it is an escape
+    sequence Python does not know. Since 3.12 that is a SyntaxWarning that says
+    it "will not work in the future", which puts the stub on a path to not
+    parsing at all. The literal has to be raw.
+
+    The contraction is :math:`c_{ik} = \sum_j a_{ij} b_{jk}`, and as a block:
+
+    .. math::
+
+       \alpha \sum_k \mathrm{tr}(A_k)
+
+    Parameters
+    ----------
+    x
+        The value.
+    """
+    ...
 def only_a_dropped_command(x: float) -> float:
     ...

@@ -86,6 +86,24 @@ APIARY_EXPOSE double bare_deprecated(double x);
  */
 APIARY_EXPOSE double rest_in_prose(double x);
 
+/**
+ * @brief Math, which is LaTeX, which is backslashes.
+ *
+ * A docstring is a Python string literal, so `\sum` in it is an escape
+ * sequence Python does not know. Since 3.12 that is a SyntaxWarning that says
+ * it "will not work in the future", which puts the stub on a path to not
+ * parsing at all. The literal has to be raw.
+ *
+ * The contraction is @f$ c_{ik} = \sum_j a_{ij} b_{jk} @f$, and as a block:
+ *
+ * @f[
+ *   \alpha \sum_k \mathrm{tr}(A_k)
+ * @f]
+ *
+ * @param x The value.
+ */
+APIARY_EXPOSE double with_math(double x);
+
 /// @ingroup internal_group
 APIARY_EXPOSE double only_a_dropped_command(double x);
 
