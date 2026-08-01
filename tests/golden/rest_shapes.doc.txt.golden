@@ -1,0 +1,183 @@
+### Round
+  brief:
+    |A round shape.
+
+### Square
+  brief:
+    |A square shape.
+
+### einsums::fixture::Shape
+  brief:
+    |An enum carries doc text too, and it is rendered as reST like any other.
+  detail:
+    |- A bullet in an enum's detail, wrapping onto a second source line to exercise the same join.
+    |- A second bullet.
+
+### einsums::fixture::accumulate
+  brief:
+    |Field descriptions carrying their own markup.
+  returns:
+    |The accumulated result, described across two source lines so the wrap is exercised here too.
+  param values:
+    |The input values. Long enough to wrap onto a second source line, which reST field bodies also require be joined.
+  param scale:
+    |A scale factor. See ``einsums::fixture::wrapped_bullets`` for the reference form.
+  tparam T:
+    |The element type, as in ``std::complex<double>``.
+  throw std::invalid_argument:
+    |When ``values`` is empty.
+
+### einsums::fixture::admonitions_with_lists
+  brief:
+    |Admonition bodies that contain lists.
+  detail:
+    |.. note::
+    |
+    |   - A bullet inside a note, whose continuation wraps onto a second source line and must stay joined.
+    |   - A second bullet.
+    |
+    |.. warning::
+    |
+    |   A one-line warning.
+    |
+    |.. seealso::
+    |
+    |   einsums::fixture::wrapped_bullets
+
+### einsums::fixture::bullets_around_code
+  brief:
+    |A bullet list directly adjacent to a code block.
+  detail:
+    |- An item before the code.
+    |- A second item.
+    |
+    |.. code-block:: py
+    |
+    |   result = wrapped_bullets()
+    |
+    |- An item after the code, opening a second list.
+
+### einsums::fixture::definition_list
+  brief:
+    |A definition list.
+  detail:
+    |KNOWN BAD (Finding 4, same root cause as nested_bullets): a definition list
+    |IS its indentation, so ltrimming every line flattens it into one paragraph.
+    |
+    |term one
+    |The definition of the first term, which wraps onto a second line.
+    |term two
+    |The definition of the second term.
+
+### einsums::fixture::embedded_rst
+  brief:
+    |Verbatim reST spliced through an rst span.
+  detail:
+    |KNOWN BAD (Finding 5): naming the span command in the brief above - writing
+    |it inside an inline literal, as prose about it has to - opens a real span.
+    |Span protection scans the raw text and does not know that a backtick-quoted
+    |command is not a command, so the opener inside the literal pairs with the
+    |genuine terminator below and swallows the whole comment.
+    |
+    |.. note::
+    |
+    |An authored directive, indented body and all.
+    |
+    |- A list inside the spliced block.
+    |- A second item.
+
+### einsums::fixture::enumerated_list
+  brief:
+    |An enumerated list whose items wrap.
+  detail:
+    |1. The first step, written long enough that it wraps onto a second source line the way an author would naturally write it.
+    |2. The second step.
+    |3. The third step.
+
+### einsums::fixture::fussy_inline_spans
+  brief:
+    |Literal and emphasis spans that reST is fussy about.
+  detail:
+    |A template argument list after a literal, ``std::vector<int>``, and a
+    |subscript, ``extents[k]``, and a call, *compute()*, each of which must be
+    |absorbed into the span so the closing delimiter is not followed by a
+    |character reST reads as a dangling start-string.
+
+### einsums::fixture::inline_command_at_line_start
+  brief:
+    |An inline command at the start of a continuation line.
+  detail:
+    |KNOWN BAD (apiary_robustness_plan.md, Finding 1): a line whose first token
+    |starts with ``@`` is taken for a block-level command, so the line below
+    |neither joins its bullet nor passes through inline conversion. The item
+    |dedents to column 0 and the ``@ref`` loses its markup.
+    |
+    |- A bullet whose continuation line begins with an inline command, such as
+    |einsums::fixture::wrapped_bullets, and then continues with prose that
+    |should stay joined to the same item.
+    |- A second bullet, to close the list.
+
+### einsums::fixture::inline_commands_wrapped
+  brief:
+    |Every inline command, each opening a continuation line.
+  detail:
+    |KNOWN BAD (Finding 1): the same defect for the rest of the closed set.
+    |
+    |A paragraph that wraps so that
+    |std::complex<double> starts a line, and another that wraps so that
+    |count starts one, and
+    |emphasis, and
+    |bold, and
+    |also_emphasis all do too.
+
+### einsums::fixture::math_next_to_list
+  brief:
+    |Math spans inline and as a block, next to a list.
+  detail:
+    |The inline form :math:`a_{ij} b_{jk}` sits in running prose, and the block
+    |form stands alone:
+    |
+    |.. math::
+    |
+    |   C_{ik} = \sum_j a_{ij} b_{jk}
+    |
+    |- A list immediately after the math block.
+    |- A second item.
+
+### einsums::fixture::nested_bullets
+  brief:
+    |A nested bullet list.
+  detail:
+    |KNOWN BAD (Finding 4): the converter is line-oriented and ltrims every line,
+    |so the indentation that expresses nesting is gone before anything looks at
+    |it. The result is valid reST and a flat four-item list - which is why only
+    |the text golden catches this one, not the markup check.
+    |
+    |- An outer item.
+    |- An inner item, indented under it.
+    |- A second inner item.
+    |- A second outer item.
+
+### einsums::fixture::par_with_bullets
+  brief:
+    |A ``@par`` block whose body is a bullet list.
+  detail:
+    |**Limitations**
+    |
+    |- A directive body is accumulated separately and joined by its own helper, so it is a second code path with the same wrapped-continuation problem.
+    |- A second item, to close the list.
+
+### einsums::fixture::wrapped_bullets
+  brief:
+    |A bullet list whose items wrap across source lines.
+  detail:
+    |The wrapped continuation lines must be joined onto their item. reST requires
+    |a bullet item's continuation to be indented to the item's text column, and
+    |the comment normalizer has already stripped that indentation, so anything
+    |other than joining produces "Bullet list ends without a blank line".
+    |
+    |- The first item is long enough that it wraps onto a second source line and then onto a third, all of which belong to the same item.
+    |- The second item, to prove the list continues.
+    |
+    |A trailing paragraph, which must be separated from the list by a blank line.
+

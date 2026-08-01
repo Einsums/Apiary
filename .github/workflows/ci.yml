@@ -18,7 +18,9 @@ jobs:
       # The conda-forge clangdev/llvmdev packages provide the CMake config
       # packages find_package(Clang/LLVM CONFIG) needs. pybind11 is what the
       # apiary_examples suite builds the generated extensions against; without
-      # it that suite skips itself.
+      # it that suite skips itself. docutils backs the malformed-rest check, so
+      # without it apiary_doc_markup skips too - and that suite is the gate that
+      # catches a doc comment converting to invalid reST.
       #
       # The LLVM major is pinned to match conda/recipe.yaml's llvm_major. Left
       # unpinned the solver picks a different major per platform, and apiary's
@@ -37,6 +39,7 @@ jobs:
             zlib
             python
             pybind11
+            docutils
 
       - name: Configure
         run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
@@ -79,6 +82,7 @@ jobs:
             zlib
             python
             pybind11
+            docutils
 
       - name: Configure
         run: cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
@@ -126,6 +130,7 @@ jobs:
             zstd
             python
             pybind11
+            docutils
 
       # Windows conda packages install under %CONDA_PREFIX%\Library, so that -
       # not the env root - is where find_package(Clang/LLVM CONFIG) has to look.

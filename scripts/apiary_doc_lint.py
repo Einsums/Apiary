@@ -14,7 +14,16 @@ gate rather than something discovered at render time:
   - a parameter/template-parameter left undocumented when its siblings are
     documented (partial docs -> likely an oversight) -> warning;
   - ``@return`` text on a ``void`` function -> warning;
-  - a malformed ``@throws`` with no exception type -> warning.
+  - a malformed ``@throws`` with no exception type -> warning;
+  - doc text that converted to **malformed reST** -> error.
+
+That last check is the one that fails at the header instead of at Sphinx. The
+other checks are semantic: they ask whether the doc comment agrees with the
+signature. ``malformed-rest`` asks whether the reST apiary *produced* is
+well-formed at all, which nothing used to ask - so a broken bullet list
+travelled all the way to the HTML build before anyone noticed, and was
+reported there against a generated file. It needs docutils; see
+``apiary_rest_check.py``.
 
 Input is one or more docs-JSON files (the output of ``apiary
 --emit-cpp-docs-json``). Diagnostics are printed as
@@ -32,6 +41,7 @@ import re
 import sys
 from dataclasses import dataclass
 
+import apiary_rest_check
 from apiary_docs_resolve import build_resolver, unresolved_references
 
 # check id -> default severity
@@ -42,6 +52,10 @@ SEVERITY = {
     "missing-tparam": "warning",
     "returns-on-void": "warning",
     "malformed-throws": "warning",
+    # The doc text does not parse as reST. An error, not a warning: the render
+    # downstream is already broken, and the whole point is to say so here
+    # rather than let Sphinx say it about a generated file.
+    "malformed-rest": "error",
     # Emitted only with --check-links, over a MERGED docs.json (the resolver
     # needs the whole graph). A ``[[Type/member]]`` author link that resolves to
     # nothing in the merged docs graph.
@@ -166,6 +180,61 @@ def walk_class(cls: dict, findings: list[Finding]) -> None:
         walk_class(nested, findings)
 
 
+def iter_documented(node, seen: set[int] | None = None):
+    """Yield every entity in the document that carries a ``doc_structured``.
+
+    Deliberately a structural walk rather than the kind-by-kind traversal the
+    semantic checks use. Those only care about callables, but *any* entity's
+    doc text is rendered into reST - an enum, a typedef, a concept - so
+    markup checking has to reach all of them, including kinds added later.
+    """
+    seen = set() if seen is None else seen
+    if id(node) in seen:
+        return
+    seen.add(id(node))
+    if isinstance(node, dict):
+        if isinstance(node.get("doc_structured"), dict):
+            yield node
+        for value in node.values():
+            yield from iter_documented(value, seen)
+    elif isinstance(node, list):
+        for value in node:
+            yield from iter_documented(value, seen)
+
+
+def check_markup(doc: dict, findings: list[Finding]) -> None:
+    """Parse every emitted doc fragment as reST and report what breaks.
+
+    Each fragment is checked on its own, and the diagnostic carries both the
+    entity's location (the header the author edits) and the line *within* the
+    fragment. The two differ - the IR records where the declaration is, not
+    where the doc comment starts - so naming the field and the fragment line is
+    what makes the message actionable.
+    """
+    for entity in iter_documented(doc):
+        ds = entity["doc_structured"]
+        name = entity.get("qualified_name") or entity.get("name") or entity.get("py_name") or "<anonymous>"
+        f, ln, col = loc(entity)
+
+        fragments: list[tuple[str, str]] = [
+            ("brief", ds.get("brief") or ""),
+            ("detail", ds.get("detail") or ""),
+            ("@return", ds.get("returns") or ""),
+        ]
+        for field in ("params", "tparams", "throws"):
+            for entry in ds.get(field) or []:
+                label = f"@{field[:-1]} {entry.get('name') or '?'}"
+                fragments.append((label, entry.get("description") or ""))
+
+        for label, text in fragments:
+            for p in apiary_rest_check.check_fragment(text):
+                where = f"{label} line {p.line}" if p.line else label
+                findings.append(
+                    Finding(f, ln, col, SEVERITY["malformed-rest"], "malformed-rest",
+                            f"{name}: malformed reST in {where}: {p.message}")
+                )
+
+
 def lint_module(doc: dict, findings: list[Finding]) -> None:
     for fn in doc.get("functions", []):
         check_callable(fn, kind="function", findings=findings)
@@ -196,6 +265,13 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         ap.error(f"unknown check id(s): {', '.join(sorted(unknown))}; valid: {', '.join(sorted(SEVERITY))}")
 
+    # Refuse to run a degraded markup check. Skipping it quietly would put us
+    # back where we started: a green lint that never looked at the markup.
+    check_rest = "malformed-rest" in selected
+    if check_rest and not apiary_rest_check.available():
+        print(f"doc_lint: {apiary_rest_check.MISSING_DOCUTILS}", file=sys.stderr)
+        return 2
+
     findings: list[Finding] = []
     docs: list[dict] = []
     for path in args.files:
@@ -207,6 +283,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         docs.append(doc)
         lint_module(doc, findings)
+        if check_rest:
+            check_markup(doc, findings)
 
     # Link resolution needs the WHOLE graph, so build one resolver over the union
     # of inputs (a single merged docs.json, or every fragment) and check each.

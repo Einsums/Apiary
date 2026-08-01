@@ -234,6 +234,23 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         set(Python_ROOT_DIR "$ENV{CONDA_PREFIX}")
     endif()
     find_package(Python COMPONENTS Interpreter QUIET)
+    # docutils backs the ``malformed-rest`` check (scripts/apiary_rest_check.py).
+    # It ships with Sphinx and is pure Python, but it is not guaranteed, so probe
+    # the interpreter the tests will actually use and gate the markup suite on
+    # the answer. run_doc_lint.sh probes for itself and skips loudly.
+    if(Python_EXECUTABLE)
+        set(_apiary_test_py "${Python_EXECUTABLE}")
+    else()
+        set(_apiary_test_py "python3")
+    endif()
+    execute_process(COMMAND "${_apiary_test_py}" -c "import docutils"
+                    RESULT_VARIABLE _apiary_docutils_rc OUTPUT_QUIET ERROR_QUIET)
+    if(_apiary_docutils_rc EQUAL 0)
+        set(APIARY_HAVE_DOCUTILS ON)
+    else()
+        set(APIARY_HAVE_DOCUTILS OFF)
+    endif()
+
     # The smoke/golden/pyi suites drive the executable, so they only register
     # when it was built. doc_lint below is pure Python and runs either way.
     if(APIARY_BUILD_TOOL)
@@ -272,6 +289,22 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
                     "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
         )
+        # Doc-markup suite: pins the reST the Doxygen converter produces for
+        # tests/fixtures/rest_shapes.hpp, both as text and as doc_lint's
+        # ``malformed-rest`` diagnostics. This is the gate that turns a doc
+        # comment that converts to invalid reST into a failure HERE, naming the
+        # header, instead of a docutils warning about a generated file at the
+        # far end of the docs build.
+        if(APIARY_HAVE_DOCUTILS)
+            add_test(NAME apiary_doc_markup
+                COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_doc_markup.sh"
+                        "$<TARGET_FILE:apiary>"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                        "${_apiary_test_py}"
+            )
+        else()
+            message(STATUS "apiary: docutils not importable - skipping apiary_doc_markup test")
+        endif()
         # Sphinx build-check: the rendered Python API reST must build with
         # ``sphinx-build -W -n`` (warnings = errors, nitpicky xrefs). Only
         # registered when sphinx-build is available (CI installs it); skipped
