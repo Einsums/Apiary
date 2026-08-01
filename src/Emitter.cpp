@@ -223,12 +223,62 @@ void emit_param_args(llvm::raw_string_ostream &os, std::vector<BoundParam> const
     }
 }
 
-// Generate the C++ pointer-to-member expression for a method, including
-// the static_cast<> needed to disambiguate overloads. For unambiguous
-// methods the cast is harmless; for overloads it's required. Static
-// methods take a free-function pointer cast (no Class::*) since they
-// have no implicit ``this``.
+// Generate the callable expression bound for a method.
+//
+// Normally that is a static_cast<>'d pointer-to-member: harmless for an
+// unambiguous method, required to pick one out of an overload set. Static
+// methods take a free-function pointer cast (no Class::*) since they have no
+// implicit ``this``.
+//
+// Ref-qualifiers make this two cases rather than one, because a ref-qualifier
+// is part of a member function's TYPE. A cast that omits it names NONE of the
+// overloads - clang rejects it outright - so `&` and `const &` simply need the
+// qualifier carried into the cast.
+//
+// `&&` and `const &&` cannot be bound through a pointer-to-member at all:
+// pybind11 invokes it on the lvalue it holds, and an rvalue-qualified function
+// is not callable on an lvalue. The only expression that calls one is a lambda
+// that casts self to an rvalue - which is exactly what `&&` MEANS, and also why
+// it is worth saying out loud: the Python object survives the call in a
+// moved-from state, and Python has no way to show that.
 std::string method_pointer(std::string const &class_qual, BoundMethod const &m) {
+    if (m.ref_qualifier == "&&") {
+        diag::report("moved-from-self", m.location,
+                     "method '" + m.name + "' is " + (m.is_const ? "const && " : "&& ") +
+                         "qualified, so it is bound through a lambda that moves from the object. After calling it the "
+                         "Python object is in a moved-from state, which nothing in Python will indicate.");
+
+        // `static_cast<Class &&>` rather than std::move so the generated TU
+        // needs no <utility>; they are the same expression. The parameter's
+        // constness is what selects between an `&&` and a `const &&` overload.
+        std::string self_type = class_qual;
+        self_type += m.is_const ? " const" : "";
+
+        std::string out = "[](";
+        out += self_type;
+        out += " &self";
+        for (std::size_t i = 0; i < m.params.size(); ++i) {
+            out += ", ";
+            out += m.params[i].type;
+            out += " a" + std::to_string(i);
+        }
+        // decltype(auto), not auto: a method returning T& must not be turned
+        // into a lambda returning T by value.
+        out += ") -> decltype(auto) { return static_cast<";
+        out += self_type;
+        out += " &&>(self)." + m.name + "(";
+        for (std::size_t i = 0; i < m.params.size(); ++i) {
+            if (i != 0) {
+                out += ", ";
+            }
+            // Preserve each argument's value category, which matters for a
+            // parameter declared as an rvalue reference.
+            out += "static_cast<" + m.params[i].type + ">(a" + std::to_string(i) + ")";
+        }
+        out += "); }";
+        return out;
+    }
+
     std::string sig;
     sig += m.return_type;
     sig += " (";
@@ -248,17 +298,9 @@ std::string method_pointer(std::string const &class_qual, BoundMethod const &m) 
     if (m.is_const) {
         sig += " const";
     }
-    // The ref-qualifier is part of a member function's TYPE, so a cast that
-    // omits it names none of the overloads and the generated TU does not
-    // compile. Emitting the qualifier here would fix `&` and `const &`, but
-    // not `&&`: pybind11 invokes through the member pointer on an lvalue, so an
-    // rvalue-qualified method needs a lambda that moves, or a refusal. Until
-    // that is decided, say what is wrong rather than emit silence.
     if (!m.ref_qualifier.empty()) {
-        diag::report("unrepresentable-overload", m.location,
-                     "method '" + m.name + "' is " + m.ref_qualifier +
-                         "-qualified; the emitted static_cast omits the qualifier and so names no overload. "
-                         "The generated code will not compile.");
+        sig += " ";
+        sig += m.ref_qualifier;
     }
     std::string out = "static_cast<";
     out += sig;
@@ -557,20 +599,10 @@ void emit_method(llvm::raw_string_ostream &os, std::string const &class_qual, Bo
                         }
                     }
                     std::string const method_kind = resolved.is_static ? "def_static" : "def";
-                    std::string const cast_kind   = resolved.is_static ? std::string{"*"} : (class_qual + "::*");
-                    os << "        ." << method_kind << "(\"" << py_inst << "\", static_cast<" << resolved.return_type << " (" << cast_kind
-                       << ")(";
-                    for (std::size_t i = 0; i < resolved.params.size(); ++i) {
-                        if (i != 0) {
-                            os << ", ";
-                        }
-                        os << resolved.params[i].type;
-                    }
-                    os << ")";
-                    if (resolved.is_const) {
-                        os << " const";
-                    }
-                    os << ">(&" << class_qual << "::" << resolved.name << ")";
+                    // Same builder as the non-template path. This used to
+                    // open-code the cast, which meant the ref-qualifier bug
+                    // lived here twice and was fixed in one place.
+                    os << "        ." << method_kind << "(\"" << py_inst << "\", " << method_pointer(class_qual, resolved);
                     emit_param_args(os, resolved.params, b);
                     emit_function_arg_modifiers(os, m, b);
                     emit_doc_arg(os, m);

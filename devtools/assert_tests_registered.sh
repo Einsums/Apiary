@@ -38,6 +38,7 @@ readonly EXPECTED=(
     apiary_shard
     apiary_example_mathx
     apiary_properties
+    apiary_compile_check
     apiary_diagnostics
     apiary_doc_markup
     apiary_sphinx_check

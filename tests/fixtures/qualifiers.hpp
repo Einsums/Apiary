@@ -14,20 +14,24 @@
 // disambiguating static_cast the emitter writes has to carry the qualifier or
 // it names neither of them.
 //
-// KNOWN BAD (Finding 7): it does not. The four overloads below emit two
-// distinct casts between them - `(...)() const` and `(...)()` - and clang
-// rejects both with "address of overloaded function 'value' cannot be
-// static_cast to type ...", because a ref-qualified member function's type
-// includes its ref-qualifier. The generated TU does not compile. Verified by
-// compiling the emitted cast against the declarations.
+// It used not to (Finding 7): all four emitted one of two casts between them -
+// `(...)() const` and `(...)()` - and clang rejected both with "address of
+// overloaded function 'value' cannot be static_cast to type ...". The generated
+// TU did not compile.
 //
-// Note that the fix is not only "put the qualifier in the cast". pybind11
-// invokes through the member pointer on an LVALUE, so `&` and `const &` work
-// once the cast is right, but `&&` and `const &&` cannot be bound through a
-// member pointer at all - they need a lambda that moves, or a refusal. That is
-// a decision about what binding an rvalue-qualified method should MEAN in
-// Python, not a mechanical repair, so the golden records the broken output
-// until it is made.
+// The fix is two-sided, which is why it took a decision rather than a repair.
+// `&` and `const &` just need the qualifier in the cast. `&&` and `const &&`
+// cannot be bound through a pointer-to-member AT ALL - pybind11 invokes it on
+// the lvalue it holds - so they are bound through a lambda that casts self to
+// an rvalue. That is what `&&` means, and it is also why the emitter reports
+// it: after such a call the Python object is in a moved-from state and nothing
+// in Python will indicate that. The alternative was to refuse to bind them,
+// which honours the safety and ignores the APIARY_EXPOSE the author wrote.
+//
+// The two-name shape below is what makes the lambda defensible here: an author
+// who gives the rvalue overload its own Python name (`take`) has said they want
+// the moving call. One who does not gets the lvalue overload under the natural
+// name and a warning about the other.
 
 #pragma once
 

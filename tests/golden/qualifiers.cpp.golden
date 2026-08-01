@@ -15,14 +15,19 @@ namespace py = pybind11;
 PYBIND11_MODULE(fixture_qualifiers, m) {
     py::class_<einsums::fixture::Handle>(m, "Handle", R"einsums(A handle whose accessors differ only in cv- and ref-qualification.)einsums")
         .def(py::init<>())
-        .def("value", static_cast<double (einsums::fixture::Handle::*)() const>(&einsums::fixture::Handle::value),
+        .def("value", static_cast<double (einsums::fixture::Handle::*)() const &>(&einsums::fixture::Handle::value),
              R"einsums(Read the value from a const lvalue.)einsums")
-        .def("value_mut", static_cast<double (einsums::fixture::Handle::*)()>(&einsums::fixture::Handle::value),
+        .def("value_mut", static_cast<double (einsums::fixture::Handle::*)() &>(&einsums::fixture::Handle::value),
              R"einsums(Read the value from a non-const lvalue.)einsums")
-        .def("take", static_cast<double (einsums::fixture::Handle::*)()>(&einsums::fixture::Handle::value),
-             R"einsums(Steal the value from an rvalue.)einsums")
-        .def("take_const", static_cast<double (einsums::fixture::Handle::*)() const>(&einsums::fixture::Handle::value),
-             R"einsums(Steal the value from a const rvalue - the rarest of the four, and the
+        .def(
+            "take", [](einsums::fixture::Handle &self) -> decltype(auto) { return static_cast<einsums::fixture::Handle &&>(self).value(); },
+            R"einsums(Steal the value from an rvalue.)einsums")
+        .def(
+            "take_const",
+            [](einsums::fixture::Handle const &self) -> decltype(auto) {
+                return static_cast<einsums::fixture::Handle const &&>(self).value();
+            },
+            R"einsums(Steal the value from a const rvalue - the rarest of the four, and the
 one a hand-written qualifier check is most likely to miss.)einsums")
         .def("reset", static_cast<void (einsums::fixture::Handle::*)()>(&einsums::fixture::Handle::reset),
              R"einsums(An unqualified overload set for contrast: these differ by parameter,

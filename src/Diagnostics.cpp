@@ -39,8 +39,8 @@ struct Check {
 // conceived described behavior that does not exist.)
 std::vector<Check> &registry() {
     static std::vector<Check> checks = {
-        {"unrepresentable-overload", Severity::Warning,
-         "an overload the emitted static_cast cannot name (e.g. a ref-qualified method)"},
+        {"moved-from-self", Severity::Warning,
+         "an rvalue-qualified method, bound through a lambda that moves from the object"},
         {"unrepresentable-pack", Severity::Warning, "a parameter pack re-emitted verbatim into a cast or a stub"},
         {"invalid-python-name", Severity::Warning, "a binding name that is not a Python identifier"},
         {"skipped-entity", Severity::Ignored, "an annotated entity the emitter chose not to bind"},

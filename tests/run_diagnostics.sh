@@ -59,7 +59,7 @@ collect() {
 }
 
 {
-    echo "### qualifiers.hpp (ref-qualified overloads)"
+    echo "### qualifiers.hpp (rvalue-qualified methods)"
     collect qualifiers.hpp
     echo
     echo "### variadic_pack.hpp (parameter packs)"
@@ -69,7 +69,7 @@ collect() {
     collect rest_shapes.hpp --diagnostic=skipped-entity=note
     echo
     echo "### a check silenced"
-    collect qualifiers.hpp --diagnostic=unrepresentable-overload=ignored
+    collect qualifiers.hpp --diagnostic=moved-from-self=ignored
 } > "${WORK}/actual.txt"
 
 if [[ "${REGEN}" == "1" ]]; then
@@ -154,7 +154,7 @@ for f in "${OUTDIR}/ok.cpp" "${OUTDIR}/ok.pyi"; do
 done
 
 # --list-diagnostics must work without naming a source file.
-if ! "${TOOL}" --list-diagnostics 2>/dev/null | grep -q "unrepresentable-overload"; then
+if ! "${TOOL}" --list-diagnostics 2>/dev/null | grep -q "moved-from-self"; then
     echo "FAIL: --list-diagnostics should list the checks without a source file" >&2
     fail=1
 fi

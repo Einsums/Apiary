@@ -1,9 +1,7 @@
-### qualifiers.hpp (ref-qualified overloads)
-qualifiers.hpp:44:49: warning: apiary: method 'value' is &-qualified; the emitted static_cast omits the qualifier and so names no overload. The generated code will not compile. [unrepresentable-overload]
-qualifiers.hpp:47:53: warning: apiary: method 'value' is &-qualified; the emitted static_cast omits the qualifier and so names no overload. The generated code will not compile. [unrepresentable-overload]
-qualifiers.hpp:50:48: warning: apiary: method 'value' is &&-qualified; the emitted static_cast omits the qualifier and so names no overload. The generated code will not compile. [unrepresentable-overload]
-qualifiers.hpp:54:54: warning: apiary: method 'value' is &&-qualified; the emitted static_cast omits the qualifier and so names no overload. The generated code will not compile. [unrepresentable-overload]
-apiary: 0 diagnostic error(s), 4 warning(s)
+### qualifiers.hpp (rvalue-qualified methods)
+qualifiers.hpp:54:48: warning: apiary: method 'value' is && qualified, so it is bound through a lambda that moves from the object. After calling it the Python object is in a moved-from state, which nothing in Python will indicate. [moved-from-self]
+qualifiers.hpp:58:54: warning: apiary: method 'value' is const && qualified, so it is bound through a lambda that moves from the object. After calling it the Python object is in a moved-from state, which nothing in Python will indicate. [moved-from-self]
+apiary: 0 diagnostic error(s), 2 warning(s)
 
 ### variadic_pack.hpp (parameter packs)
 variadic_pack.hpp:39:79: warning: apiary: 'einsums::fixture::sum_all' takes a parameter pack; the instantiated type 'double...' is re-emitted verbatim, which a C++ cast reads as varargs. The generated code will not compile. [unrepresentable-pack]

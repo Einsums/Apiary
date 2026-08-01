@@ -291,6 +291,38 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
                     "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
         )
+        # Compile check: the generated binding TU must actually compile. Every
+        # other suite asks whether the output CHANGED or whether it parses as
+        # Python; none asks the question the C++ half exists to answer, and two
+        # defects here were found only by hand-compiling an emitted expression.
+        # Needs pybind11 and the Python headers, same as apiary_examples.
+        if(Python_EXECUTABLE)
+            execute_process(
+                COMMAND "${Python_EXECUTABLE}" -c
+                        "import pybind11, sysconfig; print(pybind11.get_include()); print(sysconfig.get_paths()['include'])"
+                OUTPUT_VARIABLE _apiary_cc_includes
+                RESULT_VARIABLE _apiary_cc_rc
+                OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+            )
+            if(_apiary_cc_rc EQUAL 0)
+                string(REPLACE "\n" ";" _apiary_cc_list "${_apiary_cc_includes}")
+                list(GET _apiary_cc_list 0 _apiary_pybind_include)
+                list(GET _apiary_cc_list 1 _apiary_python_include)
+                add_test(NAME apiary_compile_check
+                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_compile_check.sh"
+                            "$<TARGET_FILE:apiary>"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                            "${CMAKE_CXX_COMPILER}"
+                            "${_apiary_pybind_include}"
+                            "${_apiary_python_include}"
+                )
+                # One clang invocation per fixture, each pulling in the whole of
+                # pybind11 - slower than the text-diffing suites by a lot.
+                set_tests_properties(apiary_compile_check PROPERTIES TIMEOUT 600)
+            else()
+                message(STATUS "apiary: pybind11 not importable - skipping apiary_compile_check test")
+            endif()
+        endif()
         # Property suite: invariants across the WHOLE fixture corpus rather
         # than one golden per input - the binding and the stub must describe
         # the same API, emission must be reproducible, and header order must
