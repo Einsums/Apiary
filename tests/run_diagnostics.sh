@@ -62,7 +62,9 @@ collect() {
     echo "### qualifiers.hpp (rvalue-qualified methods)"
     collect qualifiers.hpp
     echo
-    echo "### variadic_pack.hpp (parameter packs)"
+    # Empty since packs expand: the section stays as the regression guard that
+    # they still do.
+    echo "### variadic_pack.hpp (parameter packs - expanded, so silent)"
     collect variadic_pack.hpp
     echo
     echo "### skipped-entity, opt-in (default is ignored)"

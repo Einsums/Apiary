@@ -45,6 +45,35 @@ void compute_python_overloads(Module &module_);
 /// @return The individual values, e.g. ``{"float", "2"}``.
 std::vector<std::string> split_instantiation_args(std::string const &combo);
 
+/// @brief One C++ parameter after a template parameter pack has been expanded.
+struct ExpandedParam {
+    /// Concrete parameter type, with the pack's template parameter substituted.
+    std::string type;
+    /// Parameter name; an expanded pack element gets its index appended.
+    std::string name;
+};
+
+/// @brief Expand a trailing parameter pack against an instantiation's arguments.
+///
+/// A pack has no arity until it is instantiated, and `Ts... values` reaches
+/// both emitters as the single parameter ``Ts...``. Re-emitted verbatim that is
+/// a disaster in either target: ``double...`` in a C++ cast is VARARGS, so the
+/// cast names nothing and the TU will not compile, and in a `.pyi` it is not
+/// even valid syntax, which costs the type checker the whole file.
+///
+/// The instantiation supplies the arity. Template parameters before the pack
+/// consume one argument each; the pack takes the rest - which is the only
+/// arrangement a function template's pack can have, since it must be last to be
+/// deducible.
+///
+/// @param params Declared parameters, as (type, name) pairs.
+/// @param template_param_names The function template's parameter names, in order.
+/// @param type_args The instantiation's type arguments, already split.
+/// @return The parameter list with any pack expanded; unchanged when there is none.
+std::vector<ExpandedParam> expand_parameter_pack(std::vector<ExpandedParam> const &params,
+                                                 std::vector<std::string> const   &template_param_names,
+                                                 std::vector<std::string> const   &type_args);
+
 /// @brief Map a C++ scalar type to its accepted dtype-string aliases.
 /// @param cpp_type The C++ scalar type to map.
 /// @return The accepted dtype-string aliases, or empty when the type isn't a recognized dtype.

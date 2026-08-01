@@ -41,7 +41,8 @@ std::vector<Check> &registry() {
     static std::vector<Check> checks = {
         {"moved-from-self", Severity::Warning,
          "an rvalue-qualified method, bound through a lambda that moves from the object"},
-        {"unrepresentable-pack", Severity::Warning, "a parameter pack re-emitted verbatim into a cast or a stub"},
+        {"unrepresentable-pack", Severity::Warning,
+         "a parameter pack that survived expansion, so a '...' reached the output"},
         {"invalid-python-name", Severity::Warning, "a binding name that is not a Python identifier"},
         {"skipped-entity", Severity::Ignored, "an annotated entity the emitter chose not to bind"},
     };

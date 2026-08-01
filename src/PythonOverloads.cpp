@@ -6,6 +6,7 @@
 #include "PythonOverloads.hpp"
 
 #include <cctype>
+#include <string_view>
 #include <cstddef>
 #include <map>
 #include <string>
@@ -299,6 +300,79 @@ void compute_python_overloads(Module &module_) {
     for (auto &f : module_.functions) {
         compute_python_overloads(f);
     }
+}
+
+namespace {
+
+// Replace whole identifier tokens only, so substituting ``T`` does not maul
+// ``Tensor``.
+std::string replace_identifier(std::string const &text, std::string const &name, std::string const &value) {
+    auto is_start = [](char c) { return (std::isalpha(static_cast<unsigned char>(c)) != 0) || c == '_'; };
+    auto is_cont  = [](char c) { return (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_'; };
+
+    std::string out;
+    out.reserve(text.size());
+    std::size_t i = 0;
+    while (i < text.size()) {
+        if (!is_start(text[i])) {
+            out += text[i++];
+            continue;
+        }
+        std::size_t j = i + 1;
+        while (j < text.size() && is_cont(text[j])) {
+            ++j;
+        }
+        std::string const token = text.substr(i, j - i);
+        out += (token == name) ? value : token;
+        i = j;
+    }
+    return out;
+}
+
+} // namespace
+
+std::vector<ExpandedParam> expand_parameter_pack(std::vector<ExpandedParam> const &params,
+                                                 std::vector<std::string> const   &template_param_names,
+                                                 std::vector<std::string> const   &type_args) {
+    std::vector<ExpandedParam> out;
+    out.reserve(params.size());
+
+    for (ExpandedParam const &p : params) {
+        constexpr std::string_view k_ellipsis = "...";
+        if (p.type.size() <= k_ellipsis.size() || p.type.compare(p.type.size() - k_ellipsis.size(), k_ellipsis.size(), k_ellipsis) != 0) {
+            out.push_back(p);
+            continue;
+        }
+        std::string const base = p.type.substr(0, p.type.size() - k_ellipsis.size());
+
+        // Which template parameter is the pack? The last one whose name appears
+        // in the parameter's type - `Ts...`, `Ts const &...`, `Wrapper<Ts>...`.
+        std::size_t pack_index = std::string::npos;
+        std::string pack_name;
+        for (std::size_t i = 0; i < template_param_names.size(); ++i) {
+            std::string const &name = template_param_names[i];
+            if (!name.empty() && replace_identifier(base, name, "\x01") != base) {
+                pack_index = i;
+                pack_name  = name;
+            }
+        }
+        if (pack_index == std::string::npos || pack_index >= type_args.size()) {
+            // Nothing to expand against; leave it alone rather than invent an
+            // arity. The caller's diagnostic still fires on the `...`.
+            out.push_back(p);
+            continue;
+        }
+
+        for (std::size_t k = pack_index; k < type_args.size(); ++k) {
+            ExpandedParam expanded;
+            expanded.type = replace_identifier(base, pack_name, type_args[k]);
+            // pybind11 needs one py::arg per parameter and Python needs distinct
+            // names, so index them from the pack's own start.
+            expanded.name = p.name.empty() ? std::string{} : p.name + std::to_string(k - pack_index);
+            out.push_back(std::move(expanded));
+        }
+    }
+    return out;
 }
 
 } // namespace apiary

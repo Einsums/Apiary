@@ -3,30 +3,23 @@
 // Licensed under the MIT License. See LICENSE.txt in the project root for license information.
 //----------------------------------------------------------------------------------------------
 
-// Parameter-pack fixture, deliberately separate from signatures_modern.hpp.
+// Parameter-pack fixture.
 //
-// A pack has no arity in the declaration; APIARY_INSTANTIATE_AS supplies one.
-// Both emitters have to expand it, and neither does:
+// A pack has no arity in the declaration; APIARY_INSTANTIATE_AS supplies one,
+// and both emitters have to expand it. Neither did (Finding 10), and the same
+// verbatim `Ts...` was a different disaster in each target:
 //
-// KNOWN BAD (Finding 10a, the binding): the pack is re-emitted verbatim, so
-// the disambiguating cast comes out as `double (*)(double...)`. That is not
-// "three doubles" to a C++ compiler, it is C varargs - clang reads it as
-// `double (*)(double, ...)` and rejects the cast against
-// `sum_all<double, double, double>`. The generated TU does not compile.
-// Verified by compiling the emitted cast against the declaration.
+//   the binding  `double...` in a C++ cast is VARARGS - clang reads
+//                `double (*)(double, ...)`, the cast names no function, and the
+//                generated TU does not compile.
+//   the stub     `def sum_all(values: double...)` is not valid Python, so the
+//                whole .pyi fails to parse and the type checker gets nothing
+//                from the file - not just nothing for this function.
 //
-// KNOWN BAD (Finding 10b, the stub): the same verbatim spelling reaches the
-// .pyi as `def sum_all(values: double...)`, which is not valid Python, so the
-// whole stub fails to parse and the type checker it exists to feed gets
-// nothing.
-//
-// 10b is why this fixture is registered ONLY in run_golden.sh and not in
-// run_pyi_golden.sh. That runner asserts every generated stub parses as
-// Python - the assertion that found 10b in the first place - so goldening this
-// stub would mean committing a file the assertion must then reject. The .cpp
-// golden still pins the shape, including the broken cast, so the fix will show
-// up as a golden diff. Register this fixture in run_pyi_golden.sh as part of
-// fixing 10b.
+// Template parameters before the pack take one argument each and the pack takes
+// the rest, which is the only arrangement a function template's pack can have:
+// it must be last to be deducible. scaled_sum below is the case that proves the
+// expansion starts after a fixed parameter rather than at argument zero.
 
 #pragma once
 

@@ -47,9 +47,11 @@ readonly FIXTURE_DIR="${SCRIPT_DIR}/fixtures"
 # Each is a defect the tool reports on (see run_diagnostics.sh) and has not yet
 # fixed. They are listed rather than skipped so that fixing one turns this list
 # into a failure that says "you can remove me now".
-readonly KNOWN_BAD=(
-    "variadic_pack.hpp|Finding 10a: a parameter pack emits 'double...', which a C++ cast reads as varargs"
-)
+# Empty, and that is the goal state: every fixture's generated TU compiles.
+# Entries are added when a defect is found and removed when it is fixed - the
+# check below fails if a listed fixture starts compiling, so the list cannot
+# quietly outlive its reason.
+readonly KNOWN_BAD=()
 
 # Fixtures that CANNOT be compile-checked by construction - a different thing
 # from a defect, and kept in a separate list so the two are never confused.
@@ -79,7 +81,7 @@ skipped=0
 shopt -s nullglob
 for fixture in "${FIXTURE_DIR}"/*.hpp; do
     name="$(basename "${fixture}")"
-    if [[ -n "$(reason_from "${name}" "${NOT_COMPILABLE[@]}")" ]]; then
+    if [[ -n "$(reason_from "${name}" ${NOT_COMPILABLE[@]+"${NOT_COMPILABLE[@]}"})" ]]; then
         skipped=$((skipped + 1))
         continue
     fi
@@ -104,7 +106,7 @@ for fixture in "${FIXTURE_DIR}"/*.hpp; do
     fi
 
     checked=$((checked + 1))
-    reason="$(reason_from "${name}" "${KNOWN_BAD[@]}")"
+    reason="$(reason_from "${name}" ${KNOWN_BAD[@]+"${KNOWN_BAD[@]}"})"
     if [[ -n "${reason}" ]]; then
         if [[ "${compiled}" -eq 1 ]]; then
             echo "FAIL ${name}: listed as known-bad but it compiles now - remove it from KNOWN_BAD" >&2

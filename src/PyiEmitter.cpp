@@ -867,12 +867,26 @@ std::pair<std::vector<PyParam>, std::string> resolve_instantiation_signature(Bou
         return r1;
     };
 
+    // Expand a parameter pack against the instantiation's arity before anything
+    // else looks at the list. `Ts...` reaching a stub verbatim is `values:
+    // double...`, which is not valid Python - and one unparseable line costs the
+    // type checker every symbol in the file.
+    std::vector<ExpandedParam> declared;
+    declared.reserve(f.params.size());
     for (std::size_t i = 0; i < f.params.size(); ++i) {
-        PyParam slot;
-        slot.name       = param_name_for(f.params[i], i);
-        slot.annotation = resolve_with_canonical(f.params[i].type, f.params[i].type_canonical);
+        declared.push_back({f.params[i].type, param_name_for(f.params[i], i)});
+    }
+    std::vector<ExpandedParam> const expanded = expand_parameter_pack(declared, f.template_param_names, values);
+    bool const                       had_pack = expanded.size() != f.params.size();
 
-        if (f.params[i].default_value_py) {
+    for (std::size_t i = 0; i < expanded.size(); ++i) {
+        PyParam slot;
+        slot.name       = expanded[i].name;
+        slot.annotation = resolve_with_canonical(expanded[i].type, had_pack ? expanded[i].type : f.params[i].type_canonical);
+
+        // Once a pack has expanded, the declared list no longer lines up
+        // index-for-index, and an expanded element has no default anyway.
+        if (!had_pack && f.params[i].default_value_py) {
             slot.default_value = substitute_python_template_params(*f.params[i].default_value_py, f.template_param_names, values, names);
             if (default_needs_ellipsis(slot.default_value)) {
                 slot.default_value = "...";

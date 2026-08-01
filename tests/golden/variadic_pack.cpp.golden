@@ -13,9 +13,10 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(fixture_variadic_pack, m) {
-    m.def("sum_all", static_cast<double (*)(double...)>(&einsums::fixture::sum_all<double, double, double>), py::arg("values"),
+    m.def("sum_all", static_cast<double (*)(double, double, double)>(&einsums::fixture::sum_all<double, double, double>),
+          py::arg("values0"), py::arg("values1"), py::arg("values2"),
           R"einsums(Sum a parameter pack, pinned to three doubles by the instantiation.)einsums");
-    m.def("scaled_sum", static_cast<double (*)(double, double...)>(&einsums::fixture::scaled_sum<double, double>), py::arg("scale"),
-          py::arg("values"), R"einsums(A pack behind a leading fixed parameter, so the expansion has to start
+    m.def("scaled_sum", static_cast<double (*)(double, double, double)>(&einsums::fixture::scaled_sum<double, double>), py::arg("scale"),
+          py::arg("values0"), py::arg("values1"), R"einsums(A pack behind a leading fixed parameter, so the expansion has to start
 after an argument that is not part of it.)einsums");
 }

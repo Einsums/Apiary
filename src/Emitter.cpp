@@ -312,11 +312,14 @@ std::string method_pointer(std::string const &class_qual, BoundMethod const &m) 
     return out;
 }
 
-// A parameter pack survives template substitution as a trailing ``...``:
-// ``Ts... values`` instantiated with three doubles becomes ``double...``. Put
-// in a function-pointer cast that is not "three doubles", it is C varargs -
-// clang reads ``double (*)(double, ...)`` and the cast matches nothing. The
-// same spelling reaches the stub, where it is not even valid syntax.
+// Backstop. expand_parameter_pack() turns ``Ts... values`` into one parameter
+// per instantiation argument, so a ``...`` should never reach here - but if one
+// does (a pack the expansion could not attribute to a template parameter, say),
+// the result is a cast clang reads as C VARARGS: ``double (*)(double, ...)``
+// matches no function and the TU does not compile.
+//
+// No fixture reaches this any more, which is the point of having it: the
+// compile check only ever sees fixtures, and a consumer's headers get this.
 void check_pack_in_cast(BoundEntityCommon const &e, std::vector<std::string> const &param_types) {
     for (std::string const &t : param_types) {
         if (t.size() >= 3 && t.compare(t.size() - 3, 3, "...") == 0) {
@@ -326,6 +329,12 @@ void check_pack_in_cast(BoundEntityCommon const &e, std::vector<std::string> con
             return;
         }
     }
+}
+
+// A parameter's name, or a stable placeholder when it is unnamed. pybind11
+// needs one py::arg per parameter and the names must be distinct.
+std::string param_name_or_slot(BoundParam const &p, std::size_t slot) {
+    return p.name.empty() ? "arg" + std::to_string(slot) : p.name;
 }
 
 void emit_field(llvm::raw_string_ostream &os, std::string const &class_qual, BoundField const &f) {
@@ -1320,9 +1329,19 @@ void emit_function_overload(llvm::raw_string_ostream &os, BoundFunction const &f
     }
     std::string const ret_resolved = substitute_template_params(f.return_type, bindings);
 
+    // Expand a parameter pack against the instantiation's arity FIRST. `Ts...`
+    // re-emitted verbatim becomes `double...`, which a C++ cast reads as
+    // varargs - it names no function and the TU does not compile.
+    std::vector<ExpandedParam> declared;
+    declared.reserve(f.params.size());
+    for (std::size_t i = 0; i < f.params.size(); ++i) {
+        declared.push_back({f.params[i].type, param_name_or_slot(f.params[i], i)});
+    }
+    std::vector<ExpandedParam> const expanded = expand_parameter_pack(declared, f.template_param_names, split);
+
     std::vector<std::string> resolved_types;
-    resolved_types.reserve(f.params.size());
-    for (auto const &p : f.params) {
+    resolved_types.reserve(expanded.size());
+    for (auto const &p : expanded) {
         resolved_types.push_back(substitute_template_params(p.type, bindings));
     }
     check_pack_in_cast(f, resolved_types);
@@ -1340,11 +1359,19 @@ void emit_function_overload(llvm::raw_string_ostream &os, BoundFunction const &f
     // ``typename AType::ValueType{0}`` becomes ``float{0}`` for a float
     // instantiation. The binding TU has the resolved types in scope, not
     // the function-template parameter names.
-    std::vector<BoundParam> resolved_params = f.params;
-    for (auto &p : resolved_params) {
-        if (p.default_value) {
-            p.default_value = substitute_template_params(*p.default_value, bindings);
+    std::vector<BoundParam> resolved_params;
+    resolved_params.reserve(expanded.size());
+    for (std::size_t i = 0; i < expanded.size(); ++i) {
+        BoundParam p;
+        p.name = expanded[i].name;
+        p.type = resolved_types[i];
+        // Defaults belong to declared parameters; an expanded pack element has
+        // none, and f.params no longer lines up index-for-index once one
+        // parameter has become several.
+        if (i < f.params.size() && expanded.size() == f.params.size() && f.params[i].default_value) {
+            p.default_value = substitute_template_params(*f.params[i].default_value, bindings);
         }
+        resolved_params.push_back(std::move(p));
     }
     emit_param_args(os, resolved_params, b);
     emit_function_arg_modifiers(os, f, b);
