@@ -47,6 +47,7 @@ readonly CASES=(
     "fixture_signatures_modern|signatures_modern.hpp|signatures_modern.cpp.golden"
     "fixture_operators|operators.hpp|operators.cpp.golden"
     "fixture_std_types|std_types.hpp|std_types.cpp.golden"
+    "fixture_cross_module|cross_module.hpp|cross_module.cpp.golden"
     # variadic_pack is NOT in run_pyi_golden.sh: its stub does not parse as
     # Python (Finding 10b). The header says why.
     "fixture_variadic_pack|variadic_pack.hpp|variadic_pack.cpp.golden"

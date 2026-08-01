@@ -54,6 +54,7 @@ readonly CASES=(
     "fixture_signatures_modern|signatures_modern.hpp|signatures_modern.pyi.golden"
     "fixture_operators|operators.hpp|operators.pyi.golden"
     "fixture_std_types|std_types.hpp|std_types.pyi.golden"
+    "fixture_cross_module|cross_module.hpp|cross_module.pyi.golden"
 )
 
 # Run the tool with --stub-output to a temp file and emit the stub on
