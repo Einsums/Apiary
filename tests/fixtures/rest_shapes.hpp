@@ -29,8 +29,8 @@ namespace einsums::fixture {
  *
  * The wrapped continuation lines must be joined onto their item. reST requires
  * a bullet item's continuation to be indented to the item's text column, and
- * the comment normalizer has already stripped that indentation, so anything
- * other than joining produces "Bullet list ends without a blank line".
+ * prose lines arrive ltrimmed, so anything other than joining produces
+ * "Bullet list ends without a blank line".
  *
  * - The first item is long enough that it wraps onto a second source line and
  *   then onto a third, all of which belong to the same item.
@@ -43,10 +43,15 @@ APIARY_EXPOSE void wrapped_bullets();
 /**
  * @brief A nested bullet list.
  *
- * KNOWN BAD (Finding 4): the converter is line-oriented and ltrims every line,
- * so the indentation that expresses nesting is gone before anything looks at
- * it. The result is valid reST and a flat four-item list - which is why only
- * the text golden catches this one, not the markup check.
+ * KNOWN BAD (Finding 4): nesting IS indentation, and prose lines are ltrimmed
+ * before anything looks at them, so this arrives as a flat four-item list.
+ * Valid reST, wrong structure - which is why only the text golden catches it.
+ *
+ * The obvious fix, preserving what the author wrote, was tried and reverted:
+ * indentation on a prose line is far more often cosmetic than structural (a
+ * wrapped sentence, a right-aligned enumerator), and preserving it turned six
+ * Einsums comments into docs-build failures. Telling the two apart needs real
+ * block-structure parsing.
  *
  * - An outer item.
  *   - An inner item, indented under it.
@@ -133,8 +138,13 @@ APIARY_EXPOSE void bullets_around_code();
 /**
  * @brief Math spans inline and as a block, next to a list.
  *
- * The inline form @f$ a_{ij} b_{jk} @f$ sits in running prose, and the block
- * form stands alone:
+ * The inline form @f$ a_{ij} b_{jk} @f$ sits in running prose, and a long one
+ * wraps across source lines the way an author writes it - which reST cannot
+ * carry inside an inline role, so its interior whitespace has to be flattened:
+ * @f$\sum_k \alpha_k\,\mathrm{einsum}(\text{spec}_k, A, B)
+ *     = \mathrm{einsum}(\text{spec}_0, A,\; \sum_k \alpha_k\,P_k(B))@f$.
+ *
+ * The block form stands alone, where the layout IS the content:
  *
  * @f[
  *   C_{ik} = \sum_j a_{ij} b_{jk}
@@ -146,13 +156,17 @@ APIARY_EXPOSE void bullets_around_code();
 APIARY_EXPOSE void math_next_to_list();
 
 /**
- * @brief Verbatim reST spliced through an rst span.
+ * @brief Verbatim reST spliced through ``@rst``.
  *
- * KNOWN BAD (Finding 5): naming the span command in the brief above - writing
- * it inside an inline literal, as prose about it has to - opens a real span.
- * Span protection scans the raw text and does not know that a backtick-quoted
- * command is not a command, so the opener inside the literal pairs with the
- * genuine terminator below and swallows the whole comment.
+ * Two things at once, and both were broken (Finding 5). Naming the span
+ * command in the brief - inside an inline literal, as prose about it has to -
+ * used to open a REAL span, because span protection scanned raw text; that
+ * opener paired with the genuine terminator below and swallowed the comment.
+ * And the spliced body arrived dedented, so the directive below had no content.
+ *
+ * A protected span is extracted from the raw comment BEFORE the line handling
+ * that ltrims prose, which is why a body inside @rst can keep its indentation
+ * while a nested bullet in ordinary prose (see nested_bullets) still cannot.
  *
  * @rst
  * .. note::
@@ -169,7 +183,8 @@ APIARY_EXPOSE void embedded_rst();
  * @brief A definition list.
  *
  * KNOWN BAD (Finding 4, same root cause as nested_bullets): a definition list
- * IS its indentation, so ltrimming every line flattens it into one paragraph.
+ * is nothing BUT its indentation, so the per-line ltrim collapses it into one
+ * paragraph.
  *
  * term one
  *     The definition of the first term, which wraps onto a second line.

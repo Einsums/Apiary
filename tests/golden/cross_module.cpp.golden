@@ -44,5 +44,5 @@ entirely by splicing rather than by any of the line handling.
 
 .. note::
 
-A directive whose body should stay indented, and does not.)einsums");
+   A directive whose body stays indented, which is what makes it a body.)einsums");
 }

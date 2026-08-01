@@ -88,6 +88,24 @@ std::string convert_inline(std::string s) {
     return s;
 }
 
+// Collapse every run of whitespace (newlines included) to a single space.
+std::string collapse_whitespace(std::string const &s) {
+    std::string out;
+    bool        in_space = false;
+    for (char const c : s) {
+        if (std::isspace(static_cast<unsigned char>(c)) != 0) {
+            in_space = true;
+            continue;
+        }
+        if (in_space && !out.empty()) {
+            out += ' ';
+        }
+        in_space = false;
+        out += c;
+    }
+    return out;
+}
+
 // ── span protection (math / code / verbatim / embedded rst) ──────────────
 //
 // These spans hold LaTeX backslashes or pre-formatted text that must not be
@@ -126,6 +144,21 @@ std::string protect_spans(std::string s, std::vector<ProtectedSpan> &spans) {
     std::string out;
     std::size_t i = 0;
     while (i < s.size()) {
+        // Inside an inline literal, a command marker is prose ABOUT the command,
+        // not the command. Documentation of a span feature has to name it -
+        // ``@rst`` in a brief - and scanning raw text meant that opener paired
+        // with the genuine terminator further down and swallowed everything
+        // between them. Copy the literal through untouched so it cannot open a
+        // span. A backtick run with no partner is left to the normal path.
+        if (s[i] == '`') {
+            std::size_t const ticks = (s.compare(i, 2, "``") == 0) ? 2 : 1;
+            std::string const fence(ticks, '`');
+            if (std::size_t const close = s.find(fence, i + ticks); close != std::string::npos) {
+                out.append(s, i, close + ticks - i);
+                i = close + ticks;
+                continue;
+            }
+        }
         bool matched = false;
         for (auto const &d : delims) {
             if (s.compare(i, d.open.size(), d.open) != 0) {
@@ -139,7 +172,14 @@ std::string protect_spans(std::string s, std::vector<ProtectedSpan> &spans) {
             std::string const inner = s.substr(body_start, close_at - body_start);
             ProtectedSpan     span;
             if (d.kind == 'i') {
-                span.replacement = ":math:`" + trim(inner) + "`";
+                // An INLINE span is one expression. Authors wrap long ones
+                // across source lines and indent the continuation, and reST
+                // cannot carry an indented continuation inside an inline role -
+                // it reads the role as unterminated and the next line as a
+                // block quote. Interior whitespace here is cosmetic by
+                // construction, so flatten it. (The block forms below are the
+                // opposite: their layout is the content.)
+                span.replacement = ":math:`" + collapse_whitespace(trim(inner)) + "`";
             } else if (d.kind == 'b') {
                 span.replacement = "\n\n.. math::\n\n" + indent_block(trim(inner), "   ") + "\n";
                 span.block       = true;
@@ -515,10 +555,10 @@ DocComment parse_doc_comment(std::string const &raw) {
                 in_bullet = true;
                 append_detail_line(doc.detail, t);
             } else if (in_bullet && !trim(t).empty()) {
-                // Continuation of the current bullet item. The normalizer
-                // ltrims continuation indentation, which would dedent and
-                // break the list; join onto the item with a space instead so
-                // it stays one logical line.
+                // Continuation of the current bullet item. The line arrives
+                // ltrimmed (see the loop below), which would dedent out of the
+                // list; join onto the item with a space so it stays one logical
+                // line whatever the author's continuation indent was.
                 if (!doc.detail.empty() && doc.detail.back() != ' ' && doc.detail.back() != '\n') {
                     doc.detail += " ";
                 }
@@ -642,6 +682,22 @@ DocComment parse_doc_comment(std::string const &raw) {
         }
 
         // Plain continuation line.
+        //
+        // Prose lines are ltrimmed, even though DocExtractor now preserves what
+        // the author wrote. That looks like throwing away the fix, and is not:
+        // indentation on a prose line is almost always COSMETIC - a wrapped
+        // sentence, a `:math:` role continued on the next line, an enumerated
+        // list whose numbers are right-aligned so `2.` sits one column deeper
+        // than `10.`. reST reads every one of those structurally and reports a
+        // block quote that ends without a blank line. Preserving it turned six
+        // such comments in Einsums into docs-build failures.
+        //
+        // Telling cosmetic indentation from structural (a nested bullet, a
+        // definition list) needs real block-structure parsing, which is
+        // Finding 4 and a bigger change than this. What the preserved text DOES
+        // buy is the protected spans: @rst and @code bodies are extracted from
+        // it before this loop runs, so a directive spliced through @rst keeps
+        // the indentation that makes its body a body.
         if (pending.active) {
             pending.body.push_back(convert_inline(stripped));
         } else {

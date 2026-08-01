@@ -5,6 +5,7 @@
 
 #include "DocExtractor.hpp"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
@@ -18,9 +19,17 @@ namespace apiary {
 
 namespace {
 
-// Strip a leading ``///``, ``//!``, ``/**``, or ``*`` plus surrounding
-// whitespace from a single line of a doxygen comment. Prefixes are
-// checked in length-descending order so ``///`` matches before ``//``.
+// Strip a leading ``///``, ``//!``, ``/**``, or ``*`` from a single line of a
+// doxygen comment. Prefixes are checked in length-descending order so ``///``
+// matches before ``//``.
+//
+// Whatever follows the marker is kept verbatim, including its leading spaces.
+// This used to return line.trim(), which is why every construct that IS its
+// indentation came out wrong: a nested bullet list flattened to one level, a
+// definition list collapsed into a paragraph, and a directive spliced through
+// @rst lost the body that made it a directive. clean_raw_comment below removes
+// the common indent, so the marker's own trailing space costs nothing and the
+// author's relative indentation survives.
 llvm::StringRef strip_comment_markers(llvm::StringRef line) {
     static constexpr std::array<llvm::StringLiteral, 7> k_prefixes = {
         llvm::StringLiteral{"///"}, llvm::StringLiteral{"//!"}, llvm::StringLiteral{"/**"}, llvm::StringLiteral{"/*!"},
@@ -36,7 +45,7 @@ llvm::StringRef strip_comment_markers(llvm::StringRef line) {
     if (line.ends_with("*/")) {
         line = line.drop_back(2);
     }
-    return line.trim();
+    return line.rtrim();
 }
 
 // True for "banner" rows of repeating decoration — e.g.
@@ -95,6 +104,27 @@ std::string clean_raw_comment(llvm::StringRef text) {
     }
     while (!lines.empty() && lines.back().empty()) {
         lines.pop_back();
+    }
+
+    // Remove the indentation every line shares - one space after ``*`` in the
+    // common ``/** ... */`` shape - so column 0 means column 0 and everything
+    // deeper keeps its offset from it. Blank lines carry no indent and must not
+    // drag the minimum to zero.
+    std::size_t common = std::string::npos;
+    for (std::string const &l : lines) {
+        if (l.empty()) {
+            continue;
+        }
+        std::size_t const indent = l.find_first_not_of(" \t");
+        if (indent == std::string::npos) {
+            continue; // whitespace-only; rtrim above makes this rare
+        }
+        common = std::min(common, indent);
+    }
+    if (common != std::string::npos && common > 0) {
+        for (std::string &l : lines) {
+            l.erase(0, std::min(common, l.size()));
+        }
     }
     // ``///<`` / ``/**<`` / ``//!<`` document the PRECEDING member. The ``<``
     // is Doxygen's marker for that, never content, so drop it here - at the

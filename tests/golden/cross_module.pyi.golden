@@ -18,7 +18,7 @@ def rst_only(x: float) -> float:
 
     .. note::
 
-    A directive whose body should stay indented, and does not.
+       A directive whose body stays indented, which is what makes it a body.
     """
     ...
 # %%submodule: core

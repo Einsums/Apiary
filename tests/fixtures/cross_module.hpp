@@ -54,13 +54,10 @@ APIARY_EXPOSE APIARY_MODULE("util") Circle enclosing_circle(Shape const &shape);
 // stray empty docstring line.
 APIARY_EXPOSE double undocumented(double x);
 
-// KNOWN BAD (Finding 4, the indentation half): the splice below does NOT
-// survive its own indentation. Span protection runs on text that DocExtractor
-// has already ltrimmed line by line, so the note's body arrives at column 0 and
-// the directive ends up with no content at all - which is what the
-// malformed-rest check reports against this entity. A directive body inside
-// @rst is the shape where that per-line ltrim does the most damage, because
-// @rst is the one construct whose whole promise is "spliced verbatim".
+// A directive body inside @rst is where the old blanket trim did the most
+// damage: @rst is the one construct whose whole promise is "spliced verbatim",
+// and its body arrived at column 0, leaving the directive with no content at
+// all. Spans are extracted before the prose handling, so this now survives.
 /**
  * @rst
  * Documented only through an embedded reST block, with no prose of its own.
@@ -69,7 +66,7 @@ APIARY_EXPOSE double undocumented(double x);
  *
  * .. note::
  *
- *    A directive whose body should stay indented, and does not.
+ *    A directive whose body stays indented, which is what makes it a body.
  * @endrst
  */
 APIARY_EXPOSE double rst_only(double x);
