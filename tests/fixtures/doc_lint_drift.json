@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 5,
   "module": "fixture_doc_drift",
   "classes": [
     {

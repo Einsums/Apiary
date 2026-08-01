@@ -36,12 +36,28 @@ def log(prefix: str, msg: str) -> None:
 
 
 def load_document(path: str, *, prefix: str = "apiary_docs") -> dict:
-    """Load and lightly validate one docs-JSON document (fragment or merged)."""
+    """Load and validate one docs-JSON document (fragment or merged).
+
+    A ``schema_version`` mismatch exits rather than warning. There is no
+    migration path anywhere in this pipeline - every consumer reads the current
+    shape directly - so a document from another version is not "mostly fine",
+    it is a document whose fields may not mean what the reader thinks. Warning
+    and continuing produced exactly the failure this is meant to prevent: a
+    docs build that succeeds, renders something degraded, and surfaces as a
+    puzzle much later.
+
+    The realistic cause is a stale fragment in a build directory, and the fix
+    is to regenerate it, so the message says so. Exits 2 (a usage/input error)
+    rather than raising, because these are CLI support functions with several
+    entry points and no caller should be able to forget the check.
+    """
     text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
     doc = json.loads(text)
     version = doc.get("schema_version")
     if version != SCHEMA_VERSION:
-        log(prefix, f"warning: {path} has schema_version {version}, expected {SCHEMA_VERSION}")
+        log(prefix, f"error: {path} has schema_version {version!r}, expected {SCHEMA_VERSION}")
+        log(prefix, "       this file was written by a different version of apiary; regenerate it")
+        sys.exit(2)
     return doc
 
 

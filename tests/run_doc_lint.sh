@@ -58,7 +58,7 @@ fi
 clean="$(mktemp)"
 trap 'rm -f "${clean}"' EXIT
 cat > "${clean}" <<'JSON'
-{ "schema_version": 1, "module": "clean",
+{ "schema_version": 5, "module": "clean",
   "classes": [], "functions": [], "enums": [], "typedefs": [], "concepts": [], "macros": [] }
 JSON
 if "${PY}" "${LINT}" --select "${SEMANTIC}" "${clean}" >/dev/null 2>&1; then
@@ -75,7 +75,7 @@ if "${PY}" -c "import docutils" >/dev/null 2>&1; then
     # A bullet item whose wrapped continuation landed at column 0 - the exact
     # shape a Doxygen comment converts to when a continuation line is mishandled.
     cat > "${broken}" <<'JSON'
-{ "schema_version": 1, "module": "broken",
+{ "schema_version": 5, "module": "broken",
   "classes": [], "enums": [], "typedefs": [], "concepts": [], "macros": [],
   "functions": [ {
     "name": "thing", "qualified_name": "demo::thing", "params": [],

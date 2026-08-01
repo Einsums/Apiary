@@ -120,6 +120,39 @@ for bad in "nope=error" "unrepresentable-pack=nope" "missing-equals"; do
     fi
 done
 
+# --- nothing is written until the exit status is known -----------------------
+# Emission is where the emitters report what they could not represent, so the
+# status is not knowable until every artifact exists - but it IS knowable before
+# any of them reaches disk. A failing run that left output behind looked fresh
+# to anything that did not check the status.
+OUTDIR="${WORK}/out"
+mkdir -p "${OUTDIR}"
+"${TOOL}" --module diag_fixture --werror \
+    --output "${OUTDIR}/gen.cpp" --stub-output "${OUTDIR}/gen.pyi" \
+    "${FIXTURE_DIR}/qualifiers.hpp" -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" >/dev/null 2>&1 && rc=0 || rc=$?
+if [[ "${rc}" -ne 1 ]]; then
+    echo "FAIL: a --werror run with warnings should exit 1, got ${rc}" >&2
+    fail=1
+fi
+if [[ -e "${OUTDIR}/gen.cpp" || -e "${OUTDIR}/gen.pyi" ]]; then
+    echo "FAIL: a failing run left generated output on disk" >&2
+    ls -la "${OUTDIR}" >&2
+    fail=1
+fi
+# ...and a passing run still writes everything it was asked for.
+if ! "${TOOL}" --module diag_fixture --werror \
+        --output "${OUTDIR}/ok.cpp" --stub-output "${OUTDIR}/ok.pyi" \
+        "${FIXTURE_DIR}/simple_class.hpp" -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" >/dev/null 2>&1; then
+    echo "FAIL: a clean run should succeed" >&2
+    fail=1
+fi
+for f in "${OUTDIR}/ok.cpp" "${OUTDIR}/ok.pyi"; do
+    if [[ ! -s "${f}" ]]; then
+        echo "FAIL: a passing run did not write ${f}" >&2
+        fail=1
+    fi
+done
+
 # --list-diagnostics must work without naming a source file.
 if ! "${TOOL}" --list-diagnostics 2>/dev/null | grep -q "unrepresentable-overload"; then
     echo "FAIL: --list-diagnostics should list the checks without a source file" >&2

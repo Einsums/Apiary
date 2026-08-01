@@ -401,6 +401,14 @@ int main(int argc, char const **argv) {
         return 1;
     }
 
+    // Everything the run would write, generated but not yet on disk. See the
+    // decision point below for why.
+    struct PendingWrite {
+        std::string path; // empty -> stdout
+        std::string content;
+    };
+    std::vector<PendingWrite> pending;
+
     // Sharding: when --max-defs-per-tu is set, the binding body is split
     // across several smaller TUs (named off --output) so a heavily
     // instantiated module doesn't produce one TU large enough to exhaust the
@@ -423,15 +431,10 @@ int main(int argc, char const **argv) {
             return (g_error_count + apiary::diag::errors()) > 0 ? 1 : (rc != 0 ? rc : 0);
         }
         for (apiary::ShardFile const &shard : apiary::emit_shards(g_module, opts, g_max_defs_per_tu, g_output_path)) {
-            if (int const shard_rc = write_file(shard.path, shard.content); shard_rc != 0) {
-                return shard_rc;
-            }
+            pending.push_back({shard.path, shard.content});
         }
     } else {
-        std::string const generated = apiary::emit(g_module, opts);
-        if (int const single_rc = write_output(generated); single_rc != 0) {
-            return single_rc;
-        }
+        pending.push_back({g_output_path, apiary::emit(g_module, opts)});
     }
 
     // Optionally also emit a Python stub (.pyi) file for pyright. The
@@ -440,11 +443,8 @@ int main(int argc, char const **argv) {
     // a sibling .pyi alongside the .cpp.
     if (!g_stub_output.empty()) {
         apiary::PyiOptions stub_opts;
-        stub_opts.banner          = "module: " + std::string{g_module_name};
-        std::string const stub = apiary::emit_pyi(g_module, stub_opts);
-        if (int const stub_rc = write_file(g_stub_output, stub); stub_rc != 0) {
-            return stub_rc;
-        }
+        stub_opts.banner = "module: " + std::string{g_module_name};
+        pending.push_back({g_stub_output, apiary::emit_pyi(g_module, stub_opts)});
     }
 
     if (g_report_undocumented) {
@@ -452,11 +452,28 @@ int main(int argc, char const **argv) {
                      << (g_undocumented_count == 1 ? "y" : "ies") << ".\n";
     }
 
+    // Decide BEFORE writing. Emission is where the emitters report what they
+    // could not represent, so the exit status is not knowable until every
+    // artifact has been generated - but it IS knowable before any of them
+    // reaches disk. Writing first left a failing run's output on disk looking
+    // fresh: a build system that reruns failed edges recovers, a manual
+    // invocation or a tolerant driver does not. This is the same instinct as
+    // the empty-module refusal above, which already declines to write rather
+    // than leave an empty-but-valid TU for the next step to consume happily.
     apiary::diag::print_summary();
     g_error_count += apiary::diag::errors();
     if (g_error_count > 0) {
-        llvm::errs() << "apiary: " << g_error_count << " error(s) — bindings may be incomplete.\n";
+        llvm::errs() << "apiary: " << g_error_count << " error(s); refusing to write "
+                     << (pending.size() == 1 ? "the generated file" : "the generated files") << ".\n";
         return 1;
+    }
+
+    for (PendingWrite const &w : pending) {
+        // An empty path means the single-output case with no --output: stdout.
+        int const write_rc = w.path.empty() ? write_output(w.content) : write_file(w.path, w.content);
+        if (write_rc != 0) {
+            return write_rc;
+        }
     }
     return rc;
 }

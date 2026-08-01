@@ -370,6 +370,15 @@ behavior they have been living with. Fix, then pin.
 severity exits 2 without writing a file. A run that emitted under a policy the
 caller did not ask for would be the same silence the diagnostics exist to end.
 
+Nothing is written until the exit status is known. Emission is where the
+emitters discover what they cannot represent, so the status is not knowable
+until every artifact has been generated — but it *is* knowable before any of
+them reaches disk. A failing run therefore leaves no output: a build system that
+reruns failed edges recovers either way, but a manual invocation or a tolerant
+driver would otherwise be left with a partial file that looks fresh. Same
+instinct as the empty-module refusal, which declines to write rather than leave
+an empty-but-valid TU for the next step to consume happily.
+
 ## How it builds
 
 1. **Configure** — `apiary_add_bindings()` emits an `add_custom_command` per

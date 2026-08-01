@@ -43,6 +43,7 @@ from dataclasses import dataclass
 
 import apiary_rest_check
 from apiary_docs_resolve import build_resolver, unresolved_references
+from apiary_docs_schema import load_document
 
 # check id -> default severity
 SEVERITY = {
@@ -277,9 +278,12 @@ def main(argv: list[str] | None = None) -> int:
     findings: list[Finding] = []
     docs: list[dict] = []
     for path in args.files:
+        # Shared loader, so this consumer rejects a stale IR on the same terms
+        # as the merge stage and the renderer. Reading a document from another
+        # schema version and reporting findings against it would be a lint that
+        # graded the wrong thing and said nothing about it.
         try:
-            with open(path, encoding="utf-8") as fh:
-                doc = json.load(fh)
+            doc = load_document(path, prefix="doc_lint")
         except (OSError, json.JSONDecodeError) as e:
             print(f"doc_lint: cannot read {path}: {e}", file=sys.stderr)
             return 2

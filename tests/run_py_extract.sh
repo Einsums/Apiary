@@ -339,4 +339,26 @@ assert_contains "${DRIVE}/einsums.linalg.rst" "py:class:: Decomposition"
 assert_contains "${DRIVE}/index.rst" "^Modules$"
 echo "ok: one-command driver"
 
+# --- a stale fragment is refused, not rendered ------------------------------
+# The merge stage used to WARN on a schema_version mismatch and carry on, which
+# is how a docs build succeeds and renders something degraded. The realistic
+# cause is a stale fragment left in a build directory.
+stale="${WORK}/stale.json"
+"${PY}" -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+d['schema_version'] = 1
+json.dump(d, open(sys.argv[2], 'w'))
+" "${CPP_FRAG}" "${stale}"
+"${PY}" "${SCRIPTS_DIR}/apiary_merge_docs_json.py" -o "${WORK}/merged_stale.json" "${stale}" >/dev/null 2>&1 && rc=0 || rc=$?
+if [[ "${rc}" -ne 2 ]]; then
+    echo "FAIL: a schema_version mismatch should exit 2, got ${rc}" >&2
+    exit 1
+fi
+if [[ -e "${WORK}/merged_stale.json" ]]; then
+    echo "FAIL: a refused merge should not write its output" >&2
+    exit 1
+fi
+echo "ok: stale fragment refused"
+
 echo "PASS: run_py_extract"
