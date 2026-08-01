@@ -291,6 +291,16 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
                     "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
         )
+        # Property suite: invariants across the WHOLE fixture corpus rather
+        # than one golden per input - the binding and the stub must describe
+        # the same API, emission must be reproducible, and header order must
+        # not change the result. None of those show up as a golden diff.
+        add_test(NAME apiary_properties
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_properties.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                    "${_apiary_test_py}"
+        )
         # Diagnostics suite: the emitters can now report what they could not
         # represent. Pins the messages (their wording IS the product), the
         # severity policy, and that a bad --diagnostic spec is refused before
