@@ -338,6 +338,38 @@ header has `#define Element WHATEVER`, the codegen sees `WHATEVER(...)`,
 fails the match against the real `Element` parameter, and emits a
 diagnostic instead of producing wrong bindings.
 
+### Emitter diagnostics
+
+Those errors all come from reading the *annotations*. A second class of
+problem is only visible while writing the output: an input apiary parsed
+happily but cannot represent in the target language. Those are reported
+against the header that declares them, with a stable check id:
+
+```
+Handle.hpp:44:49: warning: apiary: method 'value' is &-qualified; the emitted
+static_cast omits the qualifier and so names no overload. The generated code
+will not compile. [unrepresentable-overload]
+```
+
+`--list-diagnostics` prints the check ids, their current severities and what
+each means. Severity is per check and settable, so a project can ratchet:
+
+```bash
+apiary --list-diagnostics
+apiary --diagnostic=skipped-entity=note ...      # opt in to an off-by-default check
+apiary --diagnostic=unrepresentable-pack=error ...  # pin one, once it is clean
+apiary --werror ...                              # promote every warning
+```
+
+They default to `warning` rather than `error` on purpose. Each describes output
+that is already wrong, but apiary has always accepted these inputs and emitted
+*something* for them; failing the build on day one would break consumers on
+behavior they have been living with. Fix, then pin.
+
+`--diagnostic` is validated before any work starts, so a typo in a check id or
+severity exits 2 without writing a file. A run that emitted under a policy the
+caller did not ask for would be the same silence the diagnostics exist to end.
+
 ## How it builds
 
 1. **Configure** — `apiary_add_bindings()` emits an `add_custom_command` per

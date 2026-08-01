@@ -6,12 +6,14 @@
 #include "Emitter.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <set>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
+#include "Diagnostics.hpp"
 #include "DocComment.hpp"
 #include "PythonOverloads.hpp"
 #include "clang/Format/Format.h"
@@ -103,12 +105,39 @@ class DirectiveView {
 };
 
 // Return the Python identifier for a bound entity, honoring @rename.
+// True for a name Python could actually bind: an identifier, and not a keyword
+// that would make the stub a syntax error. Deliberately conservative - it only
+// has to recognize the names that DO occur, and the ones that occur and are
+// invalid are C++ spellings like ``operator*``.
+bool is_python_identifier(std::string const &s) {
+    if (s.empty()) {
+        return false;
+    }
+    if ((std::isalpha(static_cast<unsigned char>(s.front())) == 0) && s.front() != '_') {
+        return false;
+    }
+    return std::all_of(s.begin(), s.end(),
+                       [](char c) { return (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_'; });
+}
+
 std::string py_name_for(BoundEntityCommon const &e) {
     DirectiveView const v(e.directives);
+    std::string         name = e.name;
     if (auto const *d = v.first("rename"); d != nullptr && !d->args.empty()) {
-        return d->args.front();
+        name = d->args.front();
     }
-    return e.name;
+    // A C++ name that is not a Python identifier - a free ``operator*``, say -
+    // used to reach the binding and the stub verbatim. In the stub that is a
+    // syntax error, which costs the type checker EVERY symbol in the file, not
+    // just this one. Report it against the header instead of letting the .pyi
+    // fail to parse somewhere downstream.
+    if (!is_python_identifier(name)) {
+        diag::report("invalid-python-name", e.location,
+                     "'" + e.qualified_name + "' binds as '" + name +
+                         "', which is not a Python identifier. The generated stub will not parse; give it an "
+                         "APIARY_RENAME, or APIARY_OPERATOR if it is an operator on a class.");
+    }
+    return name;
 }
 
 // Submodule name from a @module directive, or empty if the entity binds
@@ -219,6 +248,18 @@ std::string method_pointer(std::string const &class_qual, BoundMethod const &m) 
     if (m.is_const) {
         sig += " const";
     }
+    // The ref-qualifier is part of a member function's TYPE, so a cast that
+    // omits it names none of the overloads and the generated TU does not
+    // compile. Emitting the qualifier here would fix `&` and `const &`, but
+    // not `&&`: pybind11 invokes through the member pointer on an lvalue, so an
+    // rvalue-qualified method needs a lambda that moves, or a refusal. Until
+    // that is decided, say what is wrong rather than emit silence.
+    if (!m.ref_qualifier.empty()) {
+        diag::report("unrepresentable-overload", m.location,
+                     "method '" + m.name + "' is " + m.ref_qualifier +
+                         "-qualified; the emitted static_cast omits the qualifier and so names no overload. "
+                         "The generated code will not compile.");
+    }
     std::string out = "static_cast<";
     out += sig;
     out += ">(&";
@@ -227,6 +268,22 @@ std::string method_pointer(std::string const &class_qual, BoundMethod const &m) 
     out += m.name;
     out += ")";
     return out;
+}
+
+// A parameter pack survives template substitution as a trailing ``...``:
+// ``Ts... values`` instantiated with three doubles becomes ``double...``. Put
+// in a function-pointer cast that is not "three doubles", it is C varargs -
+// clang reads ``double (*)(double, ...)`` and the cast matches nothing. The
+// same spelling reaches the stub, where it is not even valid syntax.
+void check_pack_in_cast(BoundEntityCommon const &e, std::vector<std::string> const &param_types) {
+    for (std::string const &t : param_types) {
+        if (t.size() >= 3 && t.compare(t.size() - 3, 3, "...") == 0) {
+            diag::report("unrepresentable-pack", e.location,
+                         "'" + e.qualified_name + "' takes a parameter pack; the instantiated type '" + t +
+                             "' is re-emitted verbatim, which a C++ cast reads as varargs. The generated code will not compile.");
+            return;
+        }
+    }
 }
 
 void emit_field(llvm::raw_string_ostream &os, std::string const &class_qual, BoundField const &f) {
@@ -1136,6 +1193,9 @@ void emit_class(llvm::raw_string_ostream &os, BoundClass const &cls, std::unorde
     if (cls.is_template) {
         if (cls.instantiations.empty()) {
             os << "    // skipped: templated class " << cls.qualified_name << " has no @instantiate / @instantiate_as directive\n";
+            diag::report("skipped-entity", cls.location,
+                         "templated class '" + cls.qualified_name +
+                             "' is annotated but has no @instantiate / @instantiate_as directive, so nothing is bound for it.");
             return;
         }
         for (auto const &inst : cls.instantiations) {
@@ -1228,12 +1288,19 @@ void emit_function_overload(llvm::raw_string_ostream &os, BoundFunction const &f
     }
     std::string const ret_resolved = substitute_template_params(f.return_type, bindings);
 
+    std::vector<std::string> resolved_types;
+    resolved_types.reserve(f.params.size());
+    for (auto const &p : f.params) {
+        resolved_types.push_back(substitute_template_params(p.type, bindings));
+    }
+    check_pack_in_cast(f, resolved_types);
+
     os << "    " << mod_var << ".def(\"" << inst.py_name << "\", static_cast<" << ret_resolved << " (*)(";
-    for (std::size_t i = 0; i < f.params.size(); ++i) {
+    for (std::size_t i = 0; i < resolved_types.size(); ++i) {
         if (i != 0) {
             os << ", ";
         }
-        os << substitute_template_params(f.params[i].type, bindings);
+        os << resolved_types[i];
     }
     os << ")>(&" << f.qualified_name << "<" << inst.type_args << ">)";
 
@@ -1427,6 +1494,9 @@ void emit_function(llvm::raw_string_ostream &os, BoundFunction const &f, Backend
     }
     if (f.is_template && f.instantiations.empty()) {
         os << "    // skipped: templated free function " << f.qualified_name << " has no @instantiate_as directive\n";
+        diag::report("skipped-entity", f.location,
+                     "templated free function '" + f.qualified_name +
+                         "' is annotated but has no @instantiate_as directive, so nothing is bound for it.");
         return;
     }
 
@@ -1782,6 +1852,9 @@ void collect_class_units(BoundClass const &cls, std::unordered_set<std::string> 
             std::string buf;
             llvm::raw_string_ostream os(buf);
             os << "    // skipped: templated class " << cls.qualified_name << " has no @instantiate / @instantiate_as directive\n";
+            diag::report("skipped-entity", cls.location,
+                         "templated class '" + cls.qualified_name +
+                             "' is annotated but has no @instantiate / @instantiate_as directive, so nothing is bound for it.");
             os.flush();
             push_unit(std::move(buf), path, out);
             return;

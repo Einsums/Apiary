@@ -18,9 +18,11 @@
 // --module, "einsums" is used.
 
 #include <string>
+#include <string_view>
 #include <unordered_set>
 
 #include "DocsJson.hpp"
+#include "Diagnostics.hpp"
 #include "Emitter.hpp"
 #include "IR.hpp"
 #include "MacroScanner.hpp"
@@ -127,6 +129,20 @@ llvm::cl::opt<bool> g_plan("plan",
                                           "system learn the generated filenames at configure time. Requires "
                                           "--max-defs-per-tu and --output."),
                            llvm::cl::cat(g_tool_category), llvm::cl::init(false));
+
+llvm::cl::list<std::string> g_diagnostic("diagnostic",
+                                        llvm::cl::desc("Set one diagnostic check's severity as <check>=<severity>, where "
+                                                       "severity is ignored, note, warning or error. Repeatable. Use "
+                                                       "--list-diagnostics to see the check ids and their defaults."),
+                                        llvm::cl::cat(g_tool_category), llvm::cl::value_desc("check=severity"));
+
+llvm::cl::opt<bool> g_werror("werror", llvm::cl::desc("Promote every warning-severity diagnostic to an error."),
+                             llvm::cl::cat(g_tool_category), llvm::cl::init(false));
+
+llvm::cl::opt<bool> g_list_diagnostics("list-diagnostics",
+                                       llvm::cl::desc("Print the diagnostic check ids, their default severities and what "
+                                                      "each means, then exit."),
+                                       llvm::cl::cat(g_tool_category), llvm::cl::init(false));
 
 llvm::cl::opt<std::string> g_register_fn("register-function",
                                          llvm::cl::desc("Emit a free function with this name that takes "
@@ -278,10 +294,34 @@ int write_output(std::string const &content) {
 } // namespace
 
 int main(int argc, char const **argv) {
+    // Answered before CommonOptionsParser, which requires at least one source
+    // path: asking what the diagnostic checks ARE should not require naming a
+    // header to run them against.
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view{argv[i]} == "--list-diagnostics") {
+            apiary::diag::describe_checks();
+            return 0;
+        }
+    }
+
     auto expected = CommonOptionsParser::create(argc, argv, g_tool_category);
     if (!expected) {
         llvm::errs() << llvm::toString(expected.takeError());
         return 1;
+    }
+
+    // Diagnostic policy is settled before any work starts: a --diagnostic typo
+    // must not be discovered after the tool has already emitted a file under a
+    // severity the caller did not ask for.
+    for (std::string const &spec : g_diagnostic) {
+        std::string err;
+        if (!apiary::diag::set_severity_from_spec(spec, err)) {
+            llvm::errs() << "apiary: --diagnostic: " << err << "\n";
+            return 2;
+        }
+    }
+    if (g_werror) {
+        apiary::diag::promote_warnings_to_errors();
     }
     CommonOptionsParser &options = *expected;
     ClangTool            tool(options.getCompilations(), options.getSourcePathList());
@@ -320,7 +360,8 @@ int main(int argc, char const **argv) {
         llvm::outs() << "apiary: module '" << g_module_name << "': " << rep.total_defs << " binding statement(s) across "
                      << rep.unit_count << " emit unit(s); largest single unit = " << rep.max_unit_defs
                      << " (a shard can never be smaller than this).\n";
-        return g_error_count > 0 ? 1 : (rc != 0 ? rc : 0);
+        apiary::diag::print_summary();
+        return (g_error_count + apiary::diag::errors()) > 0 ? 1 : (rc != 0 ? rc : 0);
     }
 
     // Measured on the *emitted* binding statements, not the IR entity counts.
@@ -378,7 +419,8 @@ int main(int argc, char const **argv) {
             for (std::string const &p : apiary::plan_shards(g_module, opts, g_max_defs_per_tu, g_output_path)) {
                 llvm::outs() << p << "\n";
             }
-            return g_error_count > 0 ? 1 : (rc != 0 ? rc : 0);
+            apiary::diag::print_summary();
+            return (g_error_count + apiary::diag::errors()) > 0 ? 1 : (rc != 0 ? rc : 0);
         }
         for (apiary::ShardFile const &shard : apiary::emit_shards(g_module, opts, g_max_defs_per_tu, g_output_path)) {
             if (int const shard_rc = write_file(shard.path, shard.content); shard_rc != 0) {
@@ -410,6 +452,8 @@ int main(int argc, char const **argv) {
                      << (g_undocumented_count == 1 ? "y" : "ies") << ".\n";
     }
 
+    apiary::diag::print_summary();
+    g_error_count += apiary::diag::errors();
     if (g_error_count > 0) {
         llvm::errs() << "apiary: " << g_error_count << " error(s) — bindings may be incomplete.\n";
         return 1;

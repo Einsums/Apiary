@@ -1,0 +1,16 @@
+### qualifiers.hpp (ref-qualified overloads)
+qualifiers.hpp:44:49: warning: apiary: method 'value' is &-qualified; the emitted static_cast omits the qualifier and so names no overload. The generated code will not compile. [unrepresentable-overload]
+qualifiers.hpp:47:53: warning: apiary: method 'value' is &-qualified; the emitted static_cast omits the qualifier and so names no overload. The generated code will not compile. [unrepresentable-overload]
+qualifiers.hpp:50:48: warning: apiary: method 'value' is &&-qualified; the emitted static_cast omits the qualifier and so names no overload. The generated code will not compile. [unrepresentable-overload]
+qualifiers.hpp:54:54: warning: apiary: method 'value' is &&-qualified; the emitted static_cast omits the qualifier and so names no overload. The generated code will not compile. [unrepresentable-overload]
+apiary: 0 diagnostic error(s), 4 warning(s)
+
+### variadic_pack.hpp (parameter packs)
+variadic_pack.hpp:39:79: warning: apiary: 'einsums::fixture::sum_all' takes a parameter pack; the instantiated type 'double...' is re-emitted verbatim, which a C++ cast reads as varargs. The generated code will not compile. [unrepresentable-pack]
+variadic_pack.hpp:44:74: warning: apiary: 'einsums::fixture::scaled_sum' takes a parameter pack; the instantiated type 'double...' is re-emitted verbatim, which a C++ cast reads as varargs. The generated code will not compile. [unrepresentable-pack]
+apiary: 0 diagnostic error(s), 2 warning(s)
+
+### skipped-entity, opt-in (default is ignored)
+rest_shapes.hpp:208:44: note: apiary: templated free function 'einsums::fixture::accumulate' is annotated but has no @instantiate_as directive, so nothing is bound for it. [skipped-entity]
+
+### a check silenced

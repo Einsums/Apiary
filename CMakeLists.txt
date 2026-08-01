@@ -90,6 +90,7 @@ add_executable(apiary
     src/IR.cpp
     src/AnnotationParser.cpp
     src/DocComment.cpp
+    src/Diagnostics.cpp
     src/DocExtractor.cpp
     src/DocsJson.cpp
     src/Emitter.cpp
@@ -289,6 +290,15 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
                     "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
+        )
+        # Diagnostics suite: the emitters can now report what they could not
+        # represent. Pins the messages (their wording IS the product), the
+        # severity policy, and that a bad --diagnostic spec is refused before
+        # anything is written.
+        add_test(NAME apiary_diagnostics
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_diagnostics.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
         )
         # Doc-markup suite: pins the reST the Doxygen converter produces for
         # tests/fixtures/rest_shapes.hpp, both as text and as doc_lint's
