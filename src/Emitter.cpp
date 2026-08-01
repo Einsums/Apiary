@@ -12,6 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "DocComment.hpp"
 #include "PythonOverloads.hpp"
 #include "clang/Format/Format.h"
 #include "clang/Tooling/Core/Replacement.h"
@@ -171,12 +172,14 @@ void emit_function_arg_modifiers(llvm::raw_string_ostream &os, BoundEntityCommon
 
 void emit_doc_arg(llvm::raw_string_ostream &os, BoundEntityCommon const &e) {
     DirectiveView const v(e.directives);
+    // APIARY_DOC text is authored FOR Python and goes through verbatim; only a
+    // Doxygen comment needs converting.
     if (auto const *d = v.first("doc"); d != nullptr && !d->args.empty()) {
         os << ", " << as_cpp_doc(d->args.front());
         return;
     }
-    if (!e.doc.empty()) {
-        os << ", " << as_cpp_doc(e.doc);
+    if (std::string const py_doc = python_docstring(e.doc); !py_doc.empty()) {
+        os << ", " << as_cpp_doc(py_doc);
     }
 }
 
@@ -1162,8 +1165,8 @@ void emit_enum(llvm::raw_string_ostream &os, BoundEnum const &e, Backend const &
     os << ")\n";
     for (auto const &v : e.enumerators) {
         os << "        .value(\"" << v.name << "\", " << e.qualified_name << "::" << v.name;
-        if (!v.doc.empty()) {
-            os << ", " << as_cpp_doc(v.doc);
+        if (std::string const py_doc = python_docstring(v.doc); !py_doc.empty()) {
+            os << ", " << as_cpp_doc(py_doc);
         }
         os << ")\n";
     }

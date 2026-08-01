@@ -37,13 +37,12 @@ object.)einsums")
 returning the derived type, so both names must resolve from a module that
 declares neither.)einsums");
     m.def("undocumented", static_cast<double (*)(double)>(&einsums::fixture::undocumented), py::arg("x"));
-    m.def("rst_only", static_cast<double (*)(double)>(&einsums::fixture::rst_only), py::arg("x"), R"einsums(@rst
-Documented only through an embedded reST block, with no prose of its own.
+    m.def("rst_only", static_cast<double (*)(double)>(&einsums::fixture::rst_only), py::arg("x"),
+          R"einsums(Documented only through an embedded reST block, with no prose of its own.
 The whole doc comment is one protected span, so the brief is produced
 entirely by splicing rather than by any of the line handling.
 
 .. note::
 
-Including a directive, to prove the splice survives indentation.
-@endrst)einsums");
+A directive whose body should stay indented, and does not.)einsums");
 }

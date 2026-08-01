@@ -678,4 +678,95 @@ DocComment parse_doc_comment(std::string const &raw) {
     return doc;
 }
 
+namespace {
+
+// One numpydoc section: a header, a line of dashes as long as the header, then
+// the body. Appended only when the body has something in it.
+void append_section(std::string &out, std::string const &header, std::string const &body) {
+    if (trim(body).empty()) {
+        return;
+    }
+    if (!out.empty()) {
+        out += "\n\n";
+    }
+    out += header + "\n" + std::string(header.size(), '-') + "\n" + rtrim(body);
+}
+
+// A numpydoc named entry: the name on its own line, the description indented
+// under it. The type slot ("name : type") is left off on purpose - the C++ type
+// is not the Python type, pybind11 already prepends a typed signature line, and
+// the stub carries the real annotation.
+std::string named_entry(std::string const &name, std::string const &description) {
+    std::string out = name.empty() ? std::string{"?"} : name;
+    std::string const desc = trim(description);
+    if (desc.empty()) {
+        return out + "\n";
+    }
+    out += "\n";
+    // Indent every line by four, including the wrapped continuations of a
+    // description that already spans lines.
+    std::size_t start = 0;
+    for (std::size_t i = 0; i <= desc.size(); ++i) {
+        if (i == desc.size() || desc[i] == '\n') {
+            std::string const line = desc.substr(start, i - start);
+            out += line.empty() ? std::string{"\n"} : "    " + line + "\n";
+            start = i + 1;
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+std::string render_python_docstring(DocComment const &doc) {
+    std::string out;
+
+    if (!doc.brief.empty()) {
+        out += doc.brief;
+    }
+    if (!doc.detail.empty()) {
+        if (!out.empty()) {
+            out += "\n\n";
+        }
+        out += doc.detail;
+    }
+
+    std::string params;
+    for (auto const &p : doc.params) {
+        params += named_entry(p.name, p.description);
+    }
+    append_section(out, "Parameters", params);
+
+    append_section(out, "Returns", trim(doc.returns));
+
+    std::string raises;
+    for (auto const &t : doc.throws_) {
+        raises += named_entry(t.name, t.description);
+    }
+    append_section(out, "Raises", raises);
+
+    // "Warnings" is numpydoc's admonition section, and a deprecation is the
+    // thing a reader most needs to see. Doxygen's @deprecated carries no
+    // version, so this cannot be a ``.. deprecated::`` directive (Sphinx
+    // requires the version argument) - plain prose says the same thing and
+    // reads correctly in a terminal.
+    if (doc.deprecated) {
+        std::string note = trim(doc.deprecated_note);
+        append_section(out, "Warnings", note.empty() ? std::string{"Deprecated."} : "Deprecated. " + note);
+    }
+
+    if (!doc.since.empty()) {
+        append_section(out, "Notes", ".. versionadded:: " + trim(doc.since));
+    }
+
+    return trim(out);
+}
+
+std::string python_docstring(std::string const &raw) {
+    if (trim(raw).empty()) {
+        return {};
+    }
+    return render_python_docstring(parse_doc_comment(raw));
+}
+
 } // namespace apiary

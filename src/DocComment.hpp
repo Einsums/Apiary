@@ -81,4 +81,27 @@ struct DocComment {
 /// @return The structured DocComment.
 DocComment parse_doc_comment(std::string const &raw);
 
+/// @brief Render a parsed doc comment as a Python docstring, in numpydoc form.
+///
+/// The binding and stub emitters both need a docstring, and neither can use the
+/// raw comment: `@brief`, `@param` and the rest are Doxygen syntax, meaningless
+/// to a Python reader, and they used to reach `help()` verbatim.
+///
+/// numpydoc rather than any other convention because it is already this
+/// project's Python docstring grammar - `apiary_py_extract.py` PARSES numpydoc
+/// out of `.py` sources into this same structure - so a C++-origin binding and
+/// a Python-origin function now read the same way.
+///
+/// `tparams` are deliberately dropped: a C++ template parameter is pinned by
+/// the instantiation and there is nothing for a Python caller to pass.
+///
+/// @param doc The parsed doc comment.
+/// @return The docstring text, or empty when there is nothing to say.
+std::string render_python_docstring(DocComment const &doc);
+
+/// @brief Convenience: parse a raw doc comment and render it as a docstring.
+/// @param raw The marker-stripped Doxygen comment body.
+/// @return The docstring text, or empty when `raw` is empty.
+std::string python_docstring(std::string const &raw);
+
 } // namespace apiary

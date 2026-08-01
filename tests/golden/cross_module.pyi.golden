@@ -12,15 +12,13 @@ import numpy.typing
 # %%submodule: 
 def undocumented(x: float) -> float: ...
 def rst_only(x: float) -> float:
-    """@rst
-    Documented only through an embedded reST block, with no prose of its own.
+    """Documented only through an embedded reST block, with no prose of its own.
     The whole doc comment is one protected span, so the brief is produced
     entirely by splicing rather than by any of the line handling.
 
     .. note::
 
-    Including a directive, to prove the splice survives indentation.
-    @endrst
+    A directive whose body should stay indented, and does not.
     """
     ...
 # %%submodule: core

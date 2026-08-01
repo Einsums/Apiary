@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "DocComment.hpp"
 #include "PythonOverloads.hpp"
 #include "TypeTranslator.hpp"
 
@@ -64,7 +65,12 @@ std::vector<std::string> split_lines(std::string const &text) {
 // Picks `"""` unless the doc itself contains that sequence, in which
 // case it falls back to `'''`. Multi-line docs span multiple lines so
 // the rendered text stays readable in editor hovers.
-void emit_docstring(std::ostringstream &os, std::string const &doc, std::string const &indent) {
+// `raw` is a Doxygen comment body; it is converted to a Python docstring here
+// so every call site gets the conversion and none can forget it. The stub and
+// the binding must agree - a reader hovering in an editor and a reader calling
+// help() are looking at the same function.
+void emit_docstring(std::ostringstream &os, std::string const &raw, std::string const &indent) {
+    std::string const doc = python_docstring(raw);
     if (doc.empty()) {
         return;
     }

@@ -54,15 +54,13 @@ APIARY_EXPOSE APIARY_MODULE("util") Circle enclosing_circle(Shape const &shape);
 // stray empty docstring line.
 APIARY_EXPOSE double undocumented(double x);
 
-// KNOWN BAD (Finding 11): the binding emitter uses the RAW doc text as the
-// Python docstring, never doc_structured, so every Doxygen command survives
-// into help(). Here that means the `@rst` / `@endrst` markers and the
-// directive's indentation both land in the docstring verbatim. It is not
-// specific to @rst - `@brief`, `@param` and `@return` leak the same way, in
-// the shipped Einsums bindings, which is where this was confirmed at runtime.
-// Fixing it is a format decision (what SHOULD a docstring composed from
-// brief/detail/params/returns look like?) and it rewrites every docstring
-// golden, so it is not done here.
+// KNOWN BAD (Finding 4, the indentation half): the splice below does NOT
+// survive its own indentation. Span protection runs on text that DocExtractor
+// has already ltrimmed line by line, so the note's body arrives at column 0 and
+// the directive ends up with no content at all - which is what the
+// malformed-rest check reports against this entity. A directive body inside
+// @rst is the shape where that per-line ltrim does the most damage, because
+// @rst is the one construct whose whole promise is "spliced verbatim".
 /**
  * @rst
  * Documented only through an embedded reST block, with no prose of its own.
@@ -71,7 +69,7 @@ APIARY_EXPOSE double undocumented(double x);
  *
  * .. note::
  *
- *    Including a directive, to prove the splice survives indentation.
+ *    A directive whose body should stay indented, and does not.
  * @endrst
  */
 APIARY_EXPOSE double rst_only(double x);
