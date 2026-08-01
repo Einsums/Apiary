@@ -10,6 +10,28 @@ import numpy
 import numpy.typing
 
 # %%submodule: 
+class Allocator:
+    """The member form, which is the shape that actually shipped broken."""
+    def __init__(self) -> None: ...
+    @overload
+    def allocate(self, slot: int, intermediate: bool = True, *, dtype: Literal["float32", "float", "f4", "f", "single"]) -> float:
+        """Allocate a named buffer. `intermediate` has a default and precedes the
+        dtype selector, exactly as Graph::create_tensor does.
+        """
+        ...
+    @overload
+    def allocate(self, slot: int, intermediate: bool = True, dtype: Literal["float64", "double", "f8", "d"] = "float64") -> float:
+        """Allocate a named buffer. `intermediate` has a default and precedes the
+        dtype selector, exactly as Graph::create_tensor does.
+        """
+        ...
+    @overload
+    def allocate(self, slot: int, intermediate: bool = True, dtype: str = "float64") -> float:
+        """Allocate a named buffer. `intermediate` has a default and precedes the
+        dtype selector, exactly as Graph::create_tensor does.
+        """
+        ...
+
 @overload
 def zero_value(seed: int, dtype: Literal["float32", "float", "f4", "f", "single"]) -> float:
     """Allocate-and-zero a scalar value, returned as the dtype's value
@@ -33,4 +55,16 @@ def zero_value(seed: int, dtype: str = "float64") -> float:
     signature and differ only in the return type, so the codegen
     auto-detects the dtype-dispatcher pattern.
     """
+    ...
+@overload
+def scaled_zero(seed: int, normalize: bool = True, *, dtype: Literal["float32", "float", "f4", "f", "single"]) -> float:
+    """Free-function dispatcher with a defaulted argument ahead of the selector."""
+    ...
+@overload
+def scaled_zero(seed: int, normalize: bool = True, dtype: Literal["float64", "double", "f8", "d"] = "float64") -> float:
+    """Free-function dispatcher with a defaulted argument ahead of the selector."""
+    ...
+@overload
+def scaled_zero(seed: int, normalize: bool = True, dtype: str = "float64") -> float:
+    """Free-function dispatcher with a defaulted argument ahead of the selector."""
     ...

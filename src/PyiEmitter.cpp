@@ -5,6 +5,7 @@
 
 #include "PyiEmitter.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <functional>
@@ -638,11 +639,41 @@ PyParam build_param(BoundParam const &p, std::size_t slot, NameMap const &names)
     return out;
 }
 
+// Index of the first parameter that is REQUIRED but follows an optional one,
+// or npos when the list is already a legal Python signature.
+//
+// Python has no way to spell "required, and positionally after an optional" -
+// `def f(a=1, b)` is a syntax error. C++ has no such rule, and neither does
+// pybind11: a dispatcher that appends a required selector after an argument
+// with a default is perfectly well-formed there. When that shape reaches a
+// stub verbatim the whole .pyi stops parsing, which costs the type checker
+// every symbol in the file, not just the one function. (Finding 12: this is
+// what made the shipped ``einsums/graph.pyi`` unreadable to pyright.)
+//
+// Marking the parameter keyword-only is the one spelling that keeps it
+// required. It does narrow what may be passed positionally, so it is applied
+// only where the alternative is not valid Python at all.
+std::size_t first_required_after_optional(std::vector<PyParam> const &params) {
+    bool seen_optional = false;
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        if (!params[i].default_value.empty()) {
+            seen_optional = true;
+        } else if (seen_optional) {
+            return i;
+        }
+    }
+    return std::string::npos;
+}
+
 void emit_signature(std::ostringstream &os, std::vector<PyParam> const &params, std::string const &ret) {
+    std::size_t const kw_only_from = first_required_after_optional(params);
     os << "(";
     for (std::size_t i = 0; i < params.size(); ++i) {
         if (i != 0) {
             os << ", ";
+        }
+        if (i == kw_only_from) {
+            os << "*, ";
         }
         os << params[i].name << ": " << params[i].annotation;
         if (!params[i].default_value.empty()) {
@@ -1273,10 +1304,14 @@ void emit_method_signature(std::ostringstream &os, BoundMethod const &m, NameMap
     std::string ret = is_init ? std::string{"None"}
                               : resolve_for_method(m.return_type.empty() ? std::string{"void"} : m.return_type, m.return_type_canonical);
 
+    std::size_t const kw_only_from = first_required_after_optional(params);
     os << "(";
     for (std::size_t i = 0; i < params.size(); ++i) {
         if (i != 0) {
             os << ", ";
+        }
+        if (i == kw_only_from) {
+            os << "*, ";
         }
         if (params[i].annotation.empty()) {
             os << params[i].name; // bare ``self``
@@ -1571,9 +1606,18 @@ void emit_class_body(std::ostringstream &os, BoundClass const &cls, ClassEmissio
                 // every emitted line gets the @overload decorator.
                 name_count[py] += 1; // for the fallback
 
+                // The dtype selector is spliced on as text, AFTER the real
+                // arguments have been rendered, so the invariant
+                // first_required_after_optional() enforces inside
+                // emit_method_signature cannot see it. Apply the same rule
+                // here: a selector with no default, following an argument that
+                // has one, has to be keyword-only or the line is not Python.
+                bool const args_have_default =
+                    std::any_of(m.params.begin(), m.params.end(), [](BoundParam const &p) { return p.default_value_py.has_value(); });
                 for (auto const &[ret_t, aliases] : per_inst) {
-                    std::string sig = args_pref + "dtype: " + format_dtype_literal(aliases);
-                    if (literal_covers_default(aliases, default_dtype)) {
+                    bool const covers   = literal_covers_default(aliases, default_dtype);
+                    std::string     sig = args_pref + ((!covers && args_have_default) ? "*, dtype: " : "dtype: ") + format_dtype_literal(aliases);
+                    if (covers) {
                         sig += " = \"" + default_dtype + "\"";
                     }
                     sig += ") -> " + ret_t;
