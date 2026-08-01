@@ -48,19 +48,28 @@ MISSING_DOCUTILS = (
 )
 
 # Sphinx-only directives that apiary itself emits. ``DocComment.cpp`` renders
-# @see/@sa -> seealso, @versionadded{...} and friends -> version*, and
-# @code -> code-block. docutils would reject each as an unknown directive AND
-# swallow its body as a literal block, so a malformed list inside a @note or a
-# @par would go unnoticed. A permissive stub gets the body parsed instead.
-_STUB_DIRECTIVES = (
+# @see/@sa -> seealso and @versionadded{...} and friends -> version*. docutils
+# would reject each as an unknown directive AND swallow its body as a literal
+# block, so a malformed list inside a @note or a @par would go unnoticed. A
+# permissive stub gets the body parsed instead.
+_PARSED_DIRECTIVES = (
     "seealso",
     "versionadded",
     "versionchanged",
     "versionremoved",
     "deprecated",
+)
+
+# Directives whose content is NOT reST and must never be parsed as it. @code
+# renders to code-block, and source code is full of characters reST reads as
+# markup: a C++ `C *= 2` is an unterminated emphasis if you parse it. Sphinx
+# treats these bodies as literal, so we must too, or the check invents defects
+# in every documented example.
+_LITERAL_DIRECTIVES = (
     "code-block",
     "autosummary",
     "toctree",
+    "literalinclude",
 )
 
 # Message classes about vocabulary apiary does not own: a Sphinx role from the
@@ -104,8 +113,8 @@ def _register_stubs() -> None:
     if _registered:
         return
 
-    class _Stub(Directive):
-        """Accept any argument/option shape and parse the body as normal reST."""
+    class _Base(Directive):
+        """Accept any argument/option shape a Sphinx directive might carry."""
 
         has_content = True
         required_arguments = 0
@@ -113,13 +122,24 @@ def _register_stubs() -> None:
         final_argument_whitespace = True
         option_spec: dict = {}
 
+    class _ParsedStub(_Base):
+        """Parse the body as normal reST - defects inside it are ours to report."""
+
         def run(self):
             node = docutils.nodes.container()
             self.state.nested_parse(self.content, self.content_offset, node)
             return [node]
 
-    for name in _STUB_DIRECTIVES:
-        directives.register_directive(name, _Stub)
+    class _LiteralStub(_Base):
+        """Consume the body without parsing - it is code, not markup."""
+
+        def run(self):
+            return [docutils.nodes.literal_block("", "\n".join(self.content))]
+
+    for name in _PARSED_DIRECTIVES:
+        directives.register_directive(name, _ParsedStub)
+    for name in _LITERAL_DIRECTIVES:
+        directives.register_directive(name, _LiteralStub)
     _registered = True
 
 

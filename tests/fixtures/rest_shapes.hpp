@@ -112,10 +112,17 @@ APIARY_EXPOSE void inline_commands_wrapped();
 /**
  * @brief A bullet list directly adjacent to a code block.
  *
+ * The code deliberately contains characters reST reads as markup. A code block
+ * is not reST and must never be checked as if it were, or every documented
+ * example turns into an invented defect - `scale *= 2` alone would report an
+ * unterminated emphasis.
+ *
  * - An item before the code.
  * - A second item.
  *
  * @code{.py}
+ * scale = 1
+ * scale *= 2            # an asterisk, and a `backtick` below
  * result = wrapped_bullets()
  * @endcode
  *

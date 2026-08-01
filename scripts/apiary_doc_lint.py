@@ -63,7 +63,9 @@ SEVERITY = {
 }
 
 
-@dataclass
+# Frozen so identical findings can be de-duplicated by value; nothing mutates
+# one after construction.
+@dataclass(frozen=True)
 class Finding:
     file: str
     line: int
@@ -296,6 +298,10 @@ def main(argv: list[str] | None = None) -> int:
                                         "unresolved-reference", f"unresolved reference '[[{token}]]'"))
 
     findings = [f for f in findings if f.check in selected]
+    # One header is read by every module fragment that includes it, so the same
+    # entity - and the same defect - arrives once per input file. Report it once:
+    # an identical (location, check, message) IS the same finding.
+    findings = list(dict.fromkeys(findings))
     findings.sort(key=Finding.sort_key)
 
     n_err = sum(f.severity == "error" for f in findings)
