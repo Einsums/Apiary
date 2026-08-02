@@ -22,13 +22,24 @@
 #     headers, so every generated TU fails with "cannot use 'throw' with
 #     exceptions disabled" - inside pybind11, far from anything apiary wrote.
 #
+# The MSVC flags are spelled with a LEADING DASH, not the customary slash, and
+# that is load-bearing. These suites run under the Git Bash that ships in the
+# runner image, whose MSYS runtime rewrites any argument that looks like a POSIX
+# absolute path into a Windows one before the process ever sees it. "/EHsc" is
+# exactly that shape, so it arrived as "C:/Program Files/Git/EHsc" and clang-cl
+# filed it away as an unused linker input - leaving exceptions off and the
+# failure looking untouched by the fix. ("/std:c++20" happens to survive, since
+# the colon stops the heuristic, which is not a distinction worth relying on.)
+# clang-cl accepts either prefix for MSVC-style options, and the dash form is
+# not path-shaped, so it crosses the shell boundary intact.
+#
 # Sets APIARY_CXX_SYNTAX_FLAGS rather than echoing, because the flags have to
 # survive as separate argv entries and macOS still ships bash 3.2 (no mapfile,
 # no readarray).
 apiary_set_cxx_syntax_flags() {
     case "$(basename "$1")" in
         clang-cl | clang-cl.exe | clang-cl-* | cl | cl.exe)
-            APIARY_CXX_SYNTAX_FLAGS=(-fsyntax-only /std:c++20 /EHsc)
+            APIARY_CXX_SYNTAX_FLAGS=(-fsyntax-only -std:c++20 -EHsc)
             ;;
         *)
             APIARY_CXX_SYNTAX_FLAGS=(-fsyntax-only -std=c++20)
