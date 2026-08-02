@@ -45,6 +45,28 @@ void compute_python_overloads(Module &module_);
 /// @return The individual values, e.g. ``{"float", "2"}``.
 std::vector<std::string> split_instantiation_args(std::string const &combo);
 
+/// @brief Drop every entity whose Python name is not a Python identifier.
+///
+/// A C++ name is not always a Python one. A free ``operator*`` exposed without
+/// a rename reached both emitters verbatim: the binding registered it under a
+/// name no Python caller can type, and the stub emitted ``def operator*(...)``,
+/// which is a syntax error - so the whole ``.pyi`` failed to parse and the type
+/// checker got nothing from the file, not just nothing for that function.
+///
+/// apiary cannot represent this, so it says so and binds nothing rather than
+/// emitting something unusable. The report is an error, not a warning: the
+/// author wrote APIARY_EXPOSE, the fix is one annotation away
+/// (``APIARY_RENAME``, or ``APIARY_OPERATOR`` on a class member), and a build
+/// that quietly lacks a function the source asked for is worse than one that
+/// stops.
+///
+/// Filtering the module once, before either emitter runs, rather than checking
+/// at each of the fifteen places a name is chosen: one policy, one diagnostic,
+/// and no way for the two emitters to disagree about what got bound.
+///
+/// @param module_ The module to filter in place.
+void drop_unbindable_names(Module &module_);
+
 /// @brief One C++ parameter after a template parameter pack has been expanded.
 struct ExpandedParam {
     /// Concrete parameter type, with the pack's template parameter substituted.

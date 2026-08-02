@@ -41,21 +41,51 @@ trap 'rm -rf "${WORK}"' EXIT
 
 fail=0
 
+# A free operator, a member operator with no APIARY_OPERATOR, and the rename
+# that makes one bindable. apiary cannot spell the first two in Python, so it
+# binds nothing for them and says so; the third must still be bound.
+cat > "${WORK}/unbindable.hpp" <<'HPP'
+#pragma once
+#include <apiary/Annotations.hpp>
+namespace einsums::fixture {
+struct APIARY_EXPOSE Money {
+    APIARY_EXPOSE Money();
+    APIARY_EXPOSE APIARY_OPERATOR("__add__") Money operator+(Money const &r) const;
+    APIARY_EXPOSE Money operator-(Money const &r) const;
+};
+APIARY_EXPOSE Money operator*(Money const &lhs, double scale);
+APIARY_EXPOSE APIARY_RENAME("divided") Money operator/(Money const &lhs, double scale);
+} // namespace einsums::fixture
+HPP
+
 # Run the tool over one fixture and keep only apiary's own diagnostics.
 # Absolute paths are reduced to a basename so the golden survives a move, and
 # the "N binding statement(s)" progress line is dropped - it belongs to the
 # emitter's reporting, not to this suite.
+# As collect(), but for a header written on the fly rather than one in the
+# corpus. A fixture that deliberately produces NO output cannot live there:
+# every other runner drives the whole corpus and would see an empty emission.
+# Run the tool over one header and keep only apiary's own diagnostics.
+#
+# Two things have to be tolerated, and both are expected outcomes rather than
+# faults: the tool EXITS NON-ZERO when a check is at error severity (that is
+# the behaviour under test), and `grep -v` exits 1 when it selects no lines
+# (a silenced check, a clean header). Under `set -e -o pipefail` either would
+# abort the run and read as a harness failure, so capture first and filter
+# after.
+collect_path() {
+    local header="$1"
+    shift
+    local raw="${WORK}/collect.$$"
+    "${TOOL}" --module diag_fixture "$@" "${header}" \
+        -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2> "${raw}" >/dev/null || true
+    { grep -v "^apiary: module " "${raw}" || true; } | sed -E 's|^.*/([^/]+\.hpp):|\1:|'
+}
+
 collect() {
     local fixture="$1"
     shift
-    # A case that reports NOTHING is a real expected outcome here (a silenced
-    # check, a clean fixture), and `grep -v` exits 1 when it selects no lines -
-    # which under `set -e -o pipefail` would abort the run and look like a tool
-    # failure. Swallow just that.
-    "${TOOL}" --module diag_fixture "$@" "${FIXTURE_DIR}/${fixture}" \
-        -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>&1 >/dev/null |
-        { grep -v "^apiary: module " || true; } |
-        sed -E 's|^.*/([^/]+\.hpp):|\1:|'
+    collect_path "${FIXTURE_DIR}/${fixture}" "$@"
 }
 
 {
@@ -69,6 +99,9 @@ collect() {
     echo
     echo "### skipped-entity, opt-in (default is ignored)"
     collect rest_shapes.hpp --diagnostic=skipped-entity=note
+    echo
+    echo "### names Python cannot spell (refused, not emitted)"
+    collect_path "${WORK}/unbindable.hpp"
     echo
     echo "### a check silenced"
     collect qualifiers.hpp --diagnostic=moved-from-self=ignored

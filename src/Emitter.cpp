@@ -105,39 +105,15 @@ class DirectiveView {
 };
 
 // Return the Python identifier for a bound entity, honoring @rename.
-// True for a name Python could actually bind: an identifier, and not a keyword
-// that would make the stub a syntax error. Deliberately conservative - it only
-// has to recognize the names that DO occur, and the ones that occur and are
-// invalid are C++ spellings like ``operator*``.
-bool is_python_identifier(std::string const &s) {
-    if (s.empty()) {
-        return false;
-    }
-    if ((std::isalpha(static_cast<unsigned char>(s.front())) == 0) && s.front() != '_') {
-        return false;
-    }
-    return std::all_of(s.begin(), s.end(),
-                       [](char c) { return (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_'; });
-}
-
+// Every entity reaching the emitter has already passed
+// drop_unbindable_names(), so the name this returns is a Python identifier by
+// construction; there is nothing left to check here.
 std::string py_name_for(BoundEntityCommon const &e) {
     DirectiveView const v(e.directives);
-    std::string         name = e.name;
     if (auto const *d = v.first("rename"); d != nullptr && !d->args.empty()) {
-        name = d->args.front();
+        return d->args.front();
     }
-    // A C++ name that is not a Python identifier - a free ``operator*``, say -
-    // used to reach the binding and the stub verbatim. In the stub that is a
-    // syntax error, which costs the type checker EVERY symbol in the file, not
-    // just this one. Report it against the header instead of letting the .pyi
-    // fail to parse somewhere downstream.
-    if (!is_python_identifier(name)) {
-        diag::report("invalid-python-name", e.location,
-                     "'" + e.qualified_name + "' binds as '" + name +
-                         "', which is not a Python identifier. The generated stub will not parse; give it an "
-                         "APIARY_RENAME, or APIARY_OPERATOR if it is an operator on a class.");
-    }
-    return name;
+    return e.name;
 }
 
 // Submodule name from a @module directive, or empty if the entity binds

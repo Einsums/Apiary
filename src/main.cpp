@@ -344,6 +344,17 @@ int main(int argc, char const **argv) {
         return write_output(apiary::emit_docs_json(g_module, g_module_name));
     }
 
+    // Remove anything whose Python name is not a Python identifier, reporting
+    // each, so both emitters see the same module and neither can bind a name
+    // the other cannot spell.
+    //
+    // AFTER the docs and dump-ir exits on purpose. Bindability and
+    // documentability are different contracts: a free ``operator+`` is
+    // perfectly documentable - the C++ reference has a page for exactly that -
+    // and dropping it there would delete real API documentation to solve a
+    // Python-naming problem it does not have.
+    apiary::drop_unbindable_names(g_module);
+
     apiary::EmitOptions opts;
     opts.module_name            = g_module_name;
     opts.register_function_name = g_register_fn;

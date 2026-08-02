@@ -52,13 +52,10 @@ class APIARY_EXPOSE Money {
     APIARY_EXPOSE APIARY_OPERATOR("__float__") operator double() const;
 };
 
-// A FREE operator is deliberately absent. APIARY_OPERATOR is documented as
-// applying to a method, and a free `operator*` exposed anyway is emitted under
-// its C++ spelling: `m.def("operator*", ...)` in the binding, and
-// `def operator*(...)` in the stub - which is not valid Python, so the whole
-// .pyi fails to parse. That is a real defect (Finding 9 in the robustness
-// plan), but it is an unsupported-input diagnostic gap rather than a behavior
-// to pin, and pinning it here would mean committing a golden that the
-// stub-parses-as-Python assertion in run_pyi_golden.sh must then reject.
+// A C++ name that is not a Python identifier - a free `operator*`, a member
+// `operator-` with no APIARY_OPERATOR to name it - is REFUSED rather than
+// emitted, and the refusal is reported. Those cases live in
+// run_diagnostics.sh: a fixture that deliberately produces NO output cannot
+// also pin emitted output, and every runner here drives the whole corpus.
 
 } // namespace einsums::fixture

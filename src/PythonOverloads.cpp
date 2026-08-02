@@ -5,6 +5,9 @@
 
 #include "PythonOverloads.hpp"
 
+#include "Diagnostics.hpp"
+
+#include <algorithm>
 #include <cctype>
 #include <string_view>
 #include <cstddef>
@@ -300,6 +303,82 @@ void compute_python_overloads(Module &module_) {
     for (auto &f : module_.functions) {
         compute_python_overloads(f);
     }
+}
+
+namespace {
+
+// True for a name Python could bind: an identifier, and not something a stub
+// would fail to parse. Deliberately conservative - the names that actually
+// occur and are invalid are C++ spellings like ``operator*``.
+bool is_python_identifier(std::string const &s) {
+    if (s.empty()) {
+        return false;
+    }
+    if ((std::isalpha(static_cast<unsigned char>(s.front())) == 0) && s.front() != '_') {
+        return false;
+    }
+    return std::all_of(s.begin(), s.end(), [](char c) { return (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_'; });
+}
+
+std::string const *first_arg(DirectiveList const &directives, std::string_view name) {
+    for (Directive const &d : directives) {
+        if (d.name == name && !d.args.empty()) {
+            return &d.args.front();
+        }
+    }
+    return nullptr;
+}
+
+// The name Python will actually see. A directive that renames the binding wins
+// over the C++ spelling, which is why an ``operator+`` carrying
+// APIARY_OPERATOR("__add__") is perfectly bindable and must not be dropped.
+// This has to agree with what the emitters do, or the filter removes something
+// they would have emitted correctly.
+std::string effective_python_name(BoundEntityCommon const &e) {
+    for (std::string_view const directive : {"rename", "operator", "getter", "setter"}) {
+        if (std::string const *arg = first_arg(e.directives, directive); arg != nullptr) {
+            return *arg;
+        }
+    }
+    return e.name;
+}
+
+bool unbindable(BoundEntityCommon const &e, char const *kind) {
+    std::string const name = effective_python_name(e);
+    if (is_python_identifier(name)) {
+        return false;
+    }
+    diag::report("invalid-python-name", e.location,
+                 std::string{kind} + " '" + e.qualified_name + "' binds as '" + name +
+                     "', which is not a Python identifier; nothing is bound for it. Give it an APIARY_RENAME, or "
+                     "APIARY_OPERATOR if it is an operator on a class.");
+    return true;
+}
+
+template <typename T>
+void drop_if(std::vector<T> &items, char const *kind) {
+    items.erase(std::remove_if(items.begin(), items.end(), [&](T const &item) { return unbindable(item, kind); }), items.end());
+}
+
+void filter_class(BoundClass &cls) {
+    drop_if(cls.methods, "method");
+    drop_if(cls.fields, "field");
+    drop_if(cls.nested_enums, "enum");
+    for (BoundClass &nested : cls.nested_classes) {
+        filter_class(nested);
+    }
+    drop_if(cls.nested_classes, "class");
+}
+
+} // namespace
+
+void drop_unbindable_names(Module &module_) {
+    drop_if(module_.functions, "function");
+    drop_if(module_.enums, "enum");
+    for (BoundClass &cls : module_.classes) {
+        filter_class(cls);
+    }
+    drop_if(module_.classes, "class");
 }
 
 namespace {

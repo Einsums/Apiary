@@ -43,7 +43,9 @@ std::vector<Check> &registry() {
          "an rvalue-qualified method, bound through a lambda that moves from the object"},
         {"unrepresentable-pack", Severity::Warning,
          "a parameter pack that survived expansion, so a '...' reached the output"},
-        {"invalid-python-name", Severity::Warning, "a binding name that is not a Python identifier"},
+        // An error, not a warning: the entity is DROPPED, and a build that quietly
+        // lacks a function the source asked for is worse than one that stops.
+        {"invalid-python-name", Severity::Error, "a binding name that is not a Python identifier; nothing is bound"},
         {"skipped-entity", Severity::Ignored, "an annotated entity the emitter chose not to bind"},
     };
     return checks;
