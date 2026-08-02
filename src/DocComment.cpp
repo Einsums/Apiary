@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <regex>
 #include <string>
 #include <unordered_set>
@@ -87,6 +88,161 @@ std::string convert_inline(std::string s) {
     s = std::regex_replace(s, re_emph, "*$1*");
     s = std::regex_replace(s, re_bold, "**$1**");
     return s;
+}
+
+// ── inline HTML ─────────────────────────────────────────────────────────
+//
+// Doxygen accepts a little inline HTML and reST accepts none, so a `<tt>`
+// reached the reader as four visible characters. Convert the paired inline
+// tags Doxygen documents; leave anything else exactly as written.
+//
+// Three rules, and each of them is something a real comment in this corpus
+// needs:
+//
+//  - Only a PAIR converts, each opening tag taking the next closing one of
+//    the same name. `std::get<i>(tuple)` in prose names no markup, and a lone
+//    `<b>` is far likelier to be part of a spec string than an opening tag.
+//    Leftovers are left alone one at a time, so a stray tag does not stop a
+//    real pair beside it from converting.
+//  - Text inside backticks is copied through untouched, because
+//    ``"<output> <- <a> ; <b>"`` is a real doc string here and turning its
+//    `<b>` into `**` would cut the literal in half.
+//  - reST does not recognise inline markup that touches a word character, so
+//    `cdot<b>u</b>` has to become ``cdot\ **u**\ .`` to render as bold at
+//    all. Without the escape the asterisks are what the reader sees.
+struct HtmlTag {
+    char const *name;
+    char const *delim;
+};
+
+std::vector<HtmlTag> const &html_tags() {
+    static std::vector<HtmlTag> const tags = {
+        {"tt", "``"}, {"code", "``"}, {"b", "**"}, {"strong", "**"}, {"i", "*"}, {"em", "*"},
+    };
+    return tags;
+}
+
+bool is_word_char(char c) {
+    return (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_';
+}
+
+// Does `s` hold `<name>` (or `</name>`) at `i`, case-insensitively?
+bool tag_at(std::string const &s, std::size_t i, char const *name, bool closing) {
+    std::size_t p = i;
+    if (s[p] != '<') {
+        return false;
+    }
+    ++p;
+    if (closing) {
+        if (p >= s.size() || s[p] != '/') {
+            return false;
+        }
+        ++p;
+    } else if (p < s.size() && s[p] == '/') {
+        return false;
+    }
+    for (char const *n = name; *n != '\0'; ++n, ++p) {
+        if (p >= s.size() || std::tolower(static_cast<unsigned char>(s[p])) != *n) {
+            return false;
+        }
+    }
+    return p < s.size() && s[p] == '>';
+}
+
+std::string convert_html(std::string const &s) {
+    struct Hit {
+        std::size_t pos     = 0;
+        std::size_t len     = 0;
+        std::size_t tag     = 0;
+        bool        closing = false;
+        bool        paired  = false;
+    };
+    std::vector<Hit> hits;
+
+    for (std::size_t i = 0; i < s.size();) {
+        if (s[i] == '`') { // skip a backtick-fenced run whole
+            std::size_t const ticks = (s.compare(i, 2, "``") == 0) ? 2 : 1;
+            std::string const fence(ticks, '`');
+            if (std::size_t const close = s.find(fence, i + ticks); close != std::string::npos) {
+                i = close + ticks;
+                continue;
+            }
+        }
+        bool matched = false;
+        if (s[i] == '<') {
+            for (std::size_t t = 0; t < html_tags().size() && !matched; ++t) {
+                for (bool const closing : {false, true}) {
+                    if (!tag_at(s, i, html_tags()[t].name, closing)) {
+                        continue;
+                    }
+                    std::size_t const len = std::strlen(html_tags()[t].name) + (closing ? 3 : 2);
+                    hits.push_back({i, len, t, closing, false});
+                    i += len;
+                    matched = true;
+                    break;
+                }
+            }
+        }
+        if (!matched) {
+            ++i;
+        }
+    }
+
+    // Pair each opening tag with the next closing one of the same name. What
+    // is left over is not markup and is not touched: one stray `<b>` in a spec
+    // string must not stop the real `<b>...</b>` beside it from converting.
+    std::vector<std::size_t> pending(html_tags().size(), std::string::npos);
+    for (std::size_t k = 0; k < hits.size(); ++k) {
+        std::size_t &open_at = pending[hits[k].tag];
+        if (!hits[k].closing) {
+            open_at = k;
+            continue;
+        }
+        if (open_at == std::string::npos) {
+            continue;
+        }
+        // An empty span has no reST spelling - ```` `` `` ```` is not an
+        // inline literal - so leave the tags as prose instead.
+        std::size_t const from = hits[open_at].pos + hits[open_at].len;
+        if (!trim(s.substr(from, hits[k].pos - from)).empty()) {
+            hits[open_at].paired = true;
+            hits[k].paired       = true;
+        }
+        open_at = std::string::npos;
+    }
+
+    std::string out;
+    std::size_t copied = 0;
+    for (auto const &h : hits) {
+        if (!h.paired) {
+            continue;
+        }
+        out.append(s, copied, h.pos - copied);
+        std::size_t after = h.pos + h.len;
+        if (h.closing) {
+            // reST reads a delimiter followed (or preceded) by a space as
+            // ordinary text, so `<tt> cto / cfrom </tt>` has to lose the
+            // padding the author put inside the tags.
+            while (!out.empty() && (out.back() == ' ' || out.back() == '\t')) {
+                out.pop_back();
+            }
+        }
+        if (!h.closing && h.pos > 0 && is_word_char(s[h.pos - 1])) {
+            out += "\\ ";
+        }
+        out += html_tags()[h.tag].delim;
+        if (h.closing && after < s.size() && is_word_char(s[after])) {
+            out += "\\ ";
+        }
+        if (!h.closing) {
+            while (after < s.size() && (s[after] == ' ' || s[after] == '\t')) {
+                ++after;
+            }
+        }
+        copied = after;
+    }
+    out.append(s, copied, std::string::npos);
+    return out;
 }
 
 // Collapse every run of whitespace (newlines included) to a single space.
@@ -738,7 +894,9 @@ DocComment parse_doc_comment(std::string const &raw) {
     }
 
     std::vector<ProtectedSpan> spans;
-    std::string const          protectedText = protect_spans(cleaned, spans);
+    // Spans come out first, so an HTML-looking string inside a @code example
+    // is already gone before convert_html looks at anything.
+    std::string const protectedText = convert_html(protect_spans(cleaned, spans));
 
     // Split into lines.
     std::vector<std::string> lines;

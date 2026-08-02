@@ -313,6 +313,28 @@ APIARY_EXPOSE APIARY_INSTANTIATE(double) T accumulate(T const *values, T scale =
 APIARY_EXPOSE void fussy_inline_spans();
 
 /**
+ * @brief Inline HTML, which Doxygen accepts and reST does not.
+ *
+ * A <tt>tt</tt> element reached the reader as four visible characters, in 46
+ * places across the headers this tool documents. The paired inline tags
+ * Doxygen documents convert; everything else is left exactly as written.
+ *
+ * Three cases, each of which a real comment needed:
+ *
+ * - <b>Bold</b> and <i>italic</i> and <tt>literal</tt>, each with whitespace
+ *   around them, convert to the plain reST spelling.
+ * - A tag that touches a word, as in cdot<b>u</b>, needs reST's backslash
+ *   escape, or the reader sees the asterisks instead of bold text.
+ * - Padding inside the tags, as in <tt> cto / cfrom </tt>, is dropped: reST
+ *   reads a delimiter next to a space as ordinary text, which is how this
+ *   shape reached the docs build as an unterminated inline literal.
+ * - An UNBALANCED tag is not markup: ``std::get<i>(tuple)`` names a template
+ *   parameter, and a spec string like "<output> <- <a> ; <b>" is prose. Both
+ *   are left alone. So is anything outside the closed set, such as <ul>.
+ */
+APIARY_EXPOSE void inline_html();
+
+/**
  * @brief An inline literal wrapped across a line that then starts with ``*``.
  *
  * Found in a real header, by the docs build, after block structure started

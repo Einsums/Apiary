@@ -167,6 +167,21 @@
     |**bold**, and
     |*also_emphasis* all do too.
 
+### einsums::fixture::inline_html
+  brief:
+    |Inline HTML, which Doxygen accepts and reST does not.
+  detail:
+    |A ``tt`` element reached the reader as four visible characters, in 46
+    |places across the headers this tool documents. The paired inline tags
+    |Doxygen documents convert; everything else is left exactly as written.
+    |
+    |Three cases, each of which a real comment needed:
+    |
+    |- **Bold** and *italic* and ``literal``, each with whitespace around them, convert to the plain reST spelling.
+    |- A tag that touches a word, as in cdot\ **u**, needs reST's backslash escape, or the reader sees the asterisks instead of bold text.
+    |- Padding inside the tags, as in ``cto / cfrom``, is dropped: reST reads a delimiter next to a space as ordinary text, which is how this shape reached the docs build as an unterminated inline literal.
+    |- An UNBALANCED tag is not markup: ``std::get<i>(tuple)`` names a template parameter, and a spec string like "<output> <- <a> ; <b>" is prose. Both are left alone. So is anything outside the closed set, such as <ul>.
+
 ### einsums::fixture::item_with_second_paragraph
   brief:
     |A list item carrying a second paragraph.
