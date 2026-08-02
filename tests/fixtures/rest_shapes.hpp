@@ -13,10 +13,13 @@
 // visible as a golden diff, at the shape that broke, instead of as a docutils
 // warning about a generated file three build steps later.
 //
-// Doc comments here are written the way an author would write them. Where a
-// shape is currently converted WRONG, the comment says so and names the
-// finding; the golden records the broken output until the fix lands, at which
-// point the golden diff is the proof.
+// Doc comments here are written the way an author would write them. Several
+// shapes come in pairs that are nearly identical on the page and must convert
+// differently - a nested list against a right-aligned enumerator, a definition
+// list against a hanging indent - because those pairs are where the converter
+// has actually gone wrong. Where a shape is converted WRONG, the comment says
+// so and names the finding; the golden records the broken output until the fix
+// lands, at which point the golden diff is the proof.
 
 #pragma once
 
@@ -43,15 +46,11 @@ APIARY_EXPOSE void wrapped_bullets();
 /**
  * @brief A nested bullet list.
  *
- * KNOWN BAD (Finding 4): nesting IS indentation, and prose lines are ltrimmed
- * before anything looks at them, so this arrives as a flat four-item list.
- * Valid reST, wrong structure - which is why only the text golden catches it.
- *
- * The obvious fix, preserving what the author wrote, was tried and reverted:
- * indentation on a prose line is far more often cosmetic than structural (a
- * wrapped sentence, a right-aligned enumerator), and preserving it turned six
- * Einsums comments into docs-build failures. Telling the two apart needs real
- * block-structure parsing.
+ * Nesting IS indentation, so this is one of the two shapes that made the
+ * converter carry block structure (Finding 4). An inner item clears its
+ * parent's TEXT column, which is what tells it from the shapes below whose
+ * indentation is cosmetic; the columns are then re-emitted canonically rather
+ * than copied, so the author's exact spacing does not have to be right.
  *
  * - An outer item.
  *   - An inner item, indented under it.
@@ -59,6 +58,86 @@ APIARY_EXPOSE void wrapped_bullets();
  * - A second outer item.
  */
 APIARY_EXPOSE void nested_bullets();
+
+/**
+ * @brief A lead-in paragraph followed by an indented list.
+ *
+ * By far the commonest indentation-bearing shape in real headers, and the one
+ * a naive fix gets wrong in the other direction: the author indents the list
+ * under the sentence that introduces it, but means one list, not a list inside
+ * a block quote. It is emitted flush, separated from the paragraph by the
+ * blank line reST wants there. The lead-in wins:
+ *   - The first item, indented under the sentence above.
+ *   - The second item, which wraps onto a second source line to prove the
+ *     continuation still joins at this level.
+ */
+APIARY_EXPOSE void lead_in_then_indented_list();
+
+/**
+ * @brief An enumerated list numbered right-aligned.
+ *
+ * The first counterexample that killed the naive fix. The numbers are aligned
+ * on their last digit, so ``2.`` sits one column deeper than ``10.`` and the
+ * indentation is pure typography. Preserved, reST reads the first nine items
+ * as a block quote and reports "Block quote ends without a blank line" at the
+ * tenth. An item that lands short of the enclosing item's text column but at
+ * or past its marker is a sibling, so all of these come out at one level.
+ *
+ * The numbering runs consecutively on purpose: docutils ends an enumerated
+ * list at the first number that does not follow its predecessor, so a fixture
+ * that skipped from 2 to 9 would report a defect of its own making.
+ *
+ *  1. The first step.
+ *  2. The second step.
+ *  3. The third step.
+ *  4. The fourth step.
+ *  5. The fifth step.
+ *  6. The sixth step.
+ *  7. The seventh step.
+ *  8. The eighth step.
+ *  9. The ninth step.
+ * 10. The tenth step, whose number is one character wider.
+ * 11. The eleventh step.
+ */
+APIARY_EXPOSE void right_aligned_enumerators();
+
+/**
+ * @brief Prose wrapped with a hanging indent.
+ *
+ * The second counterexample. A sentence whose continuation is indented and
+ * which then returns to the base indent is what reST reports as "Definition
+ * list ends without a blank line", and it is the shape a wrapped ``@note`` or
+ * ``@brief`` naturally takes. Only the indent is dropped here; the author's
+ * line breaks stay, because a paragraph's lines flow together anyway:
+ *
+ * A sentence that wraps
+ *     with a hanging indent
+ * and then continues at the base indent.
+ *
+ * A single term with a single body is character-identical to a wrap whose
+ * indented part happens to end the paragraph, and in real headers that wrap is
+ * an order of magnitude commoner, so a lone pair is deliberately flattened:
+ *
+ * Fills the result with
+ *     the sum over k of a_{ik} b_{kj}.
+ */
+APIARY_EXPOSE void hanging_indent_wrap();
+
+/**
+ * @brief A list item carrying a second paragraph.
+ *
+ * A blank line inside a list does not necessarily end it. What follows is part
+ * of the item when it clears the item's text column, and ends the list when it
+ * does not - which is the same column test the nesting decision uses.
+ *
+ * - An item whose first paragraph says one thing.
+ *
+ *   A second paragraph, still inside the item.
+ * - A second item.
+ *
+ * A paragraph that ends the list, because it starts at column 0.
+ */
+APIARY_EXPOSE void item_with_second_paragraph();
 
 /**
  * @brief An enumerated list whose items wrap.
@@ -164,9 +243,9 @@ APIARY_EXPOSE void math_next_to_list();
  * opener paired with the genuine terminator below and swallowed the comment.
  * And the spliced body arrived dedented, so the directive below had no content.
  *
- * A protected span is extracted from the raw comment BEFORE the line handling
- * that ltrims prose, which is why a body inside @rst can keep its indentation
- * while a nested bullet in ordinary prose (see nested_bullets) still cannot.
+ * A protected span is extracted from the raw comment BEFORE any line handling
+ * runs, so what is spliced here is exactly what the author wrote, untouched by
+ * the block structuring that ordinary prose goes through.
  *
  * @rst
  * .. note::
@@ -182,9 +261,10 @@ APIARY_EXPOSE void embedded_rst();
 /**
  * @brief A definition list.
  *
- * KNOWN BAD (Finding 4, same root cause as nested_bullets): a definition list
- * is nothing BUT its indentation, so the per-line ltrim collapses it into one
- * paragraph.
+ * The other half of Finding 4: a definition list is nothing BUT its
+ * indentation. What distinguishes it from the hanging-indent wrap above is
+ * that every term has a body AND that the alternation repeats - nobody wraps a
+ * sentence by indenting, dedenting and indenting again.
  *
  * term one
  *     The definition of the first term, which wraps onto a second line.
@@ -231,6 +311,24 @@ APIARY_EXPOSE APIARY_INSTANTIATE(double) T accumulate(T const *values, T scale =
  * character reST reads as a dangling start-string.
  */
 APIARY_EXPOSE void fussy_inline_spans();
+
+/**
+ * @brief An inline literal wrapped across a line that then starts with ``*``.
+ *
+ * Found in a real header, by the docs build, after block structure started
+ * setting lists off from the paragraph above them. The author wrapped a
+ * formula inside an inline literal, and the continuation happened to begin
+ * with a multiplication sign followed by a space - which is also a bullet
+ * marker. Read as a list, the literal is cut in half and reST reports an
+ * inline literal start-string without an end-string.
+ *
+ * A line inside an unterminated literal is literal text, so no list starts
+ * here and the two lines stay one paragraph:
+ *
+ * Computes ``C = c_pf * C + a_pf
+ * * permute(A)`` according to the spec.
+ */
+APIARY_EXPOSE void literal_wrapped_onto_a_star();
 
 /// An enum carries doc text too, and it is rendered as reST like any other.
 ///

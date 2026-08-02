@@ -5,6 +5,7 @@
 
 #include "DocComment.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <regex>
@@ -364,30 +365,141 @@ void append_paragraph(std::string &detail, std::string const &text) {
     detail += text;
 }
 
-// Append one prose line to the current paragraph in `detail` (wrapped source
-// lines flow together; reST collapses the single newline to a space).
-void append_detail_line(std::string &detail, std::string const &line) {
-    if (!detail.empty() && detail.back() != '\n') {
-        detail += "\n";
-    }
-    detail += line;
-}
+// ── block structure ─────────────────────────────────────────────────────
+//
+// Prose in a doc comment is indentation-bearing, because reST reads every
+// column structurally, and the two readings of an indented line cannot be
+// told apart one line at a time:
+//
+//   - a NESTED list item, a definition body, a second paragraph inside a
+//     list item - the indent is the structure, and dropping it flattens the
+//     document (Finding 4: a nested list became one level, a definition list
+//     became a paragraph);
+//   - a wrapped sentence's hanging indent, a right-aligned enumerator where
+//     ``2.`` sits one column deeper than ``10.``, a continuation aligned
+//     under ``@note`` - the indent is cosmetic, and preserving it makes reST
+//     report a block quote that ends without a blank line.
+//
+// Both readings are common, and the second is much the commoner of the two
+// in real headers, which is why the naive "keep what the author wrote" fix
+// was tried and reverted. What distinguishes them is not the line, it is the
+// block the line sits in: an indent counts as nesting when it clears the
+// enclosing item's TEXT column, and a dedent that lands between two open
+// levels is a sibling of the nearer one rather than a new level.
+//
+// So these helpers do the one thing a per-line loop cannot: they carry the
+// enclosing block structure. Indents are then re-emitted at canonical
+// columns rather than the author's, so a list is properly nested and a
+// right-aligned enumerator is normalised to one level.
 
-// A line that, after trimming, begins a reST bullet item: "- ", "+ ", or
-// "* " (but not "**bold").
-bool is_bullet_item(std::string const &text) {
-    std::string const s = ltrim(text);
-    if (s.size() >= 2 && (s[0] == '-' || s[0] == '+' || s[0] == '*') && s[1] == ' ') {
-        return true;
-    }
-    // Enumerated list item: digits followed by ``.``/``)`` and a space
-    // (``13. Foo``). Like bullets, their wrapped continuation lines must be
-    // joined or reST reports "enumerated list ends without a blank line".
+// Where the TEXT of a list item starts, measured from the (already
+// unindented) start of the item - 2 for "- ", 4 for "10. " - or 0 when `s`
+// does not begin an item at all. That column is what reST requires an item's
+// continuation and any nested list to reach, so it is the number the nesting
+// decision is made against.
+std::size_t list_marker_width(std::string const &s) {
     std::size_t i = 0;
-    while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+    if (!s.empty() && (s[0] == '-' || s[0] == '+' || s[0] == '*')) {
+        i = 1;
+    } else {
+        while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+            ++i;
+        }
+        if (i == 0 || i >= s.size() || (s[i] != '.' && s[i] != ')')) {
+            return 0;
+        }
         ++i;
     }
-    return i > 0 && i + 1 < s.size() && (s[i] == '.' || s[i] == ')') && s[i + 1] == ' ';
+    if (i >= s.size() || s[i] != ' ') {
+        return 0; // "**bold", "-flag", "1.5"
+    }
+    while (i < s.size() && s[i] == ' ') {
+        ++i;
+    }
+    return i;
+}
+
+struct SourceLine {
+    std::size_t indent = 0;
+    std::string text; // indentation stripped; empty on a blank line
+    bool        blank = true;
+};
+
+std::vector<SourceLine> to_source_lines(std::vector<std::string> const &raw) {
+    std::vector<SourceLine> out;
+    out.reserve(raw.size());
+    for (auto const &r : raw) {
+        SourceLine  sl;
+        std::size_t i = 0;
+        while (i < r.size() && (r[i] == ' ' || r[i] == '\t')) {
+            sl.indent += (r[i] == '\t') ? 4 : 1;
+            ++i;
+        }
+        sl.text  = rtrim(r.substr(i));
+        sl.blank = sl.text.empty();
+        out.push_back(std::move(sl));
+    }
+    return out;
+}
+
+// One open list item: where the author put it, and where we are putting it.
+struct ListLevel {
+    std::size_t marker_col = 0; // author's column for the marker
+    std::size_t text_col   = 0; // author's column for the item's text
+    std::size_t emit_col   = 0; // our column for the marker
+    std::size_t emit_text  = 0; // our column for this item's text (children go here)
+};
+
+// Is the paragraph starting at `first` a definition list?
+//
+// A definition list and a hanging-indent wrap are the same characters: a line
+// at the base indent, then a line deeper. Two things tell them apart, and
+// both are required here.
+//
+// A term must HAVE a body: every base-indent line is followed by a deeper
+// one. A wrapped sentence that returns to the base indent ("...continues on
+// the next line" after an indented fragment) fails this, which matters
+// because that is exactly the shape docutils rejects.
+//
+// And there must be at least TWO term/body pairs. One pair on its own is
+// character-identical to a wrap whose indented fragment happens to end the
+// paragraph - and in this corpus that wrap is roughly ten times commoner, so
+// a single pair is left to the flatten-and-join path it already takes today.
+// An alternation, on the other hand, cannot be a wrap: nobody wraps a
+// sentence by indenting, dedenting and indenting again.
+bool paragraph_is_definition_list(std::vector<SourceLine> const &lines, std::size_t first) {
+    std::size_t const base  = lines[first].indent;
+    std::size_t       terms = 0;
+    for (std::size_t i = first; i < lines.size() && !lines[i].blank; ++i) {
+        if (list_marker_width(lines[i].text) != 0) {
+            return false; // a list lives here; the list machinery owns it
+        }
+        if (lines[i].indent > base) {
+            continue;
+        }
+        if (lines[i].indent < base) {
+            return false;
+        }
+        if (i + 1 >= lines.size() || lines[i + 1].blank || lines[i + 1].indent <= base) {
+            return false;
+        }
+        ++terms;
+    }
+    return terms >= 2;
+}
+
+// The distinct indents of the paragraph starting at `first`, ascending. A
+// definition body is re-emitted at four spaces per RANK rather than at the
+// author's column, so relative depth survives and absolute columns do not.
+std::vector<std::size_t> paragraph_indents(std::vector<SourceLine> const &lines, std::size_t first) {
+    std::vector<std::size_t> cols;
+    for (std::size_t i = first; i < lines.size() && !lines[i].blank; ++i) {
+        if (std::find(cols.begin(), cols.end(), lines[i].indent) == cols.end()) {
+            cols.push_back(lines[i].indent);
+        }
+    }
+    std::sort(cols.begin(), cols.end());
+    return cols;
 }
 
 // Collapse runs of 3+ newlines down to a single blank line.
@@ -407,30 +519,166 @@ std::string collapse_blank_lines(std::string const &s) {
     return out;
 }
 
-// Join wrapped continuation lines of bullet / enumerated items. Directive
-// bodies (``@par`` / ``@note`` …) accumulate raw lines that were ltrimmed, so a
-// wrapped item ("- foo\n  bar") would dedent and break the list in reST. This
-// mirrors the bullet handling on the Detail sink.
-std::string join_bullet_continuations(std::string const &text) {
-    std::vector<std::string> out;
-    bool                     in_bullet = false;
-    std::size_t              start     = 0;
-    for (std::size_t i = 0; i <= text.size(); ++i) {
-        if (i != text.size() && text[i] != '\n') {
-            continue;
-        }
-        std::string const line = text.substr(start, i - start);
-        start                  = i + 1;
-        if (is_bullet_item(line)) {
-            in_bullet = true;
-            out.push_back(line);
-        } else if (in_bullet && !trim(line).empty()) {
-            out.back() += " " + trim(line);
+// Is `text` a whole line that is nothing but one BLOCK span's placeholder?
+// Such a line stands for a ``.. math::`` or ``.. code-block::`` that brings
+// its own blank-line separation, so it ends whatever block precedes it
+// instead of being folded into it.
+bool is_block_span(std::string const &text, std::vector<ProtectedSpan> const &spans) {
+    if (text.size() < 3 || text.front() != k_ph_open || text.back() != k_ph_close) {
+        return false;
+    }
+    std::string const digits = text.substr(1, text.size() - 2);
+    if (digits.find_first_not_of("0123456789") != std::string::npos) {
+        return false;
+    }
+    std::size_t const idx = std::stoul(digits);
+    return idx < spans.size() && spans[idx].block;
+}
+
+// How many inline-literal delimiters the line carries. An odd count leaves a
+// literal open across the line break, and what follows is literal text rather
+// than markup - which matters because an author wrapping ``C = a * B + c *
+// D`` can land a line on ``* D``, and that is not a bullet.
+std::size_t count_literal_delims(std::string const &s) {
+    std::size_t count = 0;
+    for (std::size_t i = 0; i + 1 < s.size();) {
+        if (s[i] == '`' && s[i + 1] == '`') {
+            ++count;
+            i += 2;
         } else {
-            in_bullet = false;
-            out.push_back(line);
+            ++i;
         }
     }
+    return count;
+}
+
+// Render a run of doc-comment prose lines - indentation as the author wrote
+// it - as reST, carrying the block structure described above.
+//
+// Both places that hold prose go through here: the detail sink and the body
+// of a ``@par`` / ``@note`` directive. They had two different, differently
+// incomplete versions of this before.
+std::string structure_block(std::vector<std::string> const &raw, std::vector<ProtectedSpan> const &spans) {
+    std::vector<SourceLine> const lines = to_source_lines(raw);
+
+    std::vector<std::string> out;
+    auto                     push_blank = [&out] {
+        if (!out.empty() && !out.back().empty()) {
+            out.emplace_back();
+        }
+    };
+    auto push_line = [&out](std::size_t col, std::string const &text) { out.push_back(std::string(col, ' ') + text); };
+    // A wrapped line joins the one it continues: reST would need it at the
+    // enclosing item's text column, and one logical line renders identically
+    // whatever the author's continuation indent was.
+    auto join_last = [&out](std::string const &text) {
+        if (out.empty() || out.back().empty()) {
+            out.push_back(text);
+            return;
+        }
+        if (out.back().back() != ' ') {
+            out.back() += ' ';
+        }
+        out.back() += text;
+    };
+
+    std::vector<ListLevel>   stack;
+    std::vector<std::size_t> def_cols; // indents of the definition list being emitted
+    bool                     blank_seen   = false;
+    bool                     in_para      = false;
+    bool                     in_def       = false;
+    bool                     literal_open = false;
+
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (lines[i].blank) {
+            blank_seen   = true;
+            literal_open = false; // a blank line ends the paragraph, and with it any literal
+            continue;
+        }
+        std::size_t const  indent = lines[i].indent;
+        std::string const &text   = lines[i].text;
+
+        bool const in_literal = literal_open;
+        literal_open          = (literal_open != (count_literal_delims(text) % 2 != 0));
+
+        if (is_block_span(text, spans)) {
+            stack.clear();
+            in_para      = false;
+            in_def       = false;
+            blank_seen   = false;
+            literal_open = false;
+            push_blank();
+            push_line(0, text);
+            continue;
+        }
+
+        if (std::size_t const width = in_literal ? 0 : list_marker_width(text); width != 0) {
+            // Where does this item belong? Clearing the enclosing item's text
+            // column makes it a child; landing short of that but at or past
+            // the marker makes it a sibling, which is what normalises a
+            // right-aligned enumerator; anything shallower closes levels.
+            std::size_t emit_col = 0;
+            while (!stack.empty()) {
+                if (indent >= stack.back().text_col) {
+                    emit_col = stack.back().emit_text;
+                    break;
+                }
+                if (indent >= stack.back().marker_col) {
+                    emit_col = stack.back().emit_col;
+                    stack.pop_back();
+                    break;
+                }
+                stack.pop_back();
+            }
+            // A list must be set off from a preceding paragraph. Nesting and
+            // dedenting need no blank line of their own - the columns say it.
+            if (in_para || blank_seen) {
+                push_blank();
+            }
+            in_para    = false;
+            in_def     = false;
+            blank_seen = false;
+            push_line(emit_col, text);
+            stack.push_back({indent, indent + width, emit_col, emit_col + width});
+            continue;
+        }
+
+        if (!stack.empty()) {
+            if (!blank_seen) {
+                join_last(text); // a wrapped item
+                continue;
+            }
+            if (indent >= stack.back().text_col) {
+                // A second paragraph inside the item, which stays in the item.
+                push_blank();
+                push_line(stack.back().emit_text, text);
+                blank_seen = false;
+                continue;
+            }
+            stack.clear(); // the list ends here
+        }
+
+        if (!in_para || blank_seen) {
+            push_blank();
+            in_para    = true;
+            in_def     = paragraph_is_definition_list(lines, i);
+            def_cols   = in_def ? paragraph_indents(lines, i) : std::vector<std::size_t>{};
+            blank_seen = false;
+            push_line(0, text);
+            continue;
+        }
+
+        if (in_def) {
+            auto const at = std::find(def_cols.begin(), def_cols.end(), indent);
+            push_line(4 * static_cast<std::size_t>(at - def_cols.begin()), text);
+        } else {
+            // A paragraph's lines flow together in reST, so the author's wrap
+            // is kept as written and only the indent is dropped. That is what
+            // makes a hanging indent harmless: it stops being an indent.
+            push_line(0, text);
+        }
+    }
+
     std::string res;
     for (auto const &l : out) {
         if (!res.empty()) {
@@ -438,21 +686,14 @@ std::string join_bullet_continuations(std::string const &text) {
         }
         res += l;
     }
-    return res;
+    return trim(res);
 }
 
-void flush_pending(std::string &detail, Pending &p) {
+void flush_pending(std::string &detail, Pending &p, std::vector<ProtectedSpan> const &spans) {
     if (!p.active) {
         return;
     }
-    std::string body;
-    for (auto const &l : p.body) {
-        if (!body.empty()) {
-            body += "\n";
-        }
-        body += l;
-    }
-    body = join_bullet_continuations(trim(body));
+    std::string const body = structure_block(p.body, spans);
 
     std::string block;
     if (p.directive == "par") {
@@ -515,7 +756,17 @@ DocComment parse_doc_comment(std::string const &raw) {
     Sink    sink = Sink::Detail;
     Pending pending;
     bool    saw_brief = false;
-    bool    in_bullet = false; // true while accumulating a bullet-list item in detail
+
+    // Detail prose is buffered with its indentation and rendered as one block
+    // (see structure_block), because whether an indent is structural is a
+    // question about the block, not about the line. Everything the commands
+    // below append to `doc.detail` directly has to flush this buffer first, or
+    // it would land ahead of prose the author wrote before it.
+    std::vector<std::string> detail_lines;
+    auto                     flush_detail = [&] {
+        append_paragraph(doc.detail, structure_block(detail_lines, spans));
+        detail_lines.clear();
+    };
 
     auto append_to_sink = [&](std::string const &text) {
         std::string const t = convert_inline(text);
@@ -551,21 +802,7 @@ DocComment parse_doc_comment(std::string const &raw) {
             doc.deprecated_note = trim(doc.deprecated_note + " " + t);
             break;
         case Sink::Detail:
-            if (is_bullet_item(t)) {
-                in_bullet = true;
-                append_detail_line(doc.detail, t);
-            } else if (in_bullet && !trim(t).empty()) {
-                // Continuation of the current bullet item. The line arrives
-                // ltrimmed (see the loop below), which would dedent out of the
-                // list; join onto the item with a space so it stays one logical
-                // line whatever the author's continuation indent was.
-                if (!doc.detail.empty() && doc.detail.back() != ' ' && doc.detail.back() != '\n') {
-                    doc.detail += " ";
-                }
-                doc.detail += t;
-            } else {
-                append_detail_line(doc.detail, t);
-            }
+            detail_lines.push_back(t);
             break;
         }
     };
@@ -573,19 +810,16 @@ DocComment parse_doc_comment(std::string const &raw) {
     for (std::string const &line : lines) {
         std::string const stripped = ltrim(line);
 
-        // Placeholder-only line (a protected block) → flush state, drop into detail.
+        // A blank line ends a structured field and a directive body. It is
+        // kept in the detail buffer rather than acted on here, because what a
+        // blank line means to the block below it - the list continues, the
+        // item gets a second paragraph, the paragraph ends - is structure_block's
+        // question to answer.
         if (is_blank(line)) {
-            flush_pending(doc.detail, pending);
-            in_bullet = false; // a blank line ends a bullet list
-            // A blank line ends a structured field and forces a paragraph
-            // break: ensure detail ends with exactly one blank line so the
-            // next content starts a fresh block (critical after a bullet
-            // list, which reST requires be followed by a blank line).
-            if (sink == Sink::Detail && !doc.detail.empty()) {
-                while (!doc.detail.empty() && doc.detail.back() == '\n') {
-                    doc.detail.pop_back();
-                }
-                doc.detail += "\n\n";
+            if (pending.active) {
+                flush_pending(doc.detail, pending, spans);
+            } else if (sink == Sink::Detail) {
+                detail_lines.emplace_back();
             }
             sink = Sink::Detail;
             continue;
@@ -598,9 +832,11 @@ DocComment parse_doc_comment(std::string const &raw) {
         // to the continuation path so it joins its bullet item and reaches
         // convert_inline.
         if (match_command(stripped, cmd, brace_arg, rest) && !is_inline_command(cmd)) {
-            // A new command always terminates a pending directive body.
-            flush_pending(doc.detail, pending);
-            in_bullet = false;
+            // A new command ends the prose block and any pending directive
+            // body, in that order: both append to detail, and the prose came
+            // first.
+            flush_detail();
+            flush_pending(doc.detail, pending, spans);
 
             if (cmd == "brief") {
                 sink      = Sink::Brief;
@@ -681,30 +917,23 @@ DocComment parse_doc_comment(std::string const &raw) {
             continue;
         }
 
-        // Plain continuation line.
+        // Plain prose.
         //
-        // Prose lines are ltrimmed, even though DocExtractor now preserves what
-        // the author wrote. That looks like throwing away the fix, and is not:
-        // indentation on a prose line is almost always COSMETIC - a wrapped
-        // sentence, a `:math:` role continued on the next line, an enumerated
-        // list whose numbers are right-aligned so `2.` sits one column deeper
-        // than `10.`. reST reads every one of those structurally and reports a
-        // block quote that ends without a blank line. Preserving it turned six
-        // such comments in Einsums into docs-build failures.
-        //
-        // Telling cosmetic indentation from structural (a nested bullet, a
-        // definition list) needs real block-structure parsing, which is
-        // Finding 4 and a bigger change than this. What the preserved text DOES
-        // buy is the protected spans: @rst and @code bodies are extracted from
-        // it before this loop runs, so a directive spliced through @rst keeps
-        // the indentation that makes its body a body.
+        // Prose that reaches a block goes in WITH its indentation, which
+        // DocExtractor preserved for exactly this: whether that indentation is
+        // a nesting level or a wrapped line is decided later, against the
+        // block around it. Every other sink is a field body, where a wrap is
+        // all an indent can be, so those keep taking the line ltrimmed.
         if (pending.active) {
-            pending.body.push_back(convert_inline(stripped));
+            pending.body.push_back(convert_inline(rtrim(line)));
+        } else if (sink == Sink::Detail) {
+            detail_lines.push_back(convert_inline(rtrim(line)));
         } else {
             append_to_sink(stripped);
         }
     }
-    flush_pending(doc.detail, pending);
+    flush_detail();
+    flush_pending(doc.detail, pending, spans);
 
     // No explicit @brief: promote the first detail paragraph to the brief.
     if (!saw_brief && doc.brief.empty() && !doc.detail.empty()) {

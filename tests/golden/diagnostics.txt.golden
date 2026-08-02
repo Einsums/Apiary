@@ -6,7 +6,7 @@ apiary: 0 diagnostic error(s), 2 warning(s)
 ### variadic_pack.hpp (parameter packs - expanded, so silent)
 
 ### skipped-entity, opt-in (default is ignored)
-rest_shapes.hpp:223:44: note: apiary: templated free function 'einsums::fixture::accumulate' is annotated but has no @instantiate_as directive, so nothing is bound for it. [skipped-entity]
+rest_shapes.hpp:303:44: note: apiary: templated free function 'einsums::fixture::accumulate' is annotated but has no @instantiate_as directive, so nothing is bound for it. [skipped-entity]
 
 ### names Python cannot spell (refused, not emitted)
 unbindable.hpp:9:21: error: apiary: function 'einsums::fixture::operator*' binds as 'operator*', which is not a Python identifier; nothing is bound for it. Give it an APIARY_RENAME, or APIARY_OPERATOR if it is an operator on a class. [invalid-python-name]
