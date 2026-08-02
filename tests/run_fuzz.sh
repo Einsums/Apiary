@@ -43,6 +43,11 @@ readonly CXX="$4"
 readonly PYBIND_INCLUDE="$5"
 readonly PYTHON_INCLUDE="$6"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=tests/cxx_driver.sh
+. "${SCRIPT_DIR}/cxx_driver.sh"
+apiary_set_cxx_syntax_flags "${CXX}"
+
 readonly SEED="${APIARY_FUZZ_SEED:-20260801}"
 readonly COUNT="${APIARY_FUZZ_COUNT:-25}"
 
@@ -70,7 +75,7 @@ for (( i = 0; i < COUNT; i++ )); do
     #    grammar - which happened immediately, with an over-escaped character
     #    literal. A fuzzer that cries wolf gets switched off.
     herr="${WORK}/fuzz_${i}.hdr.err"
-    if ! "${CXX}" -std=c++20 -fsyntax-only -Wno-unused -I"${INCLUDE_DIR}" -x c++ "${header}" 2> "${herr}"; then
+    if ! "${CXX}" "${APIARY_CXX_SYNTAX_FLAGS[@]}" -Wno-unused -I"${INCLUDE_DIR}" -x c++ "${header}" 2> "${herr}"; then
         echo "FAIL seed=${SEED} index=${i}: the GENERATED HEADER is not valid C++ - this is a generator bug" >&2
         sed 's/^/  /' "${herr}" >&2
         fail=1
@@ -92,7 +97,7 @@ for (( i = 0; i < COUNT; i++ )); do
 
     # 2. the binding TU must compile.
     cerr="${WORK}/fuzz_${i}.cxx.err"
-    if ! "${CXX}" -std=c++20 -fsyntax-only \
+    if ! "${CXX}" "${APIARY_CXX_SYNTAX_FLAGS[@]}" \
             -I"${PYBIND_INCLUDE}" -I"${PYTHON_INCLUDE}" -I"${WORK}" -I"${INCLUDE_DIR}" \
             "${gen}" 2> "${cerr}"; then
         report "${i}" "the generated TU does not compile" "$(head -25 "${cerr}")" "${header}"

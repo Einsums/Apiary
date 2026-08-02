@@ -75,6 +75,14 @@ fi
 "${PY}" - "${JSON}" > "${WORK}/doc.txt" <<'PY'
 import json, sys
 
+# The golden is committed LF (.gitattributes pins it), and apiary's own output
+# is LF because it writes through llvm::raw_fd_ostream in binary mode. This file
+# is neither: it is written by print(), and Python's text-mode stdout translates
+# \n to the platform separator. On Windows that makes every one of the 300-odd
+# lines differ by a trailing \r, which diff reports as a whole-file rewrite that
+# reads exactly like a conversion regression.
+sys.stdout.reconfigure(newline="\n")
+
 with open(sys.argv[1], encoding="utf-8") as fh:
     doc = json.load(fh)
 
@@ -118,10 +126,11 @@ PY
 
 # --- golden 2: the markup diagnostics -------------------------------------------------
 # Paths are absolute in the IR (they come from the compilation database), so
-# reduce them to a basename before diffing.
+# reduce them to a basename before diffing. Both separators: on Windows the path
+# arrives with backslashes and a forward-slash-only pattern matches nothing.
 set +e
 "${PY}" "${SCRIPTS_DIR}/apiary_doc_lint.py" --select malformed-rest "${JSON}" 2>/dev/null \
-    | sed -E 's|^.*/([^/]+\.hpp):|\1:|' > "${WORK}/lint.txt"
+    | sed -E 's|^.*[/\\]([^/\\]+\.hpp):|\1:|' > "${WORK}/lint.txt"
 lint_rc=${PIPESTATUS[0]}
 set -e
 

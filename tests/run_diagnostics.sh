@@ -79,7 +79,10 @@ collect_path() {
     local raw="${WORK}/collect.$$"
     "${TOOL}" --module diag_fixture "$@" "${header}" \
         -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2> "${raw}" >/dev/null || true
-    { grep -v "^apiary: module " "${raw}" || true; } | sed -E 's|^.*/([^/]+\.hpp):|\1:|'
+    # Both separators: clang spells the path with whatever the platform uses, so
+    # on Windows this line arrives as D:\a\...\qualifiers.hpp:54:48 and a
+    # forward-slash-only pattern leaves the whole absolute path in the golden.
+    { grep -v "^apiary: module " "${raw}" || true; } | sed -E 's|^.*[/\\]([^/\\]+\.hpp):|\1:|'
 }
 
 collect() {

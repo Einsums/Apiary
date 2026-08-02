@@ -40,6 +40,10 @@ readonly PYTHON_INCLUDE="$5"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly FIXTURE_DIR="${SCRIPT_DIR}/fixtures"
 
+# shellcheck source=tests/cxx_driver.sh
+. "${SCRIPT_DIR}/cxx_driver.sh"
+apiary_set_cxx_syntax_flags "${CXX}"
+
 # Fixtures whose emitted TU is KNOWN not to compile, as ``name|reason`` - the
 # same shape the golden runners use for their cases, and portable to the bash
 # 3.2 macOS ships (no associative arrays, no [[ -v ]]).
@@ -97,7 +101,7 @@ for fixture in "${FIXTURE_DIR}"/*.hpp; do
     fi
 
     err="${WORK}/${name}.err"
-    if "${CXX}" -std=c++20 -fsyntax-only \
+    if "${CXX}" "${APIARY_CXX_SYNTAX_FLAGS[@]}" \
             -I"${PYBIND_INCLUDE}" -I"${PYTHON_INCLUDE}" -I"${FIXTURE_DIR}" -I"${INCLUDE_DIR}" \
             "${gen}" 2> "${err}"; then
         compiled=1
