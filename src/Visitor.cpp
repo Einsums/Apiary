@@ -553,16 +553,58 @@ std::vector<std::string> collect_bases(clang::CXXRecordDecl const *decl, clang::
     return bases;
 }
 
+// Remove every occurrence of the namespace component ``@N@<name>`` from a USR.
+//
+// USR namespace components are spelled ``@N@`` followed by the identifier and
+// terminated by the next ``@`` or by end of string, so the boundary check is
+// what keeps ``@N@v7`` from biting a namespace actually named ``v7x``.
+void strip_namespace_component(std::string &usr, std::string const &name) {
+    std::string const needle = "@N@" + name;
+    for (std::string::size_type pos = usr.find(needle); pos != std::string::npos; pos = usr.find(needle, pos)) {
+        std::string::size_type const end = pos + needle.size();
+        if (end != usr.size() && usr[end] != '@') {
+            pos = end; // a longer name that merely starts with this one
+            continue;
+        }
+        usr.erase(pos, needle.size());
+    }
+}
+
 // Stable, language-tagged symbol identifier for a declaration: ``c++:`` + the
-// Clang USR. Empty when no USR can be generated (some implicit/anonymous
-// decls). USRs are the same identifiers DocC consumes from symbol graphs, so
-// they are precise and stable across runs and translation units.
+// Clang USR, with inline-namespace components removed. Empty when no USR can be
+// generated (some implicit/anonymous decls). USRs are the same identifiers DocC
+// consumes from symbol graphs, so they are precise and stable across runs and
+// translation units.
+//
+// A USR records every enclosing DeclContext, inline namespaces included, but an
+// inline namespace is transparent to name lookup: the entity it names is
+// reachable, and spelled, without it. Leaving it in makes the ID churn for
+// reasons that have nothing to do with the entity. Two live cases: a library
+// that versions its ABI behind ``inline namespace v7`` would renumber every
+// symbol ID on an ABI bump, and libc++'s ``std::__1`` puts a standard-library
+// implementation detail into the ID of anything declared in ``std``.
+//
+// The names come from the declaration's own enclosing chain and are then
+// removed everywhere in the USR, which also covers parameter, base and return
+// types declared in the same inline namespace. A type reached from a DIFFERENT
+// inline namespace keeps its component, since collecting inline namespaces
+// across the whole translation unit would make the result depend on traversal
+// order, and an identifier that changes with visit order is not stable.
 std::string compute_symbol_id(clang::Decl const *decl) {
     llvm::SmallString<128> buf;
     if (clang::index::generateUSRForDecl(decl, buf)) {
         return {}; // declaration should be ignored / no USR
     }
-    return "c++:" + std::string(buf.str());
+    std::string usr(buf.str());
+    for (clang::DeclContext const *dc = decl->getDeclContext(); dc != nullptr; dc = dc->getParent()) {
+        auto const *ns = llvm::dyn_cast<clang::NamespaceDecl>(dc);
+        // An anonymous namespace is spelled ``@aN``, not ``@N@<name>``, and is
+        // not something to erase in any case: it is what makes the symbol local.
+        if (ns != nullptr && ns->isInline() && !ns->getName().empty()) {
+            strip_namespace_component(usr, ns->getNameAsString());
+        }
+    }
+    return "c++:" + usr;
 }
 
 // Symbol IDs of a record's public bases, parallel to ``collect_bases``. A base

@@ -359,6 +359,16 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
         )
+        # Symbol-ID stability: a library that versions its ABI behind an inline
+        # namespace must not renumber every documentation symbol_id when it
+        # bumps that namespace. Compares the fixture against itself with the
+        # inline namespace removed, so the assertion is an equality rather than
+        # a committed list of IDs that could rot into agreeing with the bug.
+        add_test(NAME apiary_symbol_ids
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_symbol_ids.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
         # Doc-markup suite: pins the reST the Doxygen converter produces for
         # tests/fixtures/rest_shapes.hpp, both as text and as doc_lint's
         # ``malformed-rest`` diagnostics. This is the gate that turns a doc
