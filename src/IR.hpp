@@ -400,6 +400,70 @@ struct BoundMacro : BoundEntityCommon {
     std::vector<std::string> params;
 };
 
+/// @brief One argument of a variable's initializer call.
+///
+/// Carries the argument twice: as written, which is what a human reads, and
+/// as a value when the expression is a constant apiary can fold. A generator
+/// that wants the declared name or default of a descriptor-style variable
+/// reads @ref value_kind and the matching member; anything it cannot fold (a
+/// function pointer, a call, a dependent expression) leaves `value_kind`
+/// empty, which is the honest answer rather than a stringified guess.
+struct BoundInitArg {
+    /// The callee's parameter name, when the callee is a known function.
+    std::string name;
+    /// The argument as written, or empty for one left to its default.
+    std::string expr;
+    /// True when the caller wrote nothing and the declared default applies.
+    bool        is_default = false;
+
+    /// One of "string", "int", "float", "bool", or empty when the argument
+    /// is not a constant this tool can evaluate.
+    std::string value_kind;
+    std::string string_value;
+    long long   int_value   = 0;
+    double      float_value = 0.0;
+    bool        bool_value  = false;
+};
+
+/// @brief A variable's initializer, when it is a call.
+///
+/// Only the call form is recorded: it is the one that carries structured
+/// facts (a factory's arguments), where an arbitrary expression carries only
+/// text.
+struct BoundInitializer {
+    /// True when the initializer is a function or factory call.
+    bool                      is_call = false;
+    /// Qualified name of the function called.
+    std::string               callee;
+    /// Explicit or deduced template arguments of the callee.
+    std::vector<std::string>  template_args;
+    /// The call's arguments, in declaration order.
+    std::vector<BoundInitArg> args;
+};
+
+/// @brief A namespace-scope variable (docs mode only).
+///
+/// Captured so that declarative, data-driven headers - a table of option
+/// descriptors, a set of named constants - can be read by a generator without
+/// a second parser. The initializer is recorded structurally when it is a
+/// call, which is what makes a factory-declared entity legible.
+struct BoundVariable : BoundEntityCommon {
+    /// The declared type as written.
+    std::string              type;
+    /// The same type after canonicalization.
+    std::string              type_canonical;
+    /// Template arguments of the type, when it names a class template
+    /// specialization: `ConfigOption<std::string>` yields `std::string`.
+    std::vector<std::string> type_template_args;
+
+    bool is_constexpr = false;
+    bool is_inline    = false;
+    bool is_const     = false;
+
+    /// How the variable was initialized. See @ref BoundInitializer.
+    BoundInitializer initializer;
+};
+
 /// @brief The full IR for one bound module.
 struct Module {
     /// Bound classes and structs.
@@ -414,6 +478,8 @@ struct Module {
     std::vector<BoundConcept>  concepts;
     /// Bound macros (docs mode only).
     std::vector<BoundMacro>    macros;
+    /// Bound namespace-scope variables (docs mode only).
+    std::vector<BoundVariable> variables;
 };
 
 /// @brief Produce a deterministic textual dump of the IR.

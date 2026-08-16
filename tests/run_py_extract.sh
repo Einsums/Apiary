@@ -65,7 +65,7 @@ find_expr() {
 }
 
 # Schema + origin
-assert_eq "schema_version" "$(jget "${PY_FRAG}" "d['schema_version']")" "5"
+assert_eq "schema_version" "$(jget "${PY_FRAG}" "d['schema_version']")" "6"
 assert_eq "top module"     "$(jget "${PY_FRAG}" "d['module']")"          "einsums"
 
 solve="$(find_expr functions solve)"

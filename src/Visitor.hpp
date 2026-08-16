@@ -148,6 +148,11 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     /// @param decl The concept declaration being visited.
     /// @return True to continue traversal.
     bool VisitConceptDecl(clang::ConceptDecl *decl);
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    /// @brief Visit a namespace-scope variable declaration (docs mode only).
+    /// @param decl The variable declaration being visited.
+    /// @return True to continue traversal.
+    bool VisitVarDecl(clang::VarDecl *decl);
 
   private:
     clang::ASTContext        &_context;

@@ -40,7 +40,7 @@ import sys
 import tokenize
 from pathlib import Path
 
-SCHEMA_VERSION = 5  # keep in lockstep with apiary_docs_schema.SCHEMA_VERSION
+SCHEMA_VERSION = 6  # keep in lockstep with apiary_docs_schema.SCHEMA_VERSION
 
 PREFIX = "py_extract"
 

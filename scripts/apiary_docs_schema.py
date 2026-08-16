@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 # Bump in lockstep with ``k_docs_json_schema_version`` in src/DocsJson.hpp.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # The top-level documentable arrays, in document order. These are the entities
 # that carry ``origin`` and participate in merge/de-dupe/collision detection.

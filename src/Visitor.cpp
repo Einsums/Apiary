@@ -17,11 +17,14 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Lex/Lexer.h"
 #include "clang/Index/USRGeneration.h"
+#include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -1200,6 +1203,197 @@ bool Visitor::VisitTypedefNameDecl(clang::TypedefNameDecl *decl) {
         }
     }
     _module.typedefs.push_back(std::move(td));
+    return true;
+}
+
+namespace {
+
+/// Peel the implicit wrappers a variable's initializer picks up - constant
+/// evaluation, temporary materialization, an elided copy - until the
+/// expression the programmer actually wrote is on top.
+clang::Expr const *unwrap_init(clang::Expr const *e) {
+    while (e != nullptr) {
+        clang::Expr const *before = e;
+        e                         = e->IgnoreImplicit();
+        if (auto const *ce = clang::dyn_cast<clang::ConstantExpr>(e)) {
+            e = ce->getSubExpr();
+        } else if (auto const *ewc = clang::dyn_cast<clang::ExprWithCleanups>(e)) {
+            e = ewc->getSubExpr();
+        } else if (auto const *mt = clang::dyn_cast<clang::MaterializeTemporaryExpr>(e)) {
+            e = mt->getSubExpr();
+        } else if (auto const *cc = clang::dyn_cast<clang::CXXConstructExpr>(e); cc != nullptr && cc->getNumArgs() == 1) {
+            e = cc->getArg(0);
+        }
+        if (e == before) {
+            break;
+        }
+    }
+    return e;
+}
+
+/// The first string literal anywhere under an expression. A string argument
+/// reaches a `std::string_view` parameter through a constructor call, so the
+/// literal is never the top node; depth is bounded because a literal that far
+/// down is not the argument's value in any useful sense.
+clang::StringLiteral const *find_string_literal(clang::Stmt const *s, int depth = 0) {
+    if (s == nullptr || depth > 6) {
+        return nullptr;
+    }
+    if (auto const *sl = clang::dyn_cast<clang::StringLiteral>(s)) {
+        return sl;
+    }
+    for (clang::Stmt const *child : s->children()) {
+        if (auto const *found = find_string_literal(child, depth + 1)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+/// Fold one call argument to a value, when it is constant. Leaves
+/// `value_kind` empty otherwise, which is how a caller learns that the
+/// argument cannot be written down (a function pointer, say).
+void evaluate_init_arg(clang::Expr const *arg, clang::ASTContext &ctx, BoundInitArg &out) {
+    if (arg == nullptr) {
+        return;
+    }
+    clang::Expr const *e = arg->IgnoreParenImpCasts();
+
+    if (e->getType()->isBooleanType()) {
+        bool folded = false;
+        if (e->EvaluateAsBooleanCondition(folded, ctx)) {
+            out.value_kind = "bool";
+            out.bool_value = folded;
+            return;
+        }
+    }
+    if (auto const *sl = find_string_literal(e)) {
+        out.value_kind   = "string";
+        out.string_value = sl->getString().str();
+        return;
+    }
+    clang::Expr::EvalResult result;
+    if (e->EvaluateAsRValue(result, ctx) && !result.HasSideEffects) {
+        if (result.Val.isInt()) {
+            out.value_kind = "int";
+            out.int_value  = result.Val.getInt().getSExtValue();
+            return;
+        }
+        if (result.Val.isFloat()) {
+            // convertToDouble() asserts on anything that is not already IEEE
+            // double, so a long double literal has to be narrowed first.
+            llvm::APFloat value = result.Val.getFloat();
+            bool          lost  = false;
+            value.convert(llvm::APFloat::IEEEdouble(), llvm::APFloat::rmNearestTiesToEven, &lost);
+            out.value_kind  = "float";
+            out.float_value = value.convertToDouble();
+            return;
+        }
+    }
+}
+
+/// Source text for an expression, as the programmer wrote it.
+std::string source_text_of(clang::Expr const *e, clang::ASTContext const &ctx) {
+    if (e == nullptr) {
+        return {};
+    }
+    clang::SourceManager const &sm    = ctx.getSourceManager();
+    auto const                  range = clang::CharSourceRange::getTokenRange(e->getSourceRange());
+    bool                        invalid = false;
+    llvm::StringRef const       text  = clang::Lexer::getSourceText(range, sm, ctx.getLangOpts(), &invalid);
+    return invalid ? std::string{} : text.str();
+}
+
+/// Render one template argument for the IR: a type through the type
+/// translator, anything else through the AST printer.
+std::string template_arg_text(clang::TemplateArgument const &arg, clang::ASTContext const &ctx) {
+    if (arg.getKind() == clang::TemplateArgument::Type) {
+        return translate_type(arg.getAsType(), ctx);
+    }
+    std::string              buffer;
+    llvm::raw_string_ostream os(buffer);
+    arg.print(ctx.getPrintingPolicy(), os, /*IncludeType=*/false);
+    return buffer;
+}
+
+} // namespace
+
+bool Visitor::VisitVarDecl(clang::VarDecl *decl) {
+    // Namespace-scope variables are captured only in docs mode: a declarative
+    // header (a table of option descriptors, a set of named constants) carries
+    // facts a generator wants, and this is how they leave the AST without a
+    // second parser having to understand C++.
+    if (!_docs_mode || decl->isImplicit()) {
+        return true;
+    }
+    // Parameters and locals are VarDecls too; only file-scope ones are API.
+    if (!decl->getDeclContext()->isFileContext() || clang::isa<clang::ParmVarDecl>(decl)) {
+        return true;
+    }
+    // An `extern` re-declaration carries neither the initializer nor, usually,
+    // the doc comment; the definition is the one to record.
+    if (decl->isThisDeclarationADefinition() == clang::VarDecl::DeclarationOnly) {
+        return true;
+    }
+    if (!decl_in_module_headers(decl)) {
+        return true;
+    }
+    std::string const qn = decl->getQualifiedNameAsString();
+    if (qn.find("detail::") != std::string::npos || qn.find("impl::") != std::string::npos ||
+        qn.find("(anonymous namespace)") != std::string::npos) {
+        return true;
+    }
+    // A documented variable is one someone meant to publish. Checked here
+    // rather than through passes_docs_filter so that an ordinary undocumented
+    // constant does not join the --report-undocumented punch list, which is
+    // about the entity kinds that reference resolution needs.
+    std::string const doc = extract_doc(decl, _context);
+    if (doc.empty() || doc.find("@internal") != std::string::npos || doc.find("\\internal") != std::string::npos) {
+        return true;
+    }
+
+    BoundVariable var;
+    fill_common(var, decl);
+    var.type           = translate_type(decl->getType(), _context);
+    var.type_canonical = translate_type(decl->getType().getCanonicalType(), _context);
+    var.is_constexpr   = decl->isConstexpr();
+    var.is_inline      = decl->isInline();
+    var.is_const       = decl->getType().isConstQualified();
+
+    if (auto const *spec = clang::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(decl->getType()->getAsCXXRecordDecl())) {
+        for (auto const &arg : spec->getTemplateArgs().asArray()) {
+            var.type_template_args.push_back(template_arg_text(arg, _context));
+        }
+    }
+
+    if (auto const *call = clang::dyn_cast_or_null<clang::CallExpr>(unwrap_init(decl->getInit()))) {
+        var.initializer.is_call = true;
+        clang::FunctionDecl const *callee = call->getDirectCallee();
+        if (callee != nullptr) {
+            var.initializer.callee = callee->getQualifiedNameAsString();
+            if (auto const *targs = callee->getTemplateSpecializationArgs()) {
+                for (auto const &arg : targs->asArray()) {
+                    var.initializer.template_args.push_back(template_arg_text(arg, _context));
+                }
+            }
+        }
+        for (unsigned i = 0; i < call->getNumArgs(); ++i) {
+            clang::Expr const *arg = call->getArg(i);
+            BoundInitArg       out;
+            if (callee != nullptr && i < callee->getNumParams()) {
+                out.name = callee->getParamDecl(i)->getNameAsString();
+            }
+            if (clang::isa<clang::CXXDefaultArgExpr>(arg->IgnoreParens())) {
+                out.is_default = true;
+            } else {
+                out.expr = source_text_of(arg, _context);
+            }
+            evaluate_init_arg(arg, _context, out);
+            var.initializer.args.push_back(std::move(out));
+        }
+    }
+
+    _module.variables.push_back(std::move(var));
     return true;
 }
 

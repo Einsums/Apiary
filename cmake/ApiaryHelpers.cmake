@@ -273,8 +273,9 @@ endfunction()
 #       EXTRA_FLAGS     <flag...>            # extra -I/-D/... after --
 #       EXTRA_DEPENDS   <file...>            # extra DEPENDS (e.g. Defines.hpp)
 #       BINDING                              # emit the pybind TU (+ stub)
-#       DOCS_JSON                            # emit the docs-json
-#       OUT_BINDING <v>  OUT_STUB <v>  OUT_DOCS_JSON <v>
+#       DOCS_JSON                            # emit the docs-json (Python surface)
+#       CPP_DOCS_JSON                        # emit the docs-json (C++ surface)
+#       OUT_BINDING <v>  OUT_STUB <v>  OUT_DOCS_JSON <v>  OUT_CPP_DOCS_JSON <v>
 #   )
 #
 # MAX_DEFS_PER_TU > 0 splits the generated binding into several smaller TUs
@@ -294,8 +295,8 @@ function(apiary_add_bindings)
     # check. Only for a module whose annotations are genuinely all behind a
     # disabled configuration - reach for it after confirming that, not to
     # silence a failure.
-    cmake_parse_arguments(_A "BINDING;DOCS_JSON;ALLOW_EMPTY"
-        "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;MAX_DEFS_PER_TU;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON"
+    cmake_parse_arguments(_A "BINDING;DOCS_JSON;CPP_DOCS_JSON;ALLOW_EMPTY"
+        "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;MAX_DEFS_PER_TU;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON;OUT_CPP_DOCS_JSON"
         "HEADERS;SOURCE_INCLUDES;DEPENDS_TARGETS;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
 
     if(NOT _A_HEADERS)
@@ -468,6 +469,37 @@ function(apiary_add_bindings)
         )
         if(_A_OUT_DOCS_JSON)
             set(${_A_OUT_DOCS_JSON} "${_docs}" PARENT_SCOPE)
+        endif()
+    endif()
+
+    # The C++ documentation frontend over the same headers. Where DOCS_JSON
+    # describes the *Python* surface a binding exposes, this describes the C++
+    # one: every documented entity in the headers, annotated or not, including
+    # namespace-scope variables and their initializers. Useful on its own for a
+    # generator that reads a declarative header.
+    if(_A_CPP_DOCS_JSON)
+        set(_cpp_docs "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}.cppdocs.json")
+        set(_apiary_cpp_docs_argv
+            --emit-cpp-docs-json
+            --module ${_A_MODULE}
+            --output ${_cpp_docs}
+            ${_source_includes}
+            ${_A_HEADERS}
+            -- ${_compile_flags}
+        )
+        add_custom_command(
+            OUTPUT ${_cpp_docs}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_A_OUTPUT_DIR}"
+            # See the binding command above on the stderr filter.
+            COMMAND ${CMAKE_COMMAND}
+                    "-DAPIARY_COMMAND=$<TARGET_FILE:apiary::apiary>;${_apiary_cpp_docs_argv}"
+                    -P "${APIARY_HELPERS_DIR}/ApiaryRun.cmake"
+            DEPENDS ${_A_HEADERS} apiary::apiary ${_A_EXTRA_DEPENDS}
+            VERBATIM
+            COMMENT "apiary: emitting C++ docs JSON for ${_A_OUTPUT_NAME}"
+        )
+        if(_A_OUT_CPP_DOCS_JSON)
+            set(${_A_OUT_CPP_DOCS_JSON} "${_cpp_docs}" PARENT_SCOPE)
         endif()
     endif()
 endfunction()

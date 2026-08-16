@@ -166,6 +166,7 @@ std::unordered_set<std::string> g_seen_enums;
 std::unordered_set<std::string> g_seen_typedefs;
 std::unordered_set<std::string> g_seen_concepts;
 std::unordered_set<std::string> g_seen_macros;
+std::unordered_set<std::string> g_seen_variables;
 int                             g_error_count        = 0;
 int                             g_undocumented_count = 0;
 int                             g_annotated_seen         = 0;
@@ -231,6 +232,11 @@ class IrConsumer : public ASTConsumer {
         for (auto &c : local.concepts) {
             if (g_seen_concepts.insert(c.qualified_name).second) {
                 g_module.concepts.push_back(std::move(c));
+            }
+        }
+        for (auto &v : local.variables) {
+            if (g_seen_variables.insert(v.qualified_name).second) {
+                g_module.variables.push_back(std::move(v));
             }
         }
         // Documented macros are not AST decls — scan the main header's raw

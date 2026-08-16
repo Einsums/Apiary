@@ -51,10 +51,18 @@ namespace apiary {
 /// per-entity `symbol_id` (the Clang USR for C++; `py:<dotted>` for Python) and
 /// a top-level `edges` array (memberOf / inheritsFrom / overrides) — the docs
 /// graph that reference resolution keys off. v5 adds a top-level `variables`
-/// array (module-level data — `py:data`); the C++ frontend emits it empty (it
-/// does not capture namespace-scope variables), the static Python frontend
-/// fills it from module-level constants.
-inline constexpr int k_docs_json_schema_version = 5;
+/// array (module-level data — `py:data`); the C++ frontend emitted it empty,
+/// the static Python frontend fills it from module-level constants. v6 has the
+/// C++ frontend fill `variables` too, from documented namespace-scope variables
+/// in docs mode, and gives a C++ variable entry `type`, `type_canonical`,
+/// `type_template_args`, `is_constexpr`/`is_inline`/`is_const`, and an
+/// `initializer` object — `{kind: "call", callee, template_args, args}` with
+/// each argument carrying its source text, its parameter name, and its folded
+/// constant value when it has one. That makes a declarative header (a table of
+/// option descriptors, say) readable by a generator without a second C++
+/// parser. Additive: a Python-frontend variable entry is unchanged, and a
+/// renderer that only reads `name`/`doc` sees no difference.
+inline constexpr int k_docs_json_schema_version = 6;
 
 /// @brief Serialize `module_` to a pretty-printed JSON string per the schema above.
 ///

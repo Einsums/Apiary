@@ -462,6 +462,71 @@ Value json_function(BoundFunction const &f) {
     };
 }
 
+// One argument of a variable's initializer call. ``value`` is the folded
+// constant, typed as JSON, and null when the expression is not one apiary can
+// evaluate — a function pointer, a nested call. ``value_kind`` names which,
+// so a consumer never has to guess whether a JSON null means "absent" or
+// "not a literal".
+Value json_init_arg(BoundInitArg const &a) {
+    Value value = Value(nullptr);
+    if (a.value_kind == "string") {
+        value = Value(a.string_value);
+    } else if (a.value_kind == "int") {
+        value = Value(a.int_value);
+    } else if (a.value_kind == "float") {
+        value = Value(a.float_value);
+    } else if (a.value_kind == "bool") {
+        value = Value(a.bool_value);
+    }
+    return Object{
+        {"name", a.name},
+        {"expr", a.expr},
+        {"is_default", a.is_default},
+        {"value_kind", a.value_kind.empty() ? Value(nullptr) : Value(a.value_kind)},
+        {"value", std::move(value)},
+    };
+}
+
+Value json_initializer(BoundInitializer const &init) {
+    if (!init.is_call) {
+        return Value(nullptr);
+    }
+    Array args;
+    for (auto const &a : init.args) {
+        args.push_back(json_init_arg(a));
+    }
+    return Object{
+        {"kind", "call"},
+        {"callee", init.callee},
+        {"template_args", json_string_list(init.template_args)},
+        {"args", std::move(args)},
+    };
+}
+
+Value json_variable(BoundVariable const &v) {
+    return Object{
+        {"name", v.name},
+        {"origin", "cpp"},
+        {"symbol_id", v.symbol_id},
+        {"py_name", resolved_py_name(v)},
+        {"hidden", is_hidden(v)},
+        {"qualified_name", v.qualified_name},
+        {"doc", v.doc},
+        {"doc_structured", json_doc_structured(v.doc)},
+        {"availability", json_availability(v.doc)},
+        {"location", json_location(v.location)},
+        {"submodule", opt_string(v.submodule)},
+        {"type", v.type},
+        {"type_canonical", v.type_canonical},
+        {"type_template_args", json_string_list(v.type_template_args)},
+        {"is_constexpr", v.is_constexpr},
+        {"is_inline", v.is_inline},
+        {"is_const", v.is_const},
+        {"initializer", json_initializer(v.initializer)},
+        {"directives", json_directives(v.directives)},
+    };
+}
+
 Value json_edge(std::string const &source, std::string const &target, char const *kind) {
     return Object{
         {"source", source},
@@ -590,6 +655,11 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
         });
     }
 
+    Array variables;
+    for (auto const &v : module_.variables) {
+        variables.push_back(json_variable(v));
+    }
+
     Value root = Object{
         {"schema_version", k_docs_json_schema_version},
         {"module", module_name},
@@ -599,9 +669,9 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
         {"typedefs", std::move(typedefs)},
         {"concepts", std::move(concepts)},
         {"macros", std::move(macros)},
-        // Module-level data (py:data). The C++ frontend does not capture
-        // namespace-scope variables; the static Python frontend populates this.
-        {"variables", Array{}},
+        // Module-level data (py:data from the static Python frontend,
+        // documented namespace-scope variables from the C++ one).
+        {"variables", std::move(variables)},
         {"edges", build_edges(module_)},
     };
 
