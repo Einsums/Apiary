@@ -116,6 +116,16 @@ llvm::cl::opt<int> g_max_defs_per_tu("max-defs-per-tu",
                                                     "exhausting compiler memory. 0 (default) emits a single TU."),
                                      llvm::cl::cat(g_tool_category), llvm::cl::init(0));
 
+llvm::cl::opt<int> g_num_tu("num-tu",
+                            llvm::cl::desc("When > 1, split the generated binding TU into exactly N smaller TUs, "
+                                           "balanced by binding-statement count. Same output shape as "
+                                           "--max-defs-per-tu ('<stem>.shard<k><ext>' plus a dispatcher in shard 0), "
+                                           "but the file names follow from N alone, so a build system can declare "
+                                           "them without running apiary first. Shards past the last unit are emitted "
+                                           "empty to keep the count exact. Mutually exclusive with "
+                                           "--max-defs-per-tu. 0 (default) emits a single TU."),
+                            llvm::cl::cat(g_tool_category), llvm::cl::init(0));
+
 llvm::cl::opt<bool> g_report_defs("report-defs",
                                   llvm::cl::desc("Print to stdout the number of binding statements (.def/.value/...) "
                                                  "this module would emit, the emit-unit count, and the largest single "
@@ -426,28 +436,36 @@ int main(int argc, char const **argv) {
     };
     std::vector<PendingWrite> pending;
 
-    // Sharding: when --max-defs-per-tu is set, the binding body is split
-    // across several smaller TUs (named off --output) so a heavily
+    // Sharding: when --max-defs-per-tu or --num-tu is set, the binding body
+    // is split across several smaller TUs (named off --output) so a heavily
     // instantiated module doesn't produce one TU large enough to exhaust the
-    // compiler's memory. --plan just reports the shard filenames (for
-    // configure-time wiring) and exits.
-    if (g_max_defs_per_tu > 0 || g_plan) {
-        if (g_output_path.empty()) {
-            llvm::errs() << "apiary: --max-defs-per-tu/--plan require --output (shard filenames are derived from it).\n";
+    // compiler's memory. The two differ in who picks the shard count, and so
+    // in whether the build system can name the outputs on its own: under
+    // --num-tu it can, under --max-defs-per-tu it needs --plan, which reports
+    // the shard filenames and exits.
+    apiary::ShardSpec const shard_spec{g_max_defs_per_tu, g_num_tu};
+    if (shard_spec.sharded() || g_plan) {
+        if (g_max_defs_per_tu > 0 && g_num_tu > 0) {
+            llvm::errs() << "apiary: --max-defs-per-tu and --num-tu are mutually exclusive - one sizes the shards and "
+                            "lets the count follow, the other fixes the count.\n";
             return 1;
         }
-        if (g_plan && g_max_defs_per_tu <= 0) {
-            llvm::errs() << "apiary: --plan requires --max-defs-per-tu > 0.\n";
+        if (g_output_path.empty()) {
+            llvm::errs() << "apiary: --max-defs-per-tu/--num-tu/--plan require --output (shard filenames are derived from it).\n";
+            return 1;
+        }
+        if (g_plan && !shard_spec.sharded()) {
+            llvm::errs() << "apiary: --plan requires --max-defs-per-tu > 0 or --num-tu > 1.\n";
             return 1;
         }
         if (g_plan) {
-            for (std::string const &p : apiary::plan_shards(g_module, opts, g_max_defs_per_tu, g_output_path)) {
+            for (std::string const &p : apiary::plan_shards(g_module, opts, shard_spec, g_output_path)) {
                 llvm::outs() << p << "\n";
             }
             apiary::diag::print_summary();
             return (g_error_count + apiary::diag::errors()) > 0 ? 1 : (rc != 0 ? rc : 0);
         }
-        for (apiary::ShardFile const &shard : apiary::emit_shards(g_module, opts, g_max_defs_per_tu, g_output_path)) {
+        for (apiary::ShardFile const &shard : apiary::emit_shards(g_module, opts, shard_spec, g_output_path)) {
             pending.push_back({shard.path, shard.content});
         }
     } else {

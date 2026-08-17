@@ -63,10 +63,32 @@ struct ShardFile {
     std::string content;
 };
 
+/// @brief How a module's bindings are cut into shards.
+///
+/// The two modes differ in who decides the shard count, which is what decides
+/// whether a build system can name the outputs without running apiary.
+///
+/// `max_defs` sizes each shard against a statement budget and lets the count
+/// follow the module's content, so the filenames are only knowable by running
+/// the tool (see `plan_shards()`). `num_tu` fixes the count instead and
+/// balances the units across it, making the filenames derivable from N alone.
+/// Use `num_tu` when apiary is built as part of the same build and so cannot
+/// be run at configure time.
+struct ShardSpec {
+    /// Approximate per-TU budget in binding statements. Shard count follows.
+    int max_defs = 0;
+    /// Exact number of TUs to emit. Shards past the last unit are emitted
+    /// empty rather than dropped, so the file list stays exactly this long.
+    int num_tu = 0;
+
+    /// @brief Whether either mode asks for a split.
+    [[nodiscard]] bool sharded() const { return max_defs > 0 || num_tu > 0; }
+};
+
 /// @brief Emit `module_`'s bindings split across several smaller TUs.
 ///
-/// The body is cut into contiguous, order-preserving shards so that no single
-/// translation unit exceeds roughly `max_defs` binding statements. Shard 0
+/// The body is cut into contiguous, order-preserving shards, sized either
+/// against `spec.max_defs` or into exactly `spec.num_tu` of them. Shard 0
 /// also carries a dispatcher (the register function, or the module macro in
 /// standalone form) that calls every `<base>__shard<k>` in order, so the
 /// ordering invariants of the single-TU path are preserved and consumers keep
@@ -77,19 +99,20 @@ struct ShardFile {
 ///
 /// @param module_ The IR module to emit bindings for.
 /// @param opts Emit configuration (output shape, target, formatting path, includes).
-/// @param max_defs Approximate per-TU budget in binding statements (> 0).
+/// @param spec Which way to cut the body, and how finely.
 /// @param base_output_path The would-be single-TU path; shard names are
 ///   derived from it as `<stem>.shard<k><ext>`.
 /// @return One entry per shard, each with its destination path and contents.
-std::vector<ShardFile> emit_shards(Module const &module_, EmitOptions const &opts, int max_defs,
+std::vector<ShardFile> emit_shards(Module const &module_, EmitOptions const &opts, ShardSpec const &spec,
                                    std::string const &base_output_path);
 
 /// @brief Compute the shard output paths without emitting their contents.
 ///
 /// Runs the same partition as `emit_shards()` so a build system can learn the
 /// generated filenames at configure time. Returns `{ base_output_path }` when
-/// the module fits in a single TU.
-std::vector<std::string> plan_shards(Module const &module_, EmitOptions const &opts, int max_defs,
+/// the module fits in a single TU. Only `ShardSpec::max_defs` needs this:
+/// under `ShardSpec::num_tu` the paths follow from N without parsing anything.
+std::vector<std::string> plan_shards(Module const &module_, EmitOptions const &opts, ShardSpec const &spec,
                                      std::string const &base_output_path);
 
 /// @brief Per-module tally of binding statements, for sizing

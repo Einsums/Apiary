@@ -270,6 +270,7 @@ endfunction()
 #       OUTPUT_NAME     <stem>               # base filename for outputs
 #       CXX_STANDARD    <n>                  # default 17
 #       MAX_DEFS_PER_TU <n>                  # split binding into shard TUs of ~n .def's
+#       NUM_TU <n>                           # split binding into exactly n shard TUs
 #       EXTRA_FLAGS     <flag...>            # extra -I/-D/... after --
 #       EXTRA_DEPENDS   <file...>            # extra DEPENDS (e.g. Defines.hpp)
 #       BINDING                              # emit the pybind TU (+ stub)
@@ -278,14 +279,25 @@ endfunction()
 #       OUT_BINDING <v>  OUT_STUB <v>  OUT_DOCS_JSON <v>  OUT_CPP_DOCS_JSON <v>
 #   )
 #
-# MAX_DEFS_PER_TU > 0 splits the generated binding into several smaller TUs
-# (``<name>_pybind.shard<k>.cpp``) so a heavily instantiated module doesn't
-# compile as one TU large enough to exhaust memory. The shard count is
-# discovered at configure time by running ``apiary --plan`` (so the OUT_BINDING
-# list and the custom-command OUTPUTs are exact). This needs the apiary binary
-# to already exist at configure time — true under find_package(Apiary); in
-# add_subdirectory mode the tool isn't built yet, so sharding is skipped (with
-# a status message) and a single TU is emitted.
+# MAX_DEFS_PER_TU and NUM_TU both split the generated binding into several
+# smaller TUs (``<name>_pybind.shard<k>.cpp``) so a heavily instantiated module
+# doesn't compile as one TU large enough to exhaust memory. They differ in who
+# picks the shard count, which decides whether the tool has to run before the
+# OUTPUTs can be named:
+#
+#   MAX_DEFS_PER_TU <n>  sizes each shard at ~n binding statements and lets the
+#       count follow the headers. The count is discovered at configure time by
+#       running ``apiary --plan``, so the binary must ALREADY EXIST then — true
+#       under find_package(Apiary); in add_subdirectory mode the tool isn't
+#       built yet, so sharding is skipped (with a status message) and a single
+#       TU is emitted.
+#   NUM_TU <n>  fixes the count at n and balances the units across it. The
+#       filenames follow from n alone, so nothing runs at configure time and
+#       this works in add_subdirectory mode. n <= 1 means a single TU.
+#
+# Set at most one. NUM_TU is the one to reach for when apiary is built as part
+# of the same build; MAX_DEFS_PER_TU auto-sizes but costs a configure-time run
+# of the tool over every header.
 #
 # Computes flags = APIARY_SYSTEM_FLAGS + usage-requirements(DEPENDS_TARGETS) +
 # EXTRA_FLAGS + -std, and sets the requested OUT_* variables in the caller's
@@ -296,7 +308,7 @@ function(apiary_add_bindings)
     # disabled configuration - reach for it after confirming that, not to
     # silence a failure.
     cmake_parse_arguments(_A "BINDING;DOCS_JSON;CPP_DOCS_JSON;ALLOW_EMPTY"
-        "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;MAX_DEFS_PER_TU;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON;OUT_CPP_DOCS_JSON"
+        "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;MAX_DEFS_PER_TU;NUM_TU;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON;OUT_CPP_DOCS_JSON"
         "HEADERS;SOURCE_INCLUDES;DEPENDS_TARGETS;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
 
     if(NOT _A_HEADERS)
@@ -358,10 +370,38 @@ function(apiary_add_bindings)
         set(_binding "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}_pybind.cpp")
         set(_stub    "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}.pyi")
 
-        # Default: a single TU. When MAX_DEFS_PER_TU is set we ask apiary to
-        # plan the split now so the OUTPUTs (and OUT_BINDING) name every shard.
+        # Default: a single TU. Either split mode replaces _binding_outputs
+        # with the full shard list, which is what the OUTPUTs and OUT_BINDING
+        # have to name.
         set(_binding_outputs "${_binding}")
-        set(_max_defs_flag "")
+        set(_shard_flags "")
+
+        if(_A_MAX_DEFS_PER_TU AND _A_MAX_DEFS_PER_TU GREATER 0
+           AND _A_NUM_TU AND _A_NUM_TU GREATER 0)
+            message(FATAL_ERROR
+                "apiary_add_bindings(${_A_OUTPUT_NAME}): MAX_DEFS_PER_TU and NUM_TU are mutually "
+                "exclusive - one sizes the shards and lets the count follow, the other fixes the count.")
+        endif()
+
+        # NUM_TU: the shard names are ``<stem>.shard<k><ext>`` for k in
+        # [0, n), which is derivable here without running anything - the
+        # reason this mode exists.
+        if(_A_NUM_TU AND _A_NUM_TU GREATER 1)
+            # NAME_WLE / LAST_EXT, not NAME_WE / EXT: apiary splits the base
+            # name at its LAST dot, so a dotted stem has to round-trip the
+            # same way here or the declared OUTPUTs miss the real files.
+            get_filename_component(_shard_dir "${_binding}" DIRECTORY)
+            get_filename_component(_shard_stem "${_binding}" NAME_WLE)
+            get_filename_component(_shard_ext "${_binding}" LAST_EXT)
+            set(_binding_outputs "")
+            math(EXPR _shard_last "${_A_NUM_TU} - 1")
+            foreach(_k RANGE ${_shard_last})
+                list(APPEND _binding_outputs "${_shard_dir}/${_shard_stem}.shard${_k}${_shard_ext}")
+            endforeach()
+            list(APPEND _shard_flags --num-tu ${_A_NUM_TU})
+            message(STATUS "apiary: ${_A_OUTPUT_NAME} -> ${_A_NUM_TU} shard TU(s) (NUM_TU)")
+        endif()
+
         if(_A_MAX_DEFS_PER_TU AND _A_MAX_DEFS_PER_TU GREATER 0)
             # Resolve a runnable apiary binary. An ALIASED_TARGET means the
             # in-tree executable, which isn't built yet at configure time — we
@@ -391,7 +431,7 @@ function(apiary_add_bindings)
                 string(STRIP "${_plan_out}" _plan_out)
                 if(_plan_rc EQUAL 0 AND _plan_out)
                     string(REPLACE "\n" ";" _binding_outputs "${_plan_out}")
-                    set(_max_defs_flag --max-defs-per-tu ${_A_MAX_DEFS_PER_TU})
+                    set(_shard_flags --max-defs-per-tu ${_A_MAX_DEFS_PER_TU})
                     list(LENGTH _binding_outputs _nshards)
                     message(STATUS "apiary: ${_A_OUTPUT_NAME} -> ${_nshards} shard TU(s) "
                         "(MAX_DEFS_PER_TU=${_A_MAX_DEFS_PER_TU})")
@@ -407,7 +447,7 @@ function(apiary_add_bindings)
         endif()
 
         # Built as a list first: unquoted expansion drops empty variables
-        # (_max_defs_flag and _source_includes are often unset), which keeps
+        # (_shard_flags and _source_includes are often unset), which keeps
         # empty arguments out of the command.
         set(_allow_empty_flag "")
         if(_A_ALLOW_EMPTY)
@@ -415,7 +455,7 @@ function(apiary_add_bindings)
         endif()
 
         set(_apiary_argv
-            ${_max_defs_flag}
+            ${_shard_flags}
             ${_allow_empty_flag}
             --register-function ${_A_REGISTER_FUNCTION}
             --output ${_binding}

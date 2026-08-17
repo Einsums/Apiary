@@ -2002,6 +2002,97 @@ std::vector<std::vector<std::size_t>> partition_units(std::vector<BodyUnit> cons
     return shards;
 }
 
+// Total cost of one shard's units.
+int shard_cost(std::vector<BodyUnit> const &units, std::vector<std::size_t> const &shard) {
+    int cost = 0;
+    for (std::size_t const idx : shard) {
+        cost += units[idx].cost;
+    }
+    return cost;
+}
+
+// Contiguous partition into EXACTLY ``n`` shards, balanced by cost.
+//
+// The budget partition above lets the shard count follow the module's
+// content; here the count is the input, which is what lets a build system
+// name the outputs without running the tool first. Binary-searches the
+// smallest per-shard ceiling the greedy walk can satisfy in n shards or
+// fewer, then splits the heaviest shard until there are exactly n. When
+// there are fewer units than shards the leftovers stay empty rather than
+// changing the count — an empty register function is nearly free to compile,
+// and a file list that shrinks under the build system's feet is not.
+std::vector<std::vector<std::size_t>> partition_units_fixed(std::vector<BodyUnit> const &units, int n) {
+    if (n <= 1) {
+        std::vector<std::size_t> all(units.size());
+        for (std::size_t i = 0; i < units.size(); ++i) {
+            all[i] = i;
+        }
+        return {std::move(all)};
+    }
+
+    // A shard can never hold less than the largest single unit, and never
+    // needs to hold more than everything, so the answer lives in [lo, hi].
+    int lo = 0;
+    int hi = 0;
+    for (BodyUnit const &u : units) {
+        lo = std::max(lo, u.cost);
+        hi += u.cost;
+    }
+    while (lo < hi) {
+        int const mid = lo + (hi - lo) / 2;
+        if (static_cast<int>(partition_units(units, mid).size()) <= n) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+
+    std::vector<std::vector<std::size_t>> shards = partition_units(units, lo);
+
+    // The ceiling that first fits in n shards often fits in fewer. Keep
+    // splitting the heaviest divisible shard so the requested TUs are all
+    // used, and stay contiguous while doing it (a split of one contiguous
+    // run is two contiguous runs, so emission order is untouched).
+    while (static_cast<int>(shards.size()) < n) {
+        std::size_t heaviest  = shards.size();
+        int         best_cost = -1;
+        for (std::size_t i = 0; i < shards.size(); ++i) {
+            if (shards[i].size() < 2) {
+                continue;
+            }
+            int const cost = shard_cost(units, shards[i]);
+            if (cost > best_cost) {
+                best_cost = cost;
+                heaviest  = i;
+            }
+        }
+        if (heaviest == shards.size()) {
+            break; // every shard is a single unit; the rest stay empty
+        }
+
+        // Cut where the running cost first reaches half the shard's.
+        std::vector<std::size_t> &group = shards[heaviest];
+        int const                 half  = best_cost / 2;
+        int                       run   = 0;
+        std::size_t               cut   = 1;
+        for (std::size_t j = 0; j + 1 < group.size(); ++j) {
+            run += units[group[j]].cost;
+            cut = j + 1;
+            if (run >= half) {
+                break;
+            }
+        }
+        std::vector<std::size_t> tail(group.begin() + static_cast<std::ptrdiff_t>(cut), group.end());
+        group.erase(group.begin() + static_cast<std::ptrdiff_t>(cut), group.end());
+        shards.insert(shards.begin() + static_cast<std::ptrdiff_t>(heaviest) + 1, std::move(tail));
+    }
+    while (static_cast<int>(shards.size()) < n) {
+        shards.emplace_back();
+    }
+
+    return shards;
+}
+
 // Insert ``.shard<k>`` before the extension of ``base`` ("foo_pybind.cpp" ->
 // "foo_pybind.shard2.cpp"). A dot is only treated as an extension when it
 // follows the last path separator.
@@ -2029,18 +2120,22 @@ std::string shard_base_fn(EmitOptions const &opts) {
 // this so the configure-time plan and the build-time emission agree on the
 // shard count (and thus the output filenames). Deterministic for a given
 // module + options.
-std::vector<std::vector<std::size_t>> plan_partition(Module const &module_, Backend const &b, int max_defs,
+std::vector<std::vector<std::size_t>> plan_partition(Module const &module_, Backend const &b, ShardSpec const &spec,
                                                      std::vector<BodyUnit> &units_out) {
     units_out = collect_body_units(module_, b);
-    return partition_units(units_out, max_defs);
+    if (spec.num_tu > 0) {
+        return partition_units_fixed(units_out, spec.num_tu);
+    }
+    return partition_units(units_out, spec.max_defs);
 }
 
 } // namespace
 
-std::vector<std::string> plan_shards(Module const &module_, EmitOptions const &opts, int max_defs, std::string const &base_output_path) {
+std::vector<std::string> plan_shards(Module const &module_, EmitOptions const &opts, ShardSpec const &spec,
+                                     std::string const &base_output_path) {
     Backend const         b = make_backend(opts.target);
     std::vector<BodyUnit> units;
-    auto const            shards = plan_partition(module_, b, max_defs, units);
+    auto const            shards = plan_partition(module_, b, spec, units);
 
     std::vector<std::string> paths;
     if (shards.size() <= 1) {
@@ -2054,10 +2149,11 @@ std::vector<std::string> plan_shards(Module const &module_, EmitOptions const &o
     return paths;
 }
 
-std::vector<ShardFile> emit_shards(Module const &module_, EmitOptions const &opts, int max_defs, std::string const &base_output_path) {
+std::vector<ShardFile> emit_shards(Module const &module_, EmitOptions const &opts, ShardSpec const &spec,
+                                   std::string const &base_output_path) {
     Backend const         b = make_backend(opts.target);
     std::vector<BodyUnit> units;
-    auto const            shards = plan_partition(module_, b, max_defs, units);
+    auto const            shards = plan_partition(module_, b, spec, units);
 
     std::vector<ShardFile> files;
 
@@ -2092,7 +2188,10 @@ std::vector<ShardFile> emit_shards(Module const &module_, EmitOptions const &opt
             os << "\n";
         }
 
-        os << "void " << basefn << "__shard" << k << "(" << b.ns << "::module_ &m) {\n";
+        // A shard with no units happens only under a fixed TU count that
+        // outruns the module's content. Leave its parameter unnamed so the
+        // empty body doesn't warn.
+        os << "void " << basefn << "__shard" << k << "(" << b.ns << "::module_ &" << (shards[k].empty() ? "" : "m") << ") {\n";
 
         std::set<std::string> subs;
         for (std::size_t idx : shards[k]) {
