@@ -401,9 +401,26 @@ int main(int argc, char const **argv) {
     // A tally on every run, not just on failure. An empty module is otherwise
     // indistinguishable from a healthy one in a build log, and this line is
     // what makes the difference visible.
-    llvm::errs() << "apiary: module '" << g_module_name << "': " << report.total_defs << " binding statement(s) from "
+    //
+    // Led by the artifact rather than by --module: a project that aggregates
+    // many C++ modules into one Python module passes the same --module to
+    // every run, so a build log carries a dozen of these lines all naming
+    // 'einsums' and nothing tying a count back to the run that produced it.
+    // The build system's own progress line is adjacent only until the build
+    // goes parallel.
+    std::string source_label{g_output_path};
+    if (std::size_t const slash = source_label.find_last_of("/\\"); slash != std::string::npos) {
+        source_label.erase(0, slash + 1);
+    }
+    if (source_label.empty()) {
+        // Writing to stdout. The register function is the next most specific
+        // name the run carries; standalone form has only the module name.
+        source_label = g_register_fn.empty() ? std::string{g_module_name} : std::string{g_register_fn};
+    }
+
+    llvm::errs() << "apiary: " << source_label << ": " << report.total_defs << " binding statement(s) from "
                  << g_module.classes.size() << " class(es), " << g_module.functions.size() << " function(s), "
-                 << g_module.enums.size() << " enum(s)\n";
+                 << g_module.enums.size() << " enum(s) in module '" << g_module_name << "'\n";
 
     // Binding nothing is an error by default. Such a module still compiles,
     // links, and imports, so every downstream check passes while it exposes

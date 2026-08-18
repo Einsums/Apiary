@@ -61,7 +61,8 @@ HPP
 # Run the tool over one fixture and keep only apiary's own diagnostics.
 # Absolute paths are reduced to a basename so the golden survives a move, and
 # the "N binding statement(s)" progress line is dropped - it belongs to the
-# emitter's reporting, not to this suite.
+# emitter's reporting, not to this suite. Matched on the phrase rather than on
+# the line's leading token, which names whichever artifact the run produces.
 # As collect(), but for a header written on the fly rather than one in the
 # corpus. A fixture that deliberately produces NO output cannot live there:
 # every other runner drives the whole corpus and would see an empty emission.
@@ -82,7 +83,7 @@ collect_path() {
     # Both separators: clang spells the path with whatever the platform uses, so
     # on Windows this line arrives as D:\a\...\qualifiers.hpp:54:48 and a
     # forward-slash-only pattern leaves the whole absolute path in the golden.
-    { grep -v "^apiary: module " "${raw}" || true; } | sed -E 's|^.*[/\\]([^/\\]+\.hpp):|\1:|'
+    { grep -v " binding statement(s) from " "${raw}" || true; } | sed -E 's|^.*[/\\]([^/\\]+\.hpp):|\1:|'
 }
 
 collect() {
