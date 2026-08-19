@@ -36,7 +36,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(apiary LANGUAGES CXX)
 endif()
 
-set(APIARY_VERSION 0.1.0)
+set(APIARY_VERSION 1.0.0)
 
 # Building the libtooling executable needs the Clang/LLVM development
 # packages. Consumers that only want the annotation header (apiary::annotations)
