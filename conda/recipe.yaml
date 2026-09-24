@@ -3,7 +3,7 @@ context:
   # LLVM/Clang major apiary's libTooling code is built against. apiary is a leaf
   # *tool* — consumers run it, they do not link its LLVM — so it may pin its own
   # toolchain independent of the rest of an environment.
-  llvm_major: "22"
+  llvm_major: "23"
 
 package:
   name: apiary
