@@ -19,7 +19,7 @@ the **one contract** shared by:
 
 There is exactly one schema. Per-frontend *fragments* and the merged
 *document* have identical shape; merging is **idempotent** (merging an
-already-merged document is a no-op). `schema_version` is currently **5**.
+already-merged document is a no-op). `schema_version` is currently **6**.
 
 > The canonical field-by-field source of truth is still `src/DocsJson.cpp`
 > (`emit_docs_json`). This document explains the shape, the join keys, and the
@@ -29,7 +29,7 @@ already-merged document is a no-op). `schema_version` is currently **5**.
 
 ```jsonc
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "module": "einsums",          // top-level Python import name (NOT a submodule)
   "classes":   [ <class>...   ],
   "functions": [ <function>... ],
@@ -144,24 +144,53 @@ standard version, so the C++ frontend leaves it null. The producing frontend
 strips the lifted directive from the prose so it is not rendered twice.
 
 - **function**: adds `return_type`, `return_type_canonical`, `return_py_type`,
-  `params[]`, `is_template`, `template_params[]`, `template_kwargs[]`,
-  `instantiations[]`, `python_overloads[]`. A Python-origin function fills
+  `params[]`, `is_template`, `template_params[]`, `template_param_decls[]`,
+  `template_kwargs[]`, `instantiations[]`, `python_overloads[]`. A Python-origin function fills
   `return_py_type` + `params[]` and leaves the binding-mechanics fields empty
   (`is_template:false`, `[]`).
 - **param**: `{name, type, type_canonical, py_type, default, default_py}`. The
   renderer reads `py_type` and `default_py`/`default`. Python origin fills
   `py_type` (from `ast.unparse`) and `default`; leaves C++ `type` fields empty.
-- **class**: adds `is_template`, `is_external`, `template_params[]`, `bases[]`,
+- **class**: adds `is_template`, `is_external`, `template_params[]`,
+  `template_param_decls[]`, `bases[]`,
   `instantiations[]`, `constructors[]`, `methods[]`, `properties[]`,
   `fields[]`, `enums[]`, `nested_classes[]`. Python origin fills
   `methods`/`properties`/`bases` and leaves `instantiations`/`is_template`
   empty.
+- **method**, **typedef** (alias template), **concept**: carry
+  `template_params[]` and `template_param_decls[]` as well.
 - **enum**: adds `is_scoped`, `underlying_type`, `underlying_py_type`,
   `enumerators[] {name,value,doc,doc_structured}`.
 - **property**: `{py_name, type, py_type, doc, doc_structured, writable}`.
 - **python_overloads[]**: `{kind, py_name, instantiation_indices[],
   dtype_values[], default_dtype, kwarg_names[]}` — see `IR.hpp::PythonOverload`.
   Python origin uses `kind:"overload_set"` for `@overload` groups.
+
+### Template parameters
+
+A templated C++ entity describes its template parameters twice, in parallel lists of the same length and order.
+
+- `template_params[]` holds the bare names (`["mode", "CRank", "T"]`).
+  The binding emitter substitutes instantiation arguments by these names, and the docs build nitpick-ignores them, so their meaning is fixed.
+  A parameter clang invents for an abbreviated function template (`f(auto x)`) is named `x:auto`, and an unnamed parameter is `""`.
+- `template_param_decls[]` holds the full declaration of each one, so the renderer can re-declare it as written:
+
+```jsonc
+{
+  "name": "CRank",                 // "" for an unnamed parameter
+  "kind": "type" | "non_type" | "template",
+  "pack": false,                   // typename... Args, size_t... Ns
+  "implicit": false,               // invented for an abbreviated function template
+  "type": "size_t" | null,         // non_type only: the declared type
+  "constraint": "geom::Scalar" | null, // type only: qualified concept, with any explicit args
+  "default": "2" | null,           // the default argument as written
+  "template_param_decls": [ ... ]  // template only: its own parameter list
+}
+```
+
+`template_param_decls` was added without a `schema_version` bump, because it is purely additive.
+The C++ renderer falls back to `typename <name>` for each entry of `template_params` when the field is absent, as it is in JSON from an older apiary.
+The Python frontend writes `template_params: []` and omits `template_param_decls`.
 
 ## Symbol IDs & edges (v4 — the relationship graph)
 

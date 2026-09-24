@@ -117,11 +117,24 @@ def header_relpath(header: Path) -> str | None:
 def collect_template_params(doc: dict, out: set[str]) -> None:
     """Every template-parameter name anywhere in the document. These are
     never cross-reference targets, so the docs build nitpick-ignores them."""
+    def from_decls(decls: list[dict]) -> None:
+        # The parameters of a template template parameter are named in its
+        # declaration (``template <typename Elem> typename C``) but are not
+        # in the entity's flat ``template_params``.
+        for tp in decls or []:
+            if tp.get("name"):
+                out.add(tp["name"])
+            from_decls(tp.get("template_param_decls"))
+
+    def from_entity(e: dict) -> None:
+        out.update(e.get("template_params", []) or [])
+        from_decls(e.get("template_param_decls"))
+
     def from_callable(c: dict) -> None:
-        out.update(c.get("template_params", []) or [])
+        from_entity(c)
 
     def from_class(cl: dict) -> None:
-        out.update(cl.get("template_params", []) or [])
+        from_entity(cl)
         for m in cl.get("methods", []) + cl.get("constructors", []):
             from_callable(m)
         for n in cl.get("nested_classes", []):
@@ -132,9 +145,34 @@ def collect_template_params(doc: dict, out: set[str]) -> None:
     for fn in doc.get("functions", []):
         from_callable(fn)
     for td in doc.get("typedefs", []):
-        out.update(td.get("template_params", []) or [])
+        from_entity(td)
     for c in doc.get("concepts", []):
-        out.update(c.get("template_params", []) or [])
+        from_entity(c)
+
+
+# The per-entity lists of a docs document. Every entry carries a
+# ``location``, which is how a module's document splits back into headers.
+_ENTITY_KINDS = ("classes", "functions", "enums", "typedefs", "concepts", "macros", "variables")
+
+# The member lists an entity can nest; walked to collect the symbol IDs a
+# header owns, so its share of the top-level ``edges`` goes with it.
+_MEMBER_KINDS = ("constructors", "methods", "fields", "properties", "enums", "nested_classes", "enumerators")
+
+
+# A clang error diagnostic: ``path:line:col: error: ...`` (or ``fatal error``).
+_CLANG_ERROR = re.compile(r":\d+:\d+: (?:fatal )?error: ")
+
+
+@dataclass
+class ApiaryRun:
+    """What one apiary invocation produced: its docs JSON (empty on failure)
+    and the report lines it printed."""
+    stdout: str
+    undoc: set[str] = field(default_factory=set)
+    undoc_refs: set[str] = field(default_factory=set)
+    # Whether clang reported an error. apiary still exits 0 and emits what it
+    # could parse, so this is the only sign that declarations may be missing.
+    clang_error: bool = False
 
 
 def gen_header(tool: str, flags: list[str], header: Path, relheader: str, out_dir: Path,

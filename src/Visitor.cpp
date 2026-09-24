@@ -13,6 +13,7 @@
 #include <cctype>
 #include <utility>
 
+#include "clang/AST/ASTConcept.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
@@ -519,17 +520,13 @@ std::vector<BoundInstantiation> collect_instantiations(clang::NamedDecl const *d
     return out;
 }
 
-// Names of each template parameter on a templated class — e.g.
+// Names of each parameter in a template parameter list, e.g.
 // ``template <typename T, size_t rank, typename Alloc>`` returns
-// ``["T", "rank", "Alloc"]``. Used by INSTANTIATE_TEMPLATE to substitute
-// `{T}`/`{rank}` placeholders against concrete instantiation values.
-std::vector<std::string> collect_template_param_names(clang::CXXRecordDecl const *decl) {
-    std::vector<std::string>        out;
-    clang::ClassTemplateDecl const *tmpl = decl->getDescribedClassTemplate();
-    if (tmpl == nullptr) {
-        return out;
-    }
-    clang::TemplateParameterList const *params = tmpl->getTemplateParameters();
+// ``["T", "rank", "Alloc"]``. The emitter binds instantiation arguments by
+// these names, and INSTANTIATE_TEMPLATE substitutes `{T}`/`{rank}`
+// placeholders against them.
+std::vector<std::string> template_param_names(clang::TemplateParameterList const *params) {
+    std::vector<std::string> out;
     if (params == nullptr) {
         return out;
     }
@@ -538,6 +535,96 @@ std::vector<std::string> collect_template_param_names(clang::CXXRecordDecl const
         out.push_back(p->getNameAsString());
     }
     return out;
+}
+
+// A template argument as written in a declaration: a default argument or an
+// explicit argument of a type constraint. Types go through translate_type so
+// they read like every other type apiary records; expressions and template
+// names are printed with the same policy as function default arguments.
+std::string print_template_argument(clang::TemplateArgument const &arg, clang::ASTContext const &ctx) {
+    if (arg.getKind() == clang::TemplateArgument::Type) {
+        return translate_type(arg.getAsType(), ctx);
+    }
+    std::string              printed;
+    llvm::raw_string_ostream os(printed);
+    clang::PrintingPolicy    policy(ctx.getLangOpts());
+    policy.SuppressTagKeyword     = true;
+    policy.FullyQualifiedName     = true;
+    policy.SuppressUnwrittenScope = true;
+    arg.print(policy, os, /*IncludeType=*/false);
+    return printed;
+}
+
+// The type constraint of a constrained type parameter, as a reference a
+// reader can resolve: the concept's qualified name plus any explicitly
+// written arguments (``std::convertible_to<int>``; the constrained type
+// itself is the implicit first argument and is not written).
+std::string print_type_constraint(clang::TypeConstraint const &tc, clang::ASTContext const &ctx) {
+    std::string              out;
+    llvm::raw_string_ostream os(out);
+    clang::PrintingPolicy    policy(ctx.getLangOpts());
+    policy.SuppressUnwrittenScope = true;
+    tc.getNamedConcept()->printQualifiedName(os, policy);
+    if (clang::ASTTemplateArgumentListInfo const *args = tc.getConceptReference()->getTemplateArgsAsWritten()) {
+        os << '<';
+        for (unsigned i = 0; i < args->NumTemplateArgs; ++i) {
+            if (i != 0) {
+                os << ", ";
+            }
+            os << print_template_argument((*args)[i].getArgument(), ctx);
+        }
+        os << '>';
+    }
+    return out;
+}
+
+// Full declarations of each parameter in a template parameter list, parallel
+// to template_param_names(). Records the kind, pack-ness, type, constraint,
+// default and (for a template template parameter) nested parameter list, so
+// the docs renderer can re-declare each one as written instead of guessing.
+std::vector<BoundTemplateParam> template_param_decls(clang::TemplateParameterList const *params, clang::ASTContext const &ctx) {
+    std::vector<BoundTemplateParam> out;
+    if (params == nullptr) {
+        return out;
+    }
+    out.reserve(params->size());
+    for (clang::NamedDecl const *p : *params) {
+        BoundTemplateParam tp;
+        tp.name        = p->getNameAsString();
+        tp.is_implicit = p->isImplicit();
+        if (auto const *ttp = llvm::dyn_cast<clang::TemplateTypeParmDecl>(p)) {
+            tp.kind    = TemplateParamKind::Type;
+            tp.is_pack = ttp->isParameterPack();
+            if (clang::TypeConstraint const *tc = ttp->getTypeConstraint()) {
+                tp.constraint = print_type_constraint(*tc, ctx);
+            }
+            if (ttp->hasDefaultArgument()) {
+                tp.default_value = print_template_argument(ttp->getDefaultArgument().getArgument(), ctx);
+            }
+        } else if (auto const *nttp = llvm::dyn_cast<clang::NonTypeTemplateParmDecl>(p)) {
+            tp.kind    = TemplateParamKind::NonType;
+            tp.is_pack = nttp->isParameterPack();
+            tp.type    = translate_type(nttp->getType(), ctx);
+            if (nttp->hasDefaultArgument()) {
+                tp.default_value = print_template_argument(nttp->getDefaultArgument().getArgument(), ctx);
+            }
+        } else if (auto const *ttmp = llvm::dyn_cast<clang::TemplateTemplateParmDecl>(p)) {
+            tp.kind            = TemplateParamKind::Template;
+            tp.is_pack         = ttmp->isParameterPack();
+            tp.template_params = template_param_decls(ttmp->getTemplateParameters(), ctx);
+            if (ttmp->hasDefaultArgument()) {
+                tp.default_value = print_template_argument(ttmp->getDefaultArgument().getArgument(), ctx);
+            }
+        }
+        out.push_back(std::move(tp));
+    }
+    return out;
+}
+
+// The template parameter list of a templated class, or null for a plain one.
+clang::TemplateParameterList const *class_template_params(clang::CXXRecordDecl const *decl) {
+    clang::ClassTemplateDecl const *tmpl = decl->getDescribedClassTemplate();
+    return tmpl == nullptr ? nullptr : tmpl->getTemplateParameters();
 }
 
 // Qualified base-class names in declaration order (public bases only —
@@ -855,7 +942,8 @@ bool Visitor::TraverseCXXRecordDecl(clang::CXXRecordDecl *decl) {
         fill_common(external, decl);
         external.is_external          = true;
         external.is_template          = decl->getDescribedClassTemplate() != nullptr;
-        external.template_param_names = collect_template_param_names(decl);
+        external.template_param_names = template_param_names(class_template_params(decl));
+        external.template_param_decls = template_param_decls(class_template_params(decl), _context);
         external.instantiations = collect_instantiations(decl, _context, external.directives, external.template_param_names, _error_count);
         _module.classes.push_back(std::move(external));
         return clang::RecursiveASTVisitor<Visitor>::TraverseCXXRecordDecl(decl);
@@ -864,7 +952,8 @@ bool Visitor::TraverseCXXRecordDecl(clang::CXXRecordDecl *decl) {
     BoundClass cls;
     fill_common(cls, decl);
     cls.is_template          = decl->getDescribedClassTemplate() != nullptr;
-    cls.template_param_names = collect_template_param_names(decl);
+    cls.template_param_names = template_param_names(class_template_params(decl));
+    cls.template_param_decls = template_param_decls(class_template_params(decl), _context);
     cls.bases                = collect_bases(decl, _context);
     cls.base_ids             = collect_base_ids(decl);
     cls.instantiations       = collect_instantiations(decl, _context, cls.directives, cls.template_param_names, _error_count);
@@ -944,13 +1033,9 @@ bool Visitor::VisitCXXMethodDecl(clang::CXXMethodDecl *decl) {
     // renderer can emit a ``template <...>`` clause (and so docs collects the
     // param names for nitpick suppression — they are never xref targets).
     if (auto const *ftpl = decl->getDescribedFunctionTemplate()) {
-        method.is_template = true;
-        if (auto const *plist = ftpl->getTemplateParameters()) {
-            method.template_param_names.reserve(plist->size());
-            for (clang::NamedDecl const *p : *plist) {
-                method.template_param_names.push_back(p->getNameAsString());
-            }
-        }
+        method.is_template          = true;
+        method.template_param_names = template_param_names(ftpl->getTemplateParameters());
+        method.template_param_decls = template_param_decls(ftpl->getTemplateParameters(), _context);
     }
 
     // Honor APIARY_VARIADIC_FROM: record the named template
@@ -1007,12 +1092,8 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
         // names to substitute concrete types into the parameter list
         // when emitting a static_cast<> to disambiguate overloads.
         if (auto const *ftpl = decl->getDescribedFunctionTemplate()) {
-            if (auto const *plist = ftpl->getTemplateParameters()) {
-                fn.template_param_names.reserve(plist->size());
-                for (clang::NamedDecl const *p : *plist) {
-                    fn.template_param_names.push_back(p->getNameAsString());
-                }
-            }
+            fn.template_param_names = template_param_names(ftpl->getTemplateParameters());
+            fn.template_param_decls = template_param_decls(ftpl->getTemplateParameters(), _context);
         }
         // Collect APIARY_TEMPLATE_KWARGS first so it's available
         // when expanding INSTANTIATE_BOOLS below. The directive carries a
@@ -1193,13 +1274,9 @@ bool Visitor::VisitTypedefNameDecl(clang::TypedefNameDecl *decl) {
     // prefix on the cpp:type directive.
     if (auto const *at = clang::dyn_cast<clang::TypeAliasDecl>(decl)) {
         if (auto const *tat = at->getDescribedAliasTemplate()) {
-            td.is_template = true;
-            if (auto const *plist = tat->getTemplateParameters()) {
-                td.template_param_names.reserve(plist->size());
-                for (clang::NamedDecl const *p : *plist) {
-                    td.template_param_names.push_back(p->getNameAsString());
-                }
-            }
+            td.is_template          = true;
+            td.template_param_names = template_param_names(tat->getTemplateParameters());
+            td.template_param_decls = template_param_decls(tat->getTemplateParameters(), _context);
         }
     }
     _module.typedefs.push_back(std::move(td));
@@ -1412,12 +1489,8 @@ bool Visitor::VisitConceptDecl(clang::ConceptDecl *decl) {
 
     BoundConcept c;
     fill_common(c, decl);
-    if (auto const *plist = decl->getTemplateParameters()) {
-        c.template_param_names.reserve(plist->size());
-        for (clang::NamedDecl const *p : *plist) {
-            c.template_param_names.push_back(p->getNameAsString());
-        }
-    }
+    c.template_param_names = template_param_names(decl->getTemplateParameters());
+    c.template_param_decls = template_param_decls(decl->getTemplateParameters(), _context);
     _module.concepts.push_back(std::move(c));
     return true;
 }

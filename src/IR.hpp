@@ -105,6 +105,45 @@ struct BoundParam {
     std::optional<std::string> default_value_py;
 };
 
+/// @brief The three kinds of C++ template parameter.
+enum class TemplateParamKind {
+    /// ``typename T``, ``TensorConcept T``.
+    Type,
+    /// ``size_t Rank``, ``auto V``.
+    NonType,
+    /// ``template <typename, size_t> typename TT``.
+    Template,
+};
+
+/// @brief One template parameter, with everything needed to re-declare it.
+///
+/// Docs mode renders a ``template <...>`` head from these. The emitter keeps
+/// binding by the bare names in ``template_param_names``, which stay parallel
+/// to a list of these.
+struct BoundTemplateParam {
+    /// Parameter name; empty for an unnamed parameter.
+    std::string                     name;
+    /// Which kind of parameter this is.
+    TemplateParamKind               kind = TemplateParamKind::Type;
+    /// True for a parameter pack (``typename... Args``).
+    bool                            is_pack = false;
+    /// True for a parameter clang invented for an abbreviated function
+    /// template (``void f(auto x)``). It has no spelling of its own.
+    bool                            is_implicit = false;
+    /// The declared type of a non-type parameter (``size_t``, ``auto``).
+    /// Empty for the other kinds.
+    std::string                     type;
+    /// The type constraint of a type parameter, qualified and with any
+    /// explicit arguments (``geom::Scalar``, ``std::convertible_to<int>``).
+    /// Empty when unconstrained or for the other kinds.
+    std::string                     constraint;
+    /// The default argument as written, or empty.
+    std::optional<std::string>      default_value;
+    /// The parameter list of a template template parameter. Empty for the
+    /// other kinds.
+    std::vector<BoundTemplateParam> template_params;
+};
+
 /// @brief A bound public data member (field) of a class.
 struct BoundField : BoundEntityCommon {
     /// C++ type of the field.
@@ -144,6 +183,9 @@ struct BoundMethod : BoundEntityCommon {
     bool                     is_template = false;
     /// Its template parameters (docs mode).
     std::vector<std::string> template_param_names;
+    /// Full declarations of the same parameters, parallel to
+    /// ``template_param_names`` (docs mode).
+    std::vector<BoundTemplateParam> template_param_decls;
     /// True for pure-virtual methods.
     bool                     is_pure_virtual = false;
     /// True if this method is a constructor.
@@ -299,6 +341,8 @@ struct BoundClass : BoundEntityCommon {
     bool                            is_external = false;
     /// Template parameter names, e.g. ["T", "rank"] for ``template <typename T, size_t rank>``.
     std::vector<std::string>        template_param_names;
+    /// Full declarations of the same parameters, parallel to ``template_param_names``.
+    std::vector<BoundTemplateParam> template_param_decls;
     /// Base class names.
     std::vector<std::string>        bases;
     /// Symbol IDs of the public base classes, parallel to ``bases``. Each is
@@ -346,6 +390,9 @@ struct BoundFunction : BoundEntityCommon {
     /// into return/parameter types when emitting a static_cast<>
     /// to disambiguate overloads.
     std::vector<std::string> template_param_names;
+    /// Full declarations of the same parameters, parallel to
+    /// ``template_param_names``.
+    std::vector<BoundTemplateParam> template_param_decls;
     /// Python kwarg names for the leading bool template parameters,
     /// from ``APIARY_TEMPLATE_KWARGS``. Empty for functions
     /// without that directive. The emitter generates a runtime
@@ -377,6 +424,8 @@ struct BoundTypedef : BoundEntityCommon {
     bool                     is_template = false;
     /// Template parameter names for alias templates.
     std::vector<std::string> template_param_names;
+    /// Full declarations of the same parameters.
+    std::vector<BoundTemplateParam> template_param_decls;
 };
 
 /// @brief A C++20 concept.
@@ -385,6 +434,8 @@ struct BoundTypedef : BoundEntityCommon {
 struct BoundConcept : BoundEntityCommon {
     /// Template parameter names of the concept.
     std::vector<std::string> template_param_names;
+    /// Full declarations of the same parameters.
+    std::vector<BoundTemplateParam> template_param_decls;
 };
 
 /// @brief A documented preprocessor macro.

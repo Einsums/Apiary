@@ -8,9 +8,13 @@
 # headers through ``apiary --emit-cpp-docs-json`` and
 # ``apiary_render_cpp_site.py``, asserts the per-entity page set and the
 # soundness rules (const/non-const overloads stay distinct, cross-header
-# overload sets merge, the best-documented duplicate wins), and, when
-# sphinx-build is available, builds the result with ``-W -n`` so a duplicate
-# declaration or malformed directive fails.
+# overload sets merge, the best-documented duplicate wins, every kind of
+# template parameter renders as declared), and, when sphinx-build is
+# available, builds the result with ``-W -n`` so a duplicate declaration or
+# malformed directive fails.
+#
+# The pages rendered from geom/Templates.hpp are also diffed against
+# tests/golden/cpp_site_declarations.rst.golden. Run with REGEN=1 to rewrite it.
 #
 # Invocation:
 #     run_cpp_site.sh <apiary-binary> <apiary-include-dir> <python> [sphinx-build]
@@ -30,6 +34,8 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly SCRIPTS_DIR="${REPO_DIR}/scripts"
 readonly FIX="${SCRIPT_DIR}/fixtures/cpp_site"
+readonly DECLS_GOLDEN="${SCRIPT_DIR}/golden/cpp_site_declarations.rst.golden"
+readonly REGEN="${REGEN:-0}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
@@ -55,14 +61,21 @@ gen() {
 
 gen geom/Shapes.hpp "${WORK}/Shapes.json"
 gen geom/Ops.hpp "${WORK}/Ops.json"
+gen geom/Templates.hpp "${WORK}/Templates.json"
+readonly JSONS=("${WORK}/Shapes.json" "${WORK}/Ops.json" "${WORK}/Templates.json")
 
 SITE="${WORK}/src/geom"
 "${PY}" "${SCRIPTS_DIR}/apiary_render_cpp_site.py" --outdir "${SITE}" \
     --module-title geom --index-label geom_api --backlink-label geom_narrative \
-    "${WORK}/Shapes.json" "${WORK}/Ops.json" 2>/dev/null
+    "${JSONS[@]}" 2>/dev/null
 
 # ---- page inventory --------------------------------------------------------
-for page in index geom.Circle geom.Scalar geom.scale enums types macros operators; do
+# Pages rendered from Templates.hpp; the golden covers these.
+readonly DECL_PAGES=(
+    geom.advance geom.Grid geom.make_fixed geom.print geom.rebuild geom.repack geom.scaled geom.sum geom.unfold
+    types
+)
+for page in index geom.Circle geom.Scalar geom.scale enums macros operators "${DECL_PAGES[@]}"; do
     assert_file "${SITE}/${page}.rst"
 done
 
@@ -94,6 +107,39 @@ if grep -qE "^\.\. cpp:(class|function|enum|type|concept)::" "${SITE}/index.rst"
     fail "index.rst declares an entity; it must only link"
 fi
 
+# ---- template parameters render as declared --------------------------------
+# Every kind of template parameter keeps its kind: a non-type parameter its
+# type, a pack its ``...``, a template template parameter its parameter list,
+# a constrained parameter its concept. The regression was every one of them
+# coming out as ``typename <name>``.
+assert_grep "template <unsigned int mode, size_t CRank, typename T> Grid<T, 2> unfold(" "${SITE}/geom.unfold.rst"
+assert_grep "template <typename... Args> Real sum(" "${SITE}/geom.sum.rst"
+assert_grep "template <size_t... Ns> Grid<Real, sizeof...(Ns)> make_fixed()" "${SITE}/geom.make_fixed.rst"
+assert_grep "template <template <typename, size_t> typename TT> TT<Real, 2> rebuild(" "${SITE}/geom.rebuild.rst"
+assert_grep "template <template <typename Elem, size_t Extent> typename Container> Container<Real, 3> repack(" "${SITE}/geom.repack.rst"
+assert_grep "template <Scalar auto Step> Real advance(Real x)" "${SITE}/geom.advance.rst"
+assert_grep "template <Scalar S, int Offset = 0> Grid<S, 2> scaled(" "${SITE}/geom.scaled.rst"
+assert_grep ".. cpp:class:: template <typename T, size_t Rank = 2> Grid" "${SITE}/geom.Grid.rst"
+assert_grep "template <typename F, bool Unroll = false> void fill(" "${SITE}/geom.Grid.rst"
+assert_grep "template <size_t NewRank, typename... Dims> Grid<T, NewRank> reshape(" "${SITE}/geom.Grid.rst"
+assert_grep ".. cpp:type:: template <typename T, size_t N = 3> Square" "${SITE}/types.rst"
+# The parameter clang invents for ``auto const &...values`` is not declared:
+# the ``auto`` already makes the template, and declaring it twice is a
+# duplicate declaration.
+assert_grep "template <typename Sep = char> void print(Sep sep, const auto &... values)" "${SITE}/geom.print.rst"
+
+actual_decls="${WORK}/declarations.rst"
+for page in "${DECL_PAGES[@]}"; do
+    printf '==> %s.rst <==\n' "${page}"
+    cat "${SITE}/${page}.rst"
+done > "${actual_decls}"
+if [[ "${REGEN}" == "1" ]]; then
+    cp "${actual_decls}" "${DECLS_GOLDEN}"
+    echo "REGEN $(basename "${DECLS_GOLDEN}")"
+elif ! diff -u "${DECLS_GOLDEN}" "${actual_decls}"; then
+    fail "declaration pages drifted from $(basename "${DECLS_GOLDEN}")"
+fi
+
 # ---- rerunning is a no-op on disk ------------------------------------------
 # Generation is deterministic, so a second run with the same input must not
 # touch a single page. This is not cosmetic: the mtime is what Sphinx keys its
@@ -116,7 +162,7 @@ before="$(snapshot)"
 sleep 1.1   # coarser-than-1s mtime granularity would mask a rewrite
 "${PY}" "${SCRIPTS_DIR}/apiary_render_cpp_site.py" --outdir "${SITE}" \
     --module-title geom --index-label geom_api --backlink-label geom_narrative \
-    "${WORK}/Shapes.json" "${WORK}/Ops.json" 2>/dev/null
+    "${JSONS[@]}" 2>/dev/null
 after="$(snapshot)"
 [[ "${before}" == "${after}" ]] || fail "re-render rewrote unchanged pages:
 $(diff <(echo "${before}") <(echo "${after}") || true)"
@@ -126,7 +172,7 @@ $(diff <(echo "${before}") <(echo "${after}") || true)"
 touch "${SITE}/geom.Ghost.rst"
 "${PY}" "${SCRIPTS_DIR}/apiary_render_cpp_site.py" --outdir "${SITE}" \
     --module-title geom --index-label geom_api --backlink-label geom_narrative \
-    "${WORK}/Shapes.json" "${WORK}/Ops.json" 2>/dev/null
+    "${JSONS[@]}" 2>/dev/null
 [[ ! -f "${SITE}/geom.Ghost.rst" ]] || fail "stale page survived the re-render"
 assert_file "${SITE}/geom.Circle.rst"
 
@@ -158,6 +204,13 @@ Narrative stub for the backlink target.
 INDEX
     "${SPHINX}" -W -n -q -b html "${WORK}/src" "${WORK}/html"
     [[ -f "${WORK}/html/geom/index.html" ]] || fail "sphinx produced no geom/index.html"
+fi
+
+if [[ "${REGEN}" == "1" ]]; then
+    # Not a pass: the golden was rewritten, not verified. Say so, so a regen
+    # is never mistaken for a green run.
+    echo "REGEN complete: 1 golden rewritten. Review 'git diff' before committing."
+    exit 0
 fi
 
 echo "PASS: run_cpp_site"

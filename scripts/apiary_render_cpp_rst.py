@@ -46,29 +46,83 @@ def log(msg: str) -> None:
 # ── Signature lowering ──────────────────────────────────────────────────────
 
 
-def lower_template(params: list[str]) -> str:
+# Defaults that are implementation machinery rather than API (SFINAE
+# ``enable_if`` guards, ``decltype`` probes, ``detail::`` helpers). They are
+# noise to a reader and the likeliest spellings to trip the cpp-domain parser,
+# so the parameter is declared without them. Mirrors render_typedef's filter.
+_NOISY_DEFAULT_TOKENS = ("decltype", "detail::", "requires", "enable_if")
+
+
+def _is_invented_auto(name: str) -> bool:
+    """clang's name for a parameter INVENTED by an abbreviated function
+    template (``f(auto... xs)`` -> ``xs:auto``)."""
+    return re.fullmatch(r"[A-Za-z_]\w*:auto", name) is not None
+
+
+def template_param_decl(tp: dict) -> str:
+    """Re-declare one template parameter from its ``template_param_decls``
+    entry, as written: ``typename T``, ``size_t Rank``, ``typename... Args``,
+    ``template <typename, size_t> typename TT``, ``Scalar S``.
+
+    A concept constraint is kept. The cpp domain parses a constrained type
+    parameter (``Scalar S``) and cross-references the concept, so there is
+    nothing to lower it to.
+    """
+    name = tp.get("name") or ""
+    kind = tp.get("kind")
+    ellipsis = "..." if tp.get("pack") else ""
+    if kind == "non_type":
+        ptype = (tp.get("type") or "auto").strip()
+        decl = f"{ptype}{ellipsis} {name}".rstrip() if ellipsis else declarator(ptype, name)
+    else:
+        if kind == "template":
+            inner = ", ".join(template_param_decl(p) for p in tp.get("template_param_decls") or [])
+            keyword = f"template <{inner}> typename"
+        else:
+            keyword = (tp.get("constraint") or "").strip() or "typename"
+        decl = f"{keyword}{ellipsis} {name}".rstrip()
+    default = (tp.get("default") or "").strip()
+    if default and not any(tok in default for tok in _NOISY_DEFAULT_TOKENS):
+        decl += f" = {default}"
+    return decl
+
+
+def lower_template(params: list[str], decls: list[dict] | None = None) -> str:
     """Render a ``template <...>`` prefix the cpp domain can parse.
 
-    Concept-constrained parameters (``BasicTensorConcept AType``) and other
-    forms are lowered to plain ``typename`` — the cpp domain rejects concept
-    constraints, so we keep the parameter name and document the real
-    constraint in prose.
+    ``decls`` is the entity's ``template_param_decls``: each parameter is
+    re-declared as written (see template_param_decl). JSON from an apiary that
+    predates that field carries only the names in ``params``; those fall back
+    to ``typename <name>``, which is right for type parameters only.
 
-    Parameters clang spells ``name:auto`` are INVENTED by an abbreviated
-    function template (``f(auto... xs)``); the ``auto`` in the parameter list
-    already implies the template head, and emitting both makes the cpp domain
-    register the declaration twice (a duplicate against itself). Skip them.
+    Parameters clang invents for an abbreviated function template
+    (``f(auto... xs)``, named ``xs:auto``) are skipped: the ``auto`` in the
+    parameter list already implies the template head, and emitting both makes
+    the cpp domain register the declaration twice (a duplicate against
+    itself).
     """
-    names = []
-    for p in params:
-        p = p.strip()
-        if re.fullmatch(r"[A-Za-z_]\w*:auto", p):
-            continue
-        m = re.match(r"[A-Za-z_]\w*", p)
-        names.append(m.group(0) if m else "T")
-    if not names:
+    if decls:
+        parts = [
+            template_param_decl(tp)
+            for tp in decls
+            if not tp.get("implicit") and not _is_invented_auto(tp.get("name") or "")
+        ]
+    else:
+        parts = []
+        for p in params:
+            p = p.strip()
+            if _is_invented_auto(p):
+                continue
+            m = re.match(r"[A-Za-z_]\w*", p)
+            parts.append(f"typename {m.group(0) if m else 'T'}")
+    if not parts:
         return ""
-    return "template <" + ", ".join(f"typename {n}" for n in names) + "> "
+    return "template <" + ", ".join(parts) + "> "
+
+
+def entity_template(entity: dict) -> str:
+    """The ``template <...>`` prefix of an entity's declaration, or ""."""
+    return lower_template(entity.get("template_params", []), entity.get("template_param_decls"))
 
 
 def declarator(t: str, name: str) -> str:
@@ -133,7 +187,7 @@ def function_signature(fn: dict) -> str | None:
     # the bare identifier the cpp domain expects inside the class scope.
     name = re.sub(r"<.*>$", "", fn["name"])
     params = ", ".join(param_decl(p) for p in fn.get("params", []))
-    tmpl = lower_template(fn.get("template_params", []))
+    tmpl = entity_template(fn)
     if fn.get("is_operator") and name == "operator":
         # clang lost the operator symbol (spaceship / hidden friend) — there
         # is nothing parseable to emit.
@@ -225,7 +279,7 @@ def render_typedef(out: list[str], td: dict) -> None:
     ns = namespace_of(td.get("qualified_name", td["name"]))
     name = td["name"]
     underlying = relativize((td.get("underlying_type") or "").strip(), ns)
-    tmpl = lower_template(td.get("template_params", []))
+    tmpl = relativize(entity_template(td), ns)
     # Implementation-detail-heavy alias underlyings (``decltype(...)``,
     # ``detail::``, SFINAE typename traits) are noise in a reference and
     # confuse the cpp parser — declare just the alias name and let the doc
@@ -238,7 +292,7 @@ def render_typedef(out: list[str], td: dict) -> None:
 
 
 def render_concept(out: list[str], c: dict) -> None:
-    tmpl = lower_template(c.get("template_params", [])) or "template <typename T> "
+    tmpl = relativize(entity_template(c), namespace_of(c.get("qualified_name", c["name"]))) or "template <typename T> "
     out.append(f".. cpp:concept:: {tmpl}{c['name']}")
     emit_doc(out, c, IND)
     out.append("")
@@ -270,7 +324,7 @@ def render_enum(out: list[str], en: dict, base: str = "") -> None:
 
 
 def class_signature(cls: dict) -> str:
-    tmpl = lower_template(cls.get("template_params", []))
+    tmpl = relativize(entity_template(cls), namespace_of(cls.get("qualified_name", cls["name"])))
     return f"{tmpl}{cls['name']}"
 
 

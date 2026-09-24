@@ -141,6 +141,40 @@ Value json_params(std::vector<BoundParam> const &params) {
 
 Value json_string_list(std::vector<std::string> const &items); // fwd
 
+char const *template_param_kind_name(TemplateParamKind kind) {
+    switch (kind) {
+    case TemplateParamKind::Type:
+        return "type";
+    case TemplateParamKind::NonType:
+        return "non_type";
+    case TemplateParamKind::Template:
+        return "template";
+    }
+    return "type";
+}
+
+// Full template-parameter declarations, parallel to ``template_params``
+// (which stays a list of bare names). Absent parts are JSON null rather than
+// "", so a consumer can tell an unconstrained parameter from one whose
+// constraint printed empty. A template template parameter nests its own list
+// under the same key.
+Value json_template_param_decls(std::vector<BoundTemplateParam> const &params) {
+    Array out;
+    for (auto const &p : params) {
+        out.push_back(Object{
+            {"name", p.name},
+            {"kind", template_param_kind_name(p.kind)},
+            {"pack", p.is_pack},
+            {"implicit", p.is_implicit},
+            {"type", p.type.empty() ? Value(nullptr) : Value(p.type)},
+            {"constraint", p.constraint.empty() ? Value(nullptr) : Value(p.constraint)},
+            {"default", opt_string(p.default_value)},
+            {"template_param_decls", json_template_param_decls(p.template_params)},
+        });
+    }
+    return out;
+}
+
 Value json_method(BoundMethod const &m) {
     return Object{
         {"name", m.name},
@@ -167,6 +201,7 @@ Value json_method(BoundMethod const &m) {
         {"is_operator", m.is_operator},
         {"is_deleted", m.is_deleted},
         {"template_params", json_string_list(m.template_param_names)},
+        {"template_param_decls", json_template_param_decls(m.template_param_decls)},
         {"directives", json_directives(m.directives)},
     };
 }
@@ -424,6 +459,7 @@ Value json_class(BoundClass const &c) {
         {"is_template", c.is_template},
         {"is_external", c.is_external},
         {"template_params", json_string_list(c.template_param_names)},
+        {"template_param_decls", json_template_param_decls(c.template_param_decls)},
         {"bases", json_string_list(c.bases)},
         {"instantiations", json_instantiations(c.instantiations)},
         {"constructors", std::move(ctors)},
@@ -455,6 +491,7 @@ Value json_function(BoundFunction const &f) {
         {"params", json_params(f.params)},
         {"is_template", f.is_template},
         {"template_params", json_string_list(f.template_param_names)},
+        {"template_param_decls", json_template_param_decls(f.template_param_decls)},
         {"template_kwargs", json_string_list(f.template_kwargs)},
         {"instantiations", json_instantiations(f.instantiations)},
         {"python_overloads", json_python_overloads(f.python_overloads)},
@@ -623,6 +660,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
             {"location", json_location(t.location)},
             {"underlying_type", t.underlying_type},
             {"template_params", json_string_list(t.template_param_names)},
+            {"template_param_decls", json_template_param_decls(t.template_param_decls)},
         });
     }
     Array concepts;
@@ -637,6 +675,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
             {"availability", json_availability(c.doc)},
             {"location", json_location(c.location)},
             {"template_params", json_string_list(c.template_param_names)},
+            {"template_param_decls", json_template_param_decls(c.template_param_decls)},
         });
     }
     Array macros;

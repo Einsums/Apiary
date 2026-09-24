@@ -1,0 +1,299 @@
+==> geom.advance.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_advance:
+
+=============
+geom::advance
+=============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <Scalar auto Step> Real advance(Real x)
+
+   Advance a coordinate by a compile-time step.
+
+   :tparam Step: The step, of any scalar type.
+   :param x: The coordinate.
+==> geom.Grid.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_Grid:
+
+==========
+geom::Grid
+==========
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:class:: template <typename T, size_t Rank = 2> Grid
+
+   A fixed-rank grid of values.
+
+   :tparam T: The element type.
+   :tparam Rank: The number of dimensions.
+
+
+   .. cpp:function:: Grid()
+
+      Build an empty grid.
+
+
+   .. cpp:function:: template <typename F, bool Unroll = false> void fill(const F &f)
+
+      Fill every cell from a generator.
+
+      :tparam F: The generator type.
+      :tparam Unroll: Whether to unroll the fill loop.
+      :param f: The generator.
+
+
+   .. cpp:function:: template <size_t NewRank, typename... Dims> Grid<T, NewRank> reshape(Dims... dims) const
+
+      Reshape to another rank.
+
+      :tparam NewRank: The rank of the result.
+      :tparam Dims: The extents, one per dimension.
+==> geom.make_fixed.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_make_fixed:
+
+================
+geom::make_fixed
+================
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <size_t... Ns> Grid<Real, sizeof...(Ns)> make_fixed()
+
+   A grid whose extents are fixed at compile time.
+
+   :tparam Ns: The extents.
+==> geom.print.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_print:
+
+===========
+geom::print
+===========
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <typename Sep = char> void print(Sep sep, const auto &... values)
+
+   Print any number of values, with an explicit separator type.
+
+   :tparam Sep: The separator type.
+==> geom.rebuild.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_rebuild:
+
+=============
+geom::rebuild
+=============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <template <typename, size_t> typename TT> TT<Real, 2> rebuild(const Grid<Real, 2> &g)
+
+   Rebuild a grid with another container template.
+
+   :tparam TT: The container template.
+==> geom.repack.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_repack:
+
+============
+geom::repack
+============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <template <typename Elem, size_t Extent> typename Container> Container<Real, 3> repack(const Grid<Real, 2> &g)
+
+   Repack a grid into another container template.
+
+   :tparam Container: The container template.
+==> geom.scaled.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_scaled:
+
+============
+geom::scaled
+============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <Scalar S, int Offset = 0> Grid<S, 2> scaled(const Grid<S, 2> &g, S factor)
+
+   Scale every cell by a scalar.
+
+   :tparam S: A scalar type.
+   :tparam Offset: An additive offset applied after scaling.
+==> geom.sum.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_sum:
+
+=========
+geom::sum
+=========
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <typename... Args> Real sum(Args... args)
+
+   Sum any number of scalars.
+
+   :tparam Args: The argument types.
+==> geom.unfold.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_unfold:
+
+============
+geom::unfold
+============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <unsigned int mode, size_t CRank, typename T> Grid<T, 2> unfold(const Grid<T, CRank> &source)
+
+   Return the mode-``mode`` unfolding of a grid.
+
+   :tparam mode: The mode to unfold along.
+   :tparam CRank: The rank of the source.
+   :tparam T: The element type.
+   :param source: The grid to unfold.
+==> types.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _geom_api_types:
+
+=====
+Types
+=====
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in headers ``geom/Shapes.hpp``, ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:type:: Real = double
+
+   The floating-point type used by every shape.
+
+
+.. cpp:type:: template <typename T, size_t N = 3> Square
+
+   A square grid.
+
+   :tparam T: The element type.
+   :tparam N: The side length.
+
+
+.. cpp:type:: size_t
+
+   The unsigned type of sizes and extents.
