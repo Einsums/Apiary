@@ -141,6 +141,28 @@ Value json_params(std::vector<BoundParam> const &params) {
 
 Value json_string_list(std::vector<std::string> const &items); // fwd
 
+// A string field that is JSON null when empty, for parts of a declaration
+// that are usually absent (a requires-clause, a noexcept condition).
+Value opt_nonempty(std::string const &s) {
+    Value v = s.empty() ? Value(nullptr) : Value(s);
+    return v;
+}
+
+// The constraint, exception, and specifier parts of a function declaration.
+// Each string is JSON null when the header does not write it.
+Value json_function_specifiers(FunctionSpecifiers const &s) {
+    return Object{
+        {"trailing_requires_clause", opt_nonempty(s.trailing_requires_clause)},
+        {"noexcept", opt_nonempty(s.noexcept_spec)},
+        {"constexpr", opt_nonempty(s.constexpr_spec)},
+        {"explicit", opt_nonempty(s.explicit_spec)},
+        {"virtual", s.is_virtual_as_written},
+        {"override", s.is_override},
+        {"final", s.is_final},
+        {"defaulted", s.is_defaulted},
+    };
+}
+
 char const *template_param_kind_name(TemplateParamKind kind) {
     switch (kind) {
     case TemplateParamKind::Type:
@@ -166,8 +188,8 @@ Value json_template_param_decls(std::vector<BoundTemplateParam> const &params) {
             {"kind", template_param_kind_name(p.kind)},
             {"pack", p.is_pack},
             {"implicit", p.is_implicit},
-            {"type", p.type.empty() ? Value(nullptr) : Value(p.type)},
-            {"constraint", p.constraint.empty() ? Value(nullptr) : Value(p.constraint)},
+            {"type", opt_nonempty(p.type)},
+            {"constraint", opt_nonempty(p.constraint)},
             {"default", opt_string(p.default_value)},
             {"template_param_decls", json_template_param_decls(p.template_params)},
         });
@@ -199,9 +221,12 @@ Value json_method(BoundMethod const &m) {
         {"is_constructor", m.is_constructor},
         {"is_destructor", m.is_destructor},
         {"is_operator", m.is_operator},
+        {"is_conversion", m.is_conversion},
         {"is_deleted", m.is_deleted},
+        {"specifiers", json_function_specifiers(m.specifiers)},
         {"template_params", json_string_list(m.template_param_names)},
         {"template_param_decls", json_template_param_decls(m.template_param_decls)},
+        {"requires_clause", opt_nonempty(m.requires_clause)},
         {"directives", json_directives(m.directives)},
     };
 }
@@ -226,6 +251,7 @@ Value json_field(BoundField const &f) {
         {"type", f.type},
         {"py_type", f.py_type},
         {"is_static", f.is_static},
+        {"is_constexpr", f.is_constexpr},
         {"doc_structured", json_doc_structured(f.doc)},
         {"availability", json_availability(f.doc)},
         {"directives", json_directives(f.directives)},
@@ -460,6 +486,8 @@ Value json_class(BoundClass const &c) {
         {"is_external", c.is_external},
         {"template_params", json_string_list(c.template_param_names)},
         {"template_param_decls", json_template_param_decls(c.template_param_decls)},
+        {"requires_clause", opt_nonempty(c.requires_clause)},
+        {"is_final", c.is_final},
         {"bases", json_string_list(c.bases)},
         {"instantiations", json_instantiations(c.instantiations)},
         {"constructors", std::move(ctors)},
@@ -490,8 +518,11 @@ Value json_function(BoundFunction const &f) {
         {"return_py_type", f.return_py_type},
         {"params", json_params(f.params)},
         {"is_template", f.is_template},
+        {"is_deleted", f.is_deleted},
+        {"specifiers", json_function_specifiers(f.specifiers)},
         {"template_params", json_string_list(f.template_param_names)},
         {"template_param_decls", json_template_param_decls(f.template_param_decls)},
+        {"requires_clause", opt_nonempty(f.requires_clause)},
         {"template_kwargs", json_string_list(f.template_kwargs)},
         {"instantiations", json_instantiations(f.instantiations)},
         {"python_overloads", json_python_overloads(f.python_overloads)},
@@ -661,6 +692,7 @@ std::string emit_docs_json(Module const &module_, std::string const &module_name
             {"underlying_type", t.underlying_type},
             {"template_params", json_string_list(t.template_param_names)},
             {"template_param_decls", json_template_param_decls(t.template_param_decls)},
+            {"requires_clause", opt_nonempty(t.requires_clause)},
         });
     }
     Array concepts;

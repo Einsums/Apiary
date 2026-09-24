@@ -144,6 +144,35 @@ struct BoundTemplateParam {
     std::vector<BoundTemplateParam> template_params;
 };
 
+/// @brief The parts of a function declaration that are not its name, return
+/// type, or parameters.
+///
+/// Docs mode renders these into the declaration so that overloads differing
+/// only in a constraint or a specifier stay distinct, and a reader sees the
+/// contract (``noexcept``, ``explicit``, ``= delete``) the header states.
+struct FunctionSpecifiers {
+    /// The trailing requires-clause (``void f(T) requires C<T>``), without the
+    /// keyword. Empty when absent.
+    std::string trailing_requires_clause;
+    /// The exception specification: empty, ``"noexcept"``, or
+    /// ``"noexcept(<expr>)"`` for a conditional one.
+    std::string noexcept_spec;
+    /// ``"constexpr"``, ``"consteval"``, or empty.
+    std::string constexpr_spec;
+    /// ``"explicit"``, ``"explicit(<expr>)"`` for a conditional one, or empty.
+    /// Only constructors and conversion operators carry one.
+    std::string explicit_spec;
+    /// True when ``virtual`` is written on the declaration. An overrider is
+    /// virtual without saying so; this records what the header says.
+    bool is_virtual_as_written = false;
+    /// True for a method marked ``override``.
+    bool is_override = false;
+    /// True for a method marked ``final``.
+    bool is_final = false;
+    /// True for a declaration defaulted on its first declaration (``= default``).
+    bool is_defaulted = false;
+};
+
 /// @brief A bound public data member (field) of a class.
 struct BoundField : BoundEntityCommon {
     /// C++ type of the field.
@@ -152,6 +181,8 @@ struct BoundField : BoundEntityCommon {
     std::string py_type;
     /// True for static data members.
     bool        is_static = false;
+    /// True for a ``constexpr`` static data member (docs mode).
+    bool        is_constexpr = false;
 };
 
 /// @brief A bound class method, constructor, or destructor.
@@ -186,16 +217,24 @@ struct BoundMethod : BoundEntityCommon {
     /// Full declarations of the same parameters, parallel to
     /// ``template_param_names`` (docs mode).
     std::vector<BoundTemplateParam> template_param_decls;
+    /// The requires-clause of the template head (``template <typename T>
+    /// requires C<T>``), as written without the keyword. Empty when absent.
+    std::string requires_clause;
     /// True for pure-virtual methods.
     bool                     is_pure_virtual = false;
     /// True if this method is a constructor.
     bool                     is_constructor  = false;
     /// True if this method is a destructor.
     bool                     is_destructor   = false;
+    /// True for a conversion operator (``operator bool()``). Clang does not
+    /// count one as an overloaded operator, so ``is_operator`` is false.
+    bool                     is_conversion   = false;
     /// True if this method is an operator overload.
     bool                     is_operator     = false;
     /// True if this method is deleted (`= delete`).
     bool                     is_deleted      = false;
+    /// Constraint, exception, and specifier parts of the declaration (docs mode).
+    FunctionSpecifiers       specifiers;
     /// Symbol IDs of the methods this one directly overrides (from
     /// ``CXXMethodDecl::overridden_methods``). Source of the docs graph's
     /// ``overrides`` edges. Empty for non-overriding methods.
@@ -343,6 +382,11 @@ struct BoundClass : BoundEntityCommon {
     std::vector<std::string>        template_param_names;
     /// Full declarations of the same parameters, parallel to ``template_param_names``.
     std::vector<BoundTemplateParam> template_param_decls;
+    /// The requires-clause of the template head (``template <typename T>
+    /// requires C<T>``), as written without the keyword. Empty when absent.
+    std::string requires_clause;
+    /// True for a class marked ``final``.
+    bool                            is_final = false;
     /// Base class names.
     std::vector<std::string>        bases;
     /// Symbol IDs of the public base classes, parallel to ``bases``. Each is
@@ -383,6 +427,10 @@ struct BoundFunction : BoundEntityCommon {
     std::vector<BoundParam> params;
     /// True for function templates.
     bool                    is_template = false;
+    /// True if this function is deleted (``= delete``).
+    bool                    is_deleted = false;
+    /// Constraint, exception, and specifier parts of the declaration (docs mode).
+    FunctionSpecifiers      specifiers;
     /// Names of the function template's template parameters (e.g.
     /// ``["AType", "BType", "CType"]`` for
     /// ``template <BasicTensorConcept AType, …>``). Used by the emitter
@@ -393,6 +441,9 @@ struct BoundFunction : BoundEntityCommon {
     /// Full declarations of the same parameters, parallel to
     /// ``template_param_names``.
     std::vector<BoundTemplateParam> template_param_decls;
+    /// The requires-clause of the template head (``template <typename T>
+    /// requires C<T>``), as written without the keyword. Empty when absent.
+    std::string requires_clause;
     /// Python kwarg names for the leading bool template parameters,
     /// from ``APIARY_TEMPLATE_KWARGS``. Empty for functions
     /// without that directive. The emitter generates a runtime
@@ -426,6 +477,9 @@ struct BoundTypedef : BoundEntityCommon {
     std::vector<std::string> template_param_names;
     /// Full declarations of the same parameters.
     std::vector<BoundTemplateParam> template_param_decls;
+    /// The requires-clause of the template head (``template <typename T>
+    /// requires C<T>``), as written without the keyword. Empty when absent.
+    std::string requires_clause;
 };
 
 /// @brief A C++20 concept.

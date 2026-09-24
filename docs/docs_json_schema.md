@@ -145,20 +145,30 @@ strips the lifted directive from the prose so it is not rendered twice.
 
 - **function**: adds `return_type`, `return_type_canonical`, `return_py_type`,
   `params[]`, `is_template`, `template_params[]`, `template_param_decls[]`,
-  `template_kwargs[]`, `instantiations[]`, `python_overloads[]`. A Python-origin function fills
+  `requires_clause`, `is_deleted`, `specifiers`, `template_kwargs[]`,
+  `instantiations[]`, `python_overloads[]`. A Python-origin function fills
   `return_py_type` + `params[]` and leaves the binding-mechanics fields empty
   (`is_template:false`, `[]`).
 - **param**: `{name, type, type_canonical, py_type, default, default_py}`. The
   renderer reads `py_type` and `default_py`/`default`. Python origin fills
   `py_type` (from `ast.unparse`) and `default`; leaves C++ `type` fields empty.
-- **class**: adds `is_template`, `is_external`, `template_params[]`,
-  `template_param_decls[]`, `bases[]`,
+- **class**: adds `is_template`, `is_external`, `is_final`, `template_params[]`,
+  `template_param_decls[]`, `requires_clause`, `bases[]`,
   `instantiations[]`, `constructors[]`, `methods[]`, `properties[]`,
-  `fields[]`, `enums[]`, `nested_classes[]`. Python origin fills
+  `fields[]`, `enums[]`, `nested_classes[]`. A C++ `fields[]` entry carries
+  `is_static` and `is_constexpr`; the C++ docs frontend lists public static
+  data members there too, so code that names one (`requires (!IsDeviceTensor)`)
+  has a declaration to resolve to. Python origin fills
   `methods`/`properties`/`bases` and leaves `instantiations`/`is_template`
   empty.
-- **method**, **typedef** (alias template), **concept**: carry
-  `template_params[]` and `template_param_decls[]` as well.
+- **method**: carries `template_params[]`, `template_param_decls[]`,
+  `requires_clause` and `specifiers` like a function, plus `is_const`,
+  `ref_qualifier`, `is_static`, `is_virtual`, `is_pure_virtual`,
+  `is_constructor`, `is_destructor`, `is_operator`, `is_conversion` and
+  `is_deleted`.
+- **typedef** (alias template): carries `template_params[]`,
+  `template_param_decls[]` and `requires_clause`. **concept**: carries
+  `template_params[]` and `template_param_decls[]`.
 - **enum**: adds `is_scoped`, `underlying_type`, `underlying_py_type`,
   `enumerators[] {name,value,doc,doc_structured}`.
 - **property**: `{py_name, type, py_type, doc, doc_structured, writable}`.
@@ -188,9 +198,34 @@ A templated C++ entity describes its template parameters twice, in parallel list
 }
 ```
 
-`template_param_decls` was added without a `schema_version` bump, because it is purely additive.
-The C++ renderer falls back to `typename <name>` for each entry of `template_params` when the field is absent, as it is in JSON from an older apiary.
-The Python frontend writes `template_params: []` and omits `template_param_decls`.
+`requires_clause` is the requires-clause of the template head (`template <typename T> requires C<T>`), without the keyword, or null.
+
+### Function specifiers
+
+A C++ function or method carries the parts of its declaration beyond its name, types and parameters in `specifiers`.
+Each records only what the header writes: a destructor is implicitly `noexcept` and an overrider implicitly virtual, and neither shows up here.
+
+```jsonc
+"specifiers": {
+  "trailing_requires_clause": "Scalar<U>" | null, // void f(U) requires Scalar<U>
+  "noexcept": "noexcept" | "noexcept(<expr>)" | null,
+  "constexpr": "constexpr" | "consteval" | null,
+  "explicit": "explicit" | "explicit(<expr>)" | null, // constructors and conversion operators
+  "virtual": false,    // `virtual` written on this declaration
+  "override": false,
+  "final": false,
+  "defaulted": false   // = default
+}
+```
+
+`= delete` is `is_deleted` on the function or method, and `= 0` is a method's `is_pure_virtual`.
+A conversion operator (`operator bool()`) has `is_conversion: true` and `is_operator: false`, because clang does not count it as an overloaded operator.
+
+### Declaration fields and older JSON
+
+`template_param_decls`, `requires_clause`, `specifiers`, a function's `is_deleted`, a method's `is_conversion`, a class's `is_final` and a field's `is_constexpr` were added without a `schema_version` bump, because they are purely additive.
+The C++ renderer reads each as absent when it is missing, as it is in JSON from an older apiary: it falls back to `typename <name>` for each entry of `template_params`, and renders no constraints or specifiers.
+The Python frontend writes `template_params: []` and omits the rest.
 
 ## Symbol IDs & edges (v4 — the relationship graph)
 

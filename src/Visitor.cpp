@@ -20,6 +20,7 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/ExprConcepts.h"
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
@@ -52,6 +53,20 @@ DirectiveList parse_attached_directives(clang::Decl const *decl) {
     return out;
 }
 
+// An expression as source-like C++: a default argument, a requires-clause, a
+// noexcept or explicit condition. Types inside it are fully qualified so a
+// renderer can relativize them against the enclosing namespace.
+std::string print_expr(clang::Expr const *e, clang::ASTContext const &ctx) {
+    std::string              printed;
+    llvm::raw_string_ostream os(printed);
+    clang::PrintingPolicy    policy(ctx.getLangOpts());
+    policy.SuppressTagKeyword     = true;
+    policy.FullyQualifiedName     = true;
+    policy.SuppressUnwrittenScope = false;
+    e->printPretty(os, nullptr, policy);
+    return printed;
+}
+
 // Build the BoundParam list for a function/method declaration. Default
 // argument expressions are captured as their pretty-printed source form.
 std::vector<BoundParam> build_params(clang::FunctionDecl const *fn, clang::ASTContext const &ctx) {
@@ -65,13 +80,7 @@ std::vector<BoundParam> build_params(clang::FunctionDecl const *fn, clang::ASTCo
         bp.py_type        = translate_python_type(p->getType(), ctx);
         if (p->hasDefaultArg() && !p->hasUninstantiatedDefaultArg()) {
             if (clang::Expr const *def = p->getDefaultArg()) {
-                std::string              printed;
-                llvm::raw_string_ostream os(printed);
-                clang::PrintingPolicy    policy(ctx.getLangOpts());
-                policy.SuppressTagKeyword     = true;
-                policy.FullyQualifiedName     = true;
-                policy.SuppressUnwrittenScope = false;
-                def->printPretty(os, nullptr, policy);
+                std::string printed = print_expr(def, ctx);
                 // An UNSCOPED enum's enumerator is written bare (`V0`), and
                 // printPretty keeps the written form - FullyQualifiedName
                 // governs type printing, not this. The generated TU is at
@@ -621,6 +630,127 @@ std::vector<BoundTemplateParam> template_param_decls(clang::TemplateParameterLis
     return out;
 }
 
+// A constraint expression as source-like C++, with one lowering: a
+// requires-expression made only of nested requirements and with no parameters
+// of its own (``requires { requires P; requires Q; }``, a common way to list
+// several conditions) is printed as the equivalent conjunction ``(P && Q)``.
+// A reader loses nothing, and the result is an ordinary constant expression,
+// which a renderer can put in a declaration where a requires-expression
+// cannot go. Every other requires-expression is printed as written.
+std::string print_constraint(clang::Expr const *e, clang::ASTContext const &ctx) {
+    e = e->IgnoreImplicit();
+    if (auto const *paren = llvm::dyn_cast<clang::ParenExpr>(e)) {
+        return "(" + print_constraint(paren->getSubExpr(), ctx) + ")";
+    }
+    if (auto const *bin = llvm::dyn_cast<clang::BinaryOperator>(e); bin != nullptr && bin->isLogicalOp()) {
+        return print_constraint(bin->getLHS(), ctx) + (bin->getOpcode() == clang::BO_LAnd ? " && " : " || ") +
+               print_constraint(bin->getRHS(), ctx);
+    }
+    if (auto const *req = llvm::dyn_cast<clang::RequiresExpr>(e); req != nullptr && req->getLocalParameters().empty()) {
+        std::vector<std::string> conditions;
+        for (clang::concepts::Requirement const *r : req->getRequirements()) {
+            auto const *nested = llvm::dyn_cast<clang::concepts::NestedRequirement>(r);
+            if (nested == nullptr || nested->hasInvalidConstraint()) {
+                return print_expr(e, ctx);
+            }
+            clang::Expr const *cond = nested->getConstraintExpr()->IgnoreImplicit();
+            std::string        text = print_constraint(cond, ctx);
+            // ``&&`` binds tighter than ``||`` and the conditional operator,
+            // so those keep their own parentheses inside the conjunction.
+            auto const *cond_bin = llvm::dyn_cast<clang::BinaryOperator>(cond);
+            if ((cond_bin != nullptr && (cond_bin->getOpcode() == clang::BO_LOr || cond_bin->isAssignmentOp() ||
+                                         cond_bin->getOpcode() == clang::BO_Comma)) ||
+                llvm::isa<clang::ConditionalOperator>(cond)) {
+                text = "(" + text + ")";
+            }
+            conditions.push_back(std::move(text));
+        }
+        if (!conditions.empty()) {
+            std::string out = "(";
+            for (std::size_t i = 0; i < conditions.size(); ++i) {
+                out += (i == 0 ? "" : " && ") + conditions[i];
+            }
+            return out + ")";
+        }
+    }
+    return print_expr(e, ctx);
+}
+
+// The requires-clause of a template head, without the keyword, or "".
+std::string requires_clause_of(clang::TemplateParameterList const *params, clang::ASTContext const &ctx) {
+    if (params == nullptr || params->getRequiresClause() == nullptr) {
+        return {};
+    }
+    return print_constraint(params->getRequiresClause(), ctx);
+}
+
+// Whether ``constexpr`` is written among a function's declaration specifiers.
+// Clang makes a defaulted special member constexpr on its own when it can be,
+// and records that exactly like a written one, so for those the header text is
+// the only way to tell.
+bool constexpr_written(clang::FunctionDecl const *decl, clang::ASTContext const &ctx) {
+    clang::SourceManager const &sm      = ctx.getSourceManager();
+    auto const                  range   = clang::CharSourceRange::getCharRange(decl->getBeginLoc(), decl->getLocation());
+    bool                        invalid = false;
+    llvm::StringRef const       text    = clang::Lexer::getSourceText(range, sm, ctx.getLangOpts(), &invalid);
+    if (invalid) {
+        return false;
+    }
+    for (std::size_t pos = text.find("constexpr"); pos != llvm::StringRef::npos; pos = text.find("constexpr", pos + 1)) {
+        bool const        starts = pos == 0 || !(std::isalnum(static_cast<unsigned char>(text[pos - 1])) || text[pos - 1] == '_');
+        std::size_t const end    = pos + 9;
+        bool const        ends   = end == text.size() || !(std::isalnum(static_cast<unsigned char>(text[end])) || text[end] == '_');
+        if (starts && ends) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The constraint, exception, and specifier parts of a function declaration,
+// as the header writes them. Only what is written is recorded: a destructor is
+// implicitly noexcept and an overrider implicitly virtual, and neither is
+// part of the declaration a reader sees.
+FunctionSpecifiers function_specifiers(clang::FunctionDecl const *decl, clang::ASTContext const &ctx) {
+    FunctionSpecifiers out;
+    if (clang::AssociatedConstraint const &trailing = decl->getTrailingRequiresClause()) {
+        out.trailing_requires_clause = print_constraint(trailing.ConstraintExpr, ctx);
+    }
+    if (decl->getExceptionSpecSourceRange().isValid()) {
+        if (auto const *proto = decl->getType()->getAs<clang::FunctionProtoType>()) {
+            switch (proto->getExceptionSpecType()) {
+            case clang::EST_BasicNoexcept:
+            case clang::EST_DynamicNone: // ``throw()``, the pre-C++17 spelling of noexcept
+                out.noexcept_spec = "noexcept";
+                break;
+            case clang::EST_DependentNoexcept:
+            case clang::EST_NoexceptFalse:
+            case clang::EST_NoexceptTrue:
+                out.noexcept_spec = "noexcept(" + print_expr(proto->getNoexceptExpr(), ctx) + ")";
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    if (decl->isConsteval()) {
+        out.constexpr_spec = "consteval";
+    } else if (decl->isConstexprSpecified() && (!decl->isExplicitlyDefaulted() || constexpr_written(decl, ctx))) {
+        out.constexpr_spec = "constexpr";
+    }
+    clang::ExplicitSpecifier const explicit_spec = clang::ExplicitSpecifier::getFromDecl(decl);
+    if (clang::Expr const *cond = explicit_spec.getExpr()) {
+        out.explicit_spec = "explicit(" + print_expr(cond, ctx) + ")";
+    } else if (explicit_spec.isExplicit()) {
+        out.explicit_spec = "explicit";
+    }
+    out.is_virtual_as_written = decl->isVirtualAsWritten();
+    out.is_override           = decl->hasAttr<clang::OverrideAttr>();
+    out.is_final              = decl->hasAttr<clang::FinalAttr>();
+    out.is_defaulted          = decl->isExplicitlyDefaulted();
+    return out;
+}
+
 // The template parameter list of a templated class, or null for a plain one.
 clang::TemplateParameterList const *class_template_params(clang::CXXRecordDecl const *decl) {
     clang::ClassTemplateDecl const *tmpl = decl->getDescribedClassTemplate();
@@ -954,7 +1084,9 @@ bool Visitor::TraverseCXXRecordDecl(clang::CXXRecordDecl *decl) {
     cls.is_template          = decl->getDescribedClassTemplate() != nullptr;
     cls.template_param_names = template_param_names(class_template_params(decl));
     cls.template_param_decls = template_param_decls(class_template_params(decl), _context);
+    cls.requires_clause      = requires_clause_of(class_template_params(decl), _context);
     cls.bases                = collect_bases(decl, _context);
+    cls.is_final             = decl->hasAttr<clang::FinalAttr>();
     cls.base_ids             = collect_base_ids(decl);
     cls.instantiations       = collect_instantiations(decl, _context, cls.directives, cls.template_param_names, _error_count);
 
@@ -1023,7 +1155,9 @@ bool Visitor::VisitCXXMethodDecl(clang::CXXMethodDecl *decl) {
     method.is_constructor        = clang::isa<clang::CXXConstructorDecl>(decl);
     method.is_destructor         = clang::isa<clang::CXXDestructorDecl>(decl);
     method.is_operator           = decl->isOverloadedOperator();
+    method.is_conversion         = clang::isa<clang::CXXConversionDecl>(decl);
     method.is_deleted            = decl->isDeleted();
+    method.specifiers            = function_specifiers(decl, _context);
     for (clang::CXXMethodDecl const *overridden : decl->overridden_methods()) {
         if (std::string id = compute_symbol_id(overridden); !id.empty()) {
             method.overridden_ids.push_back(std::move(id));
@@ -1036,6 +1170,7 @@ bool Visitor::VisitCXXMethodDecl(clang::CXXMethodDecl *decl) {
         method.is_template          = true;
         method.template_param_names = template_param_names(ftpl->getTemplateParameters());
         method.template_param_decls = template_param_decls(ftpl->getTemplateParameters(), _context);
+        method.requires_clause      = requires_clause_of(ftpl->getTemplateParameters(), _context);
     }
 
     // Honor APIARY_VARIADIC_FROM: record the named template
@@ -1079,6 +1214,8 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
     fn.return_py_type        = translate_python_type(decl->getReturnType(), _context);
     fn.params                = build_params(decl, _context);
     fn.is_template           = decl->getDescribedFunctionTemplate() != nullptr;
+    fn.is_deleted            = decl->isDeleted();
+    fn.specifiers            = function_specifiers(decl, _context);
     // Resolve APIARY_INSTANTIATE_AS directives on a templated free
     // function into per-instantiation BoundInstantiation entries. Each
     // directive specifies an explicit Python name and the C++ type
@@ -1094,6 +1231,7 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
         if (auto const *ftpl = decl->getDescribedFunctionTemplate()) {
             fn.template_param_names = template_param_names(ftpl->getTemplateParameters());
             fn.template_param_decls = template_param_decls(ftpl->getTemplateParameters(), _context);
+            fn.requires_clause      = requires_clause_of(ftpl->getTemplateParameters(), _context);
         }
         // Collect APIARY_TEMPLATE_KWARGS first so it's available
         // when expanding INSTANTIATE_BOOLS below. The directive carries a
@@ -1277,6 +1415,7 @@ bool Visitor::VisitTypedefNameDecl(clang::TypedefNameDecl *decl) {
             td.is_template          = true;
             td.template_param_names = template_param_names(tat->getTemplateParameters());
             td.template_param_decls = template_param_decls(tat->getTemplateParameters(), _context);
+            td.requires_clause      = requires_clause_of(tat->getTemplateParameters(), _context);
         }
     }
     _module.typedefs.push_back(std::move(td));
@@ -1401,6 +1540,28 @@ bool Visitor::VisitVarDecl(clang::VarDecl *decl) {
     // facts a generator wants, and this is how they leave the AST without a
     // second parser having to understand C++.
     if (!_docs_mode || decl->isImplicit()) {
+        return true;
+    }
+    // A static data member is a member of its class, like a field. Code names
+    // them (``requires (!IsDeviceTensor)``, ``Tensor<T, 2>::IsDeviceTensor``),
+    // so a documented class must declare its public ones or those names have
+    // nothing to resolve to.
+    if (decl->isStaticDataMember()) {
+        BoundClass *cls = current_class();
+        if (cls == nullptr || !passes_member_filter(decl)) {
+            return true;
+        }
+        // An out-of-class definition repeats a member the class already declared.
+        if (decl->isOutOfLine()) {
+            return true;
+        }
+        BoundField field;
+        fill_common(field, decl);
+        field.type         = translate_type(decl->getType(), _context);
+        field.py_type      = translate_python_type(decl->getType(), _context);
+        field.is_static    = true;
+        field.is_constexpr = decl->isConstexpr();
+        cls->fields.push_back(std::move(field));
         return true;
     }
     // Parameters and locals are VarDecls too; only file-scope ones are API.

@@ -9,12 +9,13 @@
 # ``apiary_render_cpp_site.py``, asserts the per-entity page set and the
 # soundness rules (const/non-const overloads stay distinct, cross-header
 # overload sets merge, the best-documented duplicate wins, every kind of
-# template parameter renders as declared), and, when sphinx-build is
-# available, builds the result with ``-W -n`` so a duplicate declaration or
-# malformed directive fails.
+# template parameter and every part of a declaration renders as written), and,
+# when sphinx-build is available, builds the result with ``-W -n`` so a
+# duplicate declaration or malformed directive fails.
 #
-# The pages rendered from geom/Templates.hpp are also diffed against
-# tests/golden/cpp_site_declarations.rst.golden. Run with REGEN=1 to rewrite it.
+# The pages rendered from geom/Templates.hpp and geom/Specifiers.hpp are also
+# diffed against tests/golden/cpp_site_declarations.rst.golden. Run with
+# REGEN=1 to rewrite it.
 #
 # Invocation:
 #     run_cpp_site.sh <apiary-binary> <apiary-include-dir> <python> [sphinx-build]
@@ -62,7 +63,8 @@ gen() {
 gen geom/Shapes.hpp "${WORK}/Shapes.json"
 gen geom/Ops.hpp "${WORK}/Ops.json"
 gen geom/Templates.hpp "${WORK}/Templates.json"
-readonly JSONS=("${WORK}/Shapes.json" "${WORK}/Ops.json" "${WORK}/Templates.json")
+gen geom/Specifiers.hpp "${WORK}/Specifiers.json"
+readonly JSONS=("${WORK}/Shapes.json" "${WORK}/Ops.json" "${WORK}/Templates.json" "${WORK}/Specifiers.json")
 
 SITE="${WORK}/src/geom"
 "${PY}" "${SCRIPTS_DIR}/apiary_render_cpp_site.py" --outdir "${SITE}" \
@@ -70,10 +72,11 @@ SITE="${WORK}/src/geom"
     "${JSONS[@]}" 2>/dev/null
 
 # ---- page inventory --------------------------------------------------------
-# Pages rendered from Templates.hpp; the golden covers these.
+# Pages rendered from Templates.hpp and Specifiers.hpp; the golden covers these.
 readonly DECL_PAGES=(
     geom.advance geom.Grid geom.make_fixed geom.print geom.rebuild geom.repack geom.scaled geom.sum geom.unfold
-    types
+    geom.Box geom.exchange geom.length geom.magnitude geom.same_area geom.Shape geom.Hexagon
+    geom.square geom.twice geom.widen types
 )
 for page in index geom.Circle geom.Scalar geom.scale enums macros operators "${DECL_PAGES[@]}"; do
     assert_file "${SITE}/${page}.rst"
@@ -127,6 +130,43 @@ assert_grep ".. cpp:type:: template <typename T, size_t N = 3> Square" "${SITE}/
 # the ``auto`` already makes the template, and declaring it twice is a
 # duplicate declaration.
 assert_grep "template <typename Sep = char> void print(Sep sep, const auto &... values)" "${SITE}/geom.print.rst"
+
+# ---- declarations render in full -------------------------------------------
+# Requires-clauses, exception specifications, and specifiers are part of the
+# declaration. Overloads that differ only in a requires-clause must both
+# survive extraction and rendering; before, the second silently vanished.
+assert_grep "template <typename T> requires Scalar<T> T twice(T x)" "${SITE}/geom.twice.rst"
+assert_grep "template <typename T> requires (!Scalar<T>) T twice(T x)" "${SITE}/geom.twice.rst"
+assert_grep "template <typename U> Box<T> scaled(U factor) const requires Scalar<U>" "${SITE}/geom.Box.rst"
+assert_grep ".. cpp:class:: template <typename T> requires Scalar<T> Box" "${SITE}/geom.Box.rst"
+# A static data member is declared, so a constraint naming it resolves.
+assert_grep ".. cpp:member:: static constexpr bool IsExact" "${SITE}/geom.Box.rst"
+assert_grep "Box<T> rounded() const requires (!IsExact)" "${SITE}/geom.Box.rst"
+assert_grep "template <typename U> explicit(!Scalar<U>) Box(U u)" "${SITE}/geom.Box.rst"
+assert_grep ".. cpp:type:: template <typename T> requires Scalar<T> ScalarBox" "${SITE}/types.rst"
+assert_grep "constexpr Real magnitude(Real x) noexcept" "${SITE}/geom.magnitude.rst"
+assert_grep "void exchange(T &a, T &b) noexcept(noexcept(" "${SITE}/geom.exchange.rst"
+assert_grep "consteval int square(int n)" "${SITE}/geom.square.rst"
+assert_grep "bool same_area(const Circle &a, const Circle &b) = delete" "${SITE}/geom.same_area.rst"
+# A defaulted member is constexpr to clang whether or not the header says so,
+# and a destructor noexcept; neither is written here, so neither renders.
+assert_grep "   .. cpp:function:: Shape() = default" "${SITE}/geom.Shape.rst"
+assert_grep "   .. cpp:function:: virtual ~Shape() = default" "${SITE}/geom.Shape.rst"
+assert_grep "Shape(const Shape &) = delete" "${SITE}/geom.Shape.rst"
+assert_grep "virtual Real area() const = 0" "${SITE}/geom.Shape.rst"
+# A conversion operator has no separate return type; operator new does.
+assert_grep "   .. cpp:function:: constexpr explicit operator bool() const noexcept" "${SITE}/geom.Shape.rst"
+assert_grep "static void * operator new(" "${SITE}/geom.Shape.rst"
+assert_grep ".. cpp:class:: Hexagon final : public Shape" "${SITE}/geom.Hexagon.rst"
+assert_grep "explicit Hexagon(Real side)" "${SITE}/geom.Hexagon.rst"
+assert_grep "Real area() const override" "${SITE}/geom.Hexagon.rst"
+assert_grep "virtual Real side() const final" "${SITE}/geom.Hexagon.rst"
+# A requires-expression of nested requirements only declares as their
+# conjunction.
+assert_grep "template <typename T> requires (Scalar<T> && (sizeof(T) > 4)) Real widen(T x)" "${SITE}/geom.widen.rst"
+# A requires-expression cannot go in a cpp-domain declaration; it is stated in
+# the body instead.
+assert_grep "Requires \`\`requires (const C &c) { c.size(); }\`\`." "${SITE}/geom.length.rst"
 
 actual_decls="${WORK}/declarations.rst"
 for page in "${DECL_PAGES[@]}"; do

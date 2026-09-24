@@ -214,7 +214,20 @@ class IrConsumer : public ASTConsumer {
             // overloaded free functions sharing a name (e.g. one
             // templated, one not — common for Python-bindable wrappers
             // around C++ overload sets) all survive the cross-TU dedupe.
+            // The template head and the constraints are part of the
+            // signature too: ``template <typename T> requires C<T> T f(T)``
+            // and its ``requires (!C<T>)`` sibling have identical parameter
+            // types and are still two functions.
             std::string key = f.qualified_name;
+            key += '<';
+            for (auto const &tp : f.template_param_decls) {
+                key += std::to_string(static_cast<int>(tp.kind));
+                key += tp.is_pack ? "..." : "";
+                key += tp.type;
+                key += tp.constraint;
+                key += ',';
+            }
+            key += "> requires " + f.requires_clause;
             key += '(';
             for (std::size_t i = 0; i < f.params.size(); ++i) {
                 if (i != 0) {
@@ -222,7 +235,7 @@ class IrConsumer : public ASTConsumer {
                 }
                 key += f.params[i].type;
             }
-            key += ')';
+            key += ") requires " + f.specifiers.trailing_requires_clause;
             if (g_seen_functions.insert(std::move(key)).second) {
                 g_module.functions.push_back(std::move(f));
             }

@@ -260,6 +260,347 @@ Defined in header ``geom/Templates.hpp``.
    :tparam CRank: The rank of the source.
    :tparam T: The element type.
    :param source: The grid to unfold.
+==> geom.Box.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_Box:
+
+=========
+geom::Box
+=========
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:class:: template <typename T> requires Scalar<T> Box
+
+   A box holding one scalar.
+
+   :tparam T: The scalar type.
+
+
+   .. cpp:function:: template <typename U> explicit(!Scalar<U>) Box(U u)
+
+      Box a value, converting implicitly only from a scalar.
+
+      :tparam U: The source type.
+      :param u: The value.
+
+
+   .. cpp:function:: template <typename U> Box<T> scaled(U factor) const requires Scalar<U>
+
+      Scale by a factor of any scalar type.
+
+      :tparam U: The factor type.
+      :param factor: The factor.
+
+
+   .. cpp:function:: Box<T> rounded() const requires (!IsExact)
+
+      The value rounded to a whole number; only an inexact box has one.
+
+
+   .. cpp:member:: static constexpr bool IsExact
+
+      Whether the box holds an exact value.
+==> geom.exchange.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_exchange:
+
+==============
+geom::exchange
+==============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <typename T> void exchange(T &a, T &b) noexcept(noexcept(T(static_cast<T &&>(a))))
+
+   Swap two values, throwing only if moving them can.
+
+   :param a: The first value.
+   :param b: The second value.
+==> geom.length.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_length:
+
+============
+geom::length
+============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <typename C> int length(const C &c)
+
+   The number of elements in anything with a ``size()``.
+
+   :param c: The container.
+
+
+   Requires ``requires (const C &c) { c.size(); }``.
+==> geom.magnitude.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_magnitude:
+
+===============
+geom::magnitude
+===============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: constexpr Real magnitude(Real x) noexcept
+
+   Absolute value, without throwing.
+
+   :param x: The value.
+==> geom.same_area.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_same_area:
+
+===============
+geom::same_area
+===============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: bool same_area(const Circle &a, const Circle &b) = delete
+
+   Circles cannot be compared by area.
+==> geom.Shape.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_Shape:
+
+===========
+geom::Shape
+===========
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:class:: Shape
+
+   A closed shape in the plane.
+
+
+   .. cpp:function:: Shape() = default
+
+      A default shape.
+
+
+   .. cpp:function:: Shape(const Shape &) = delete
+
+      Shapes are not copied.
+
+
+   .. cpp:function:: virtual ~Shape() = default
+
+      Release the shape.
+
+
+   .. cpp:function:: virtual Real area() const = 0
+
+      The enclosed area.
+
+
+   .. cpp:function:: constexpr explicit operator bool() const noexcept
+
+      Whether the shape encloses any area.
+
+
+   .. cpp:function:: static void * operator new(size_t bytes)
+
+      Shapes come from a pool.
+
+      :param bytes: The allocation size.
+==> geom.Hexagon.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_Hexagon:
+
+=============
+geom::Hexagon
+=============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:class:: Hexagon final : public Shape
+
+   A regular hexagon, which nothing derives from.
+
+
+   .. cpp:function:: explicit Hexagon(Real side)
+
+      A hexagon with a given side.
+
+      :param side: The side length.
+
+
+   .. cpp:function:: Real area() const override
+
+      The enclosed area.
+
+
+   .. cpp:function:: virtual Real side() const final
+
+      The side length, fixed for good.
+==> geom.square.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_square:
+
+============
+geom::square
+============
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: consteval int square(int n)
+
+   A compile-time square.
+
+   :param n: The value to square.
+==> geom.twice.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_twice:
+
+===========
+geom::twice
+===========
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <typename T> requires Scalar<T> T twice(T x)
+
+   Double a scalar.
+
+   :param x: The value.
+
+
+.. cpp:function:: template <typename T> requires (!Scalar<T>) T twice(T x)
+
+   Double something that is not a scalar, by concatenation.
+
+   :param x: The value.
+==> geom.widen.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_widen:
+
+===========
+geom::widen
+===========
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Specifiers.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:function:: template <typename T> requires (Scalar<T> && (sizeof(T) > 4)) Real widen(T x)
+
+   Widen a large scalar. The requires-expression holds only nested
+   requirements, so it declares as the conjunction of them.
+
+   :param x: The value.
 ==> types.rst <==
 ..
     ----------------------------------------------------------------------------------------------
@@ -277,13 +618,20 @@ Types
 .. note::
    Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
 
-Defined in headers ``geom/Shapes.hpp``, ``geom/Templates.hpp``.
+Defined in headers ``geom/Shapes.hpp``, ``geom/Specifiers.hpp``, ``geom/Templates.hpp``.
 
 .. cpp:namespace:: geom
 
 .. cpp:type:: Real = double
 
    The floating-point type used by every shape.
+
+
+.. cpp:type:: template <typename T> requires Scalar<T> ScalarBox
+
+   A box of a scalar type.
+
+   :tparam T: The scalar type.
 
 
 .. cpp:type:: template <typename T, size_t N = 3> Square

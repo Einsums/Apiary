@@ -120,9 +120,45 @@ def lower_template(params: list[str], decls: list[dict] | None = None) -> str:
     return "template <" + ", ".join(parts) + "> "
 
 
+def declarable_constraint(clause: str) -> bool:
+    """Whether a requires-clause can go in a cpp-domain declaration.
+
+    The cpp domain parses concept checks, ``&&``/``||`` combinations and
+    parenthesized constant expressions, but not a requires-expression
+    (``requires requires (T a) { a + a; }``). A clause containing one is kept
+    out of the signature and stated in the body instead (emit_constraints).
+    """
+    return re.search(r"\brequires\b", clause) is None
+
+
+def requires_clauses(entity: dict) -> list[str]:
+    """The entity's requires-clauses, template head first, then trailing."""
+    head = (entity.get("requires_clause") or "").strip()
+    trailing = ((entity.get("specifiers") or {}).get("trailing_requires_clause") or "").strip()
+    return [c for c in (head, trailing) if c]
+
+
 def entity_template(entity: dict) -> str:
-    """The ``template <...>`` prefix of an entity's declaration, or ""."""
-    return lower_template(entity.get("template_params", []), entity.get("template_param_decls"))
+    """The ``template <...>`` prefix of an entity's declaration, including
+    its requires-clause when the cpp domain can declare it, or ""."""
+    head = lower_template(entity.get("template_params", []), entity.get("template_param_decls"))
+    clause = (entity.get("requires_clause") or "").strip()
+    if head and clause and declarable_constraint(clause):
+        head = f"{head}requires {clause} "
+    return head
+
+
+def emit_constraints(out: list[str], entity: dict, indent: str, ns: str) -> None:
+    """State in the body each requires-clause the signature could not carry.
+    Overloads that differ only in such a clause still collapse to one
+    signature; this keeps the constraint visible on the one that renders."""
+    for clause in requires_clauses(entity):
+        if not declarable_constraint(clause):
+            # The blank line first: a doc-less entity has nothing between its
+            # directive line and this paragraph.
+            out.append("")
+            out.append(f"{indent}Requires ``{relativize(clause, ns)}``.")
+            out.append("")
 
 
 def declarator(t: str, name: str) -> str:
@@ -192,7 +228,11 @@ def function_signature(fn: dict) -> str | None:
         # clang lost the operator symbol (spaceship / hidden friend) — there
         # is nothing parseable to emit.
         return None
-    if fn.get("is_operator") and name.startswith("operator "):
+    # JSON from an apiary that predates ``is_conversion``: clang does not count
+    # a conversion as an overloaded operator, while ``operator new`` and
+    # ``operator delete`` are ones whose names also contain a space.
+    is_conversion = fn.get("is_conversion", name.startswith("operator ") and not fn.get("is_operator"))
+    if is_conversion:
         # Conversion operator: ``operator <target>()`` — the return type IS
         # the conversion target; emit no separate return type.
         target = _clean_typeparams((fn.get("return_type") or "").strip()) or _clean_typeparams(name[len("operator "):])
@@ -202,18 +242,48 @@ def function_signature(fn: dict) -> str | None:
     else:
         ret = _clean_typeparams((fn.get("return_type") or "void").strip())
         sig = f"{tmpl}{ret} {name}({params})"
+    spec = fn.get("specifiers") or {}
+    # Declaration specifiers go AFTER the template head (``template <...>
+    # static constexpr ...``), in the order C++ code conventionally writes them.
+    prefix = [
+        word
+        for word, present in (
+            ("static", fn.get("is_static")),
+            (spec.get("constexpr"), spec.get("constexpr")),
+            (spec.get("explicit"), spec.get("explicit")),
+            ("virtual", spec.get("virtual")),
+        )
+        if present
+    ]
+    if prefix:
+        sig = tmpl + " ".join(prefix) + " " + sig[len(tmpl):]
     # Method qualifiers. ``const`` and the ref-qualifier are both load-bearing:
     # a const/non-const pair, or an ``&``/``&&`` pair, renders to the SAME
     # signature without them, and the second directive is a duplicate
-    # declaration the build must not have to suppress. They must also come out
-    # in source order, ``const`` then ``&``/``&&``.
-    # ``static`` goes AFTER any template clause (``template <...> static ...``).
-    if fn.get("is_static"):
-        sig = tmpl + "static " + sig[len(tmpl):] if tmpl else "static " + sig
+    # declaration the build must not have to suppress. A requires-clause is
+    # load-bearing the same way for a constrained overload set. Everything
+    # after the parameter list comes out in the order the grammar fixes:
+    # cv, ref, noexcept, virt-specifiers, requires-clause, then ``= 0`` /
+    # ``= delete`` / ``= default``.
     if fn.get("is_const"):
         sig += " const"
     if ref := fn.get("ref_qualifier"):
         sig += " " + ref
+    if noexcept := spec.get("noexcept"):
+        sig += " " + noexcept
+    if spec.get("override"):
+        sig += " override"
+    if spec.get("final"):
+        sig += " final"
+    trailing = (spec.get("trailing_requires_clause") or "").strip()
+    if trailing and declarable_constraint(trailing):
+        sig += f" requires {trailing}"
+    if fn.get("is_pure_virtual"):
+        sig += " = 0"
+    elif fn.get("is_deleted"):
+        sig += " = delete"
+    elif spec.get("defaulted"):
+        sig += " = default"
     return relativize(_clean_typeparams(sig), namespace_of(fn.get("qualified_name", name)))
 
 
@@ -272,6 +342,7 @@ def render_function(out: list[str], fn: dict, base: str = "") -> None:
         return
     out.append(f"{base}.. cpp:function:: {sig}")
     emit_doc(out, fn, base + IND)
+    emit_constraints(out, fn, base + IND, namespace_of(fn.get("qualified_name", fn["name"])))
     out.append("")
 
 
@@ -288,6 +359,7 @@ def render_typedef(out: list[str], td: dict) -> None:
     decl = f"{tmpl}{name}" if (complex_underlying or not underlying) else f"{tmpl}{name} = {underlying}"
     out.append(f".. cpp:type:: {decl}")
     emit_doc(out, td, IND)
+    emit_constraints(out, td, IND, ns)
     out.append("")
 
 
@@ -324,8 +396,15 @@ def render_enum(out: list[str], en: dict, base: str = "") -> None:
 
 
 def class_signature(cls: dict) -> str:
-    tmpl = relativize(entity_template(cls), namespace_of(cls.get("qualified_name", cls["name"])))
-    return f"{tmpl}{cls['name']}"
+    """``template <...> Name final : public Base``, as the header declares it.
+    ``bases`` holds the public bases only, which are the ones a reader can use."""
+    ns = namespace_of(cls.get("qualified_name", cls["name"]))
+    sig = relativize(entity_template(cls), ns) + cls["name"]
+    if cls.get("is_final"):
+        sig += " final"
+    if bases := cls.get("bases"):
+        sig += " : " + ", ".join(f"public {relativize(_clean_typeparams(b), ns)}" for b in bases)
+    return sig
 
 
 def render_class(out: list[str], cls: dict, base: str = "") -> None:
@@ -337,12 +416,14 @@ def render_class(out: list[str], cls: dict, base: str = "") -> None:
     scope = cls.get("qualified_name", cls["name"])
     out.append(f"{base}.. cpp:class:: {class_signature(cls)}")
     emit_doc(out, cls, base + IND)
+    emit_constraints(out, cls, base + IND, namespace_of(scope))
     out.append("")
     # Members nest under the class directive via indentation. Distinct C++
-    # overloads can lower to the SAME cpp-domain signature (concept-constrained
-    # overload sets lose their requires clauses); emit each rendered signature
-    # once — keeping the first documented occurrence — so the class body never
-    # declares a duplicate.
+    # overloads can still lower to the SAME cpp-domain signature when all that
+    # tells them apart is a requires-expression the cpp domain cannot declare
+    # (see declarable_constraint); emit each rendered signature once, keeping
+    # the first documented occurrence, so the class body never declares a
+    # duplicate.
     inner = base + IND
     seen_sigs: dict[str, dict] = {}
     members: list[dict] = []
@@ -361,7 +442,12 @@ def render_class(out: list[str], cls: dict, base: str = "") -> None:
         render_function(out, m, base=inner)
     for f in cls.get("fields", []):
         ftype = relativize((f.get("type") or "").strip(), scope)
-        out.append(f"{inner}.. cpp:member:: {declarator(ftype, f['name'])}")
+        # A constexpr member's type prints with its implied ``const``
+        # (``const bool``); ``constexpr`` already says so.
+        if f.get("is_constexpr"):
+            ftype = re.sub(r"^const\s+|\s+const$", "", ftype)
+        specs = ("static " if f.get("is_static") else "") + ("constexpr " if f.get("is_constexpr") else "")
+        out.append(f"{inner}.. cpp:member:: {specs}{declarator(ftype, f['name'])}")
         emit_doc(out, f, inner + IND)
         out.append("")
     # Nested enums and classes nest one level deeper, becoming
