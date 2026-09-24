@@ -17,6 +17,8 @@
 // Without --output, the formatted source is written to stdout. Without
 // --module, "einsums" is used.
 
+#include <algorithm>
+#include <map>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -274,16 +276,44 @@ class IrConsumer : public ASTConsumer {
                 g_module.variables.push_back(std::move(v));
             }
         }
-        // Documented macros are not AST decls — scan the main header's raw
-        // source text (docs mode only). Reading raw text covers all #if
-        // branches, so a macro documented inside a compiler-specific branch
-        // is still captured.
+        // Documented macros are not AST decls — scan raw source text instead
+        // (docs mode only). Reading raw text covers all #if branches, so a
+        // macro documented inside a compiler-specific branch is still
+        // captured. The text scanned is the main file's and every module
+        // header's (--source-include), because the main file is not always a
+        // module header: a generated umbrella that includes a module's
+        // headers, parsed once for all of them, defines no macros itself.
         if (g_emit_cpp_docs_json) {
-            clang::SourceManager const &sm  = ctx.getSourceManager();
-            llvm::StringRef const       buf = sm.getBufferData(sm.getMainFileID());
-            for (auto &m : apiary::scan_macros(buf)) {
-                if (g_seen_macros.insert(m.qualified_name).second) {
-                    g_module.macros.push_back(std::move(m));
+            // Non-const: loading a header's buffer is a SourceManager query
+            // that may fill its cache.
+            clang::SourceManager                  &sm = ctx.getSourceManager();
+            std::map<std::string, llvm::StringRef> texts; // by path, so the scan order is stable
+            if (auto const main = sm.getFileEntryRefForID(sm.getMainFileID())) {
+                texts.emplace(main->getName().str(), sm.getBufferData(sm.getMainFileID()));
+            }
+            if (!g_source_includes.empty()) {
+                for (auto it = sm.fileinfo_begin(); it != sm.fileinfo_end(); ++it) {
+                    clang::FileEntryRef const file = it->first;
+                    std::string const         path = file.getName().str();
+                    std::string               slashed = path;
+                    std::replace(slashed.begin(), slashed.end(), '\\', '/');
+                    bool const in_module = std::any_of(g_source_includes.begin(), g_source_includes.end(), [&](std::string const &inc) {
+                        return llvm::StringRef{slashed}.ends_with(inc);
+                    });
+                    if (!in_module || texts.count(path) != 0) {
+                        continue;
+                    }
+                    if (auto const buf = sm.getMemoryBufferForFileOrNone(file)) {
+                        texts.emplace(path, buf->getBuffer());
+                    }
+                }
+            }
+            for (auto const &[path, text] : texts) {
+                for (auto &m : apiary::scan_macros(text)) {
+                    m.location.file = path;
+                    if (g_seen_macros.insert(m.qualified_name).second) {
+                        g_module.macros.push_back(std::move(m));
+                    }
                 }
             }
         }

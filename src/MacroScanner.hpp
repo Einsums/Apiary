@@ -19,7 +19,9 @@ namespace apiary {
 /// function-like ``NAME(args)``).
 ///
 /// @param source Raw header source text to scan.
-/// @return The documented macros recovered from @p source.
+/// @return The documented macros recovered from @p source, each with the
+///         1-based line of its ``#define`` in ``location.line``. The caller
+///         sets ``location.file``.
 ///
 /// @note Reads raw source text — all preprocessor branches — so a macro
 ///       documented inside a compiler-specific ``#if`` branch is still found

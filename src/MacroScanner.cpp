@@ -169,6 +169,10 @@ std::vector<BoundMacro> scan_macros(llvm::StringRef source) {
                     m.doc              = std::move(doc);
                     m.is_function_like = func_like;
                     m.params           = std::move(params);
+                    // The line of the ``#define`` itself, 1-based. The caller
+                    // knows which file the text came from and fills that in.
+                    m.location.line   = static_cast<unsigned>(k + 1);
+                    m.location.column = 1;
                     out.push_back(std::move(m));
                 }
             }

@@ -410,6 +410,15 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
                     "$<IF:$<BOOL:${APIARY_SPHINX_BUILD}>,${APIARY_SPHINX_BUILD},>"
         )
+        # The C++ reference generator (apiary_gen_cpp_docs.py): one parse per
+        # module through a generated umbrella, the per-header fallback for a
+        # module whose headers do not compile together, the header-layout
+        # split, and output that does not depend on --jobs.
+        add_test(NAME apiary_gen_cpp_docs
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_gen_cpp_docs.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
+        )
 
         # examples/ built against the *install tree*, as a consumer would. This
         # is the only coverage of apiary_detect_toolchain / apiary_add_bindings /
