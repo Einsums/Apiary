@@ -65,7 +65,25 @@ find_expr() {
 }
 
 # Schema + origin
-assert_eq "schema_version" "$(jget "${PY_FRAG}" "d['schema_version']")" "6"
+#
+# The schema version lives in five places: the C++ frontend's constant is the
+# source of truth, and the two Python constants and both mentions in the schema
+# document must agree with it. They are bumped by hand, and the document has
+# already been left behind once, so check every copy rather than pinning a
+# number here that could drift with them.
+readonly SCHEMA_DOC="${REPO_DIR}/docs/docs_json_schema.md"
+schema_version="$(sed -nE 's/^inline constexpr int k_docs_json_schema_version = ([0-9]+);$/\1/p' \
+    "${REPO_DIR}/src/DocsJson.hpp")"
+[[ -n "${schema_version}" ]] || fail "could not read k_docs_json_schema_version from src/DocsJson.hpp"
+assert_eq "apiary_docs_schema.SCHEMA_VERSION" \
+    "$(sed -nE 's/^SCHEMA_VERSION = ([0-9]+).*/\1/p' "${SCRIPTS_DIR}/apiary_docs_schema.py")" "${schema_version}"
+assert_eq "apiary_py_extract.SCHEMA_VERSION" \
+    "$(sed -nE 's/^SCHEMA_VERSION = ([0-9]+).*/\1/p' "${SCRIPTS_DIR}/apiary_py_extract.py")" "${schema_version}"
+assert_eq "docs_json_schema.md prose" \
+    "$(sed -nE 's/.*`schema_version` is currently \*\*([0-9]+)\*\*.*/\1/p' "${SCHEMA_DOC}")" "${schema_version}"
+assert_eq "docs_json_schema.md example" \
+    "$(sed -nE 's/^ *"schema_version": ([0-9]+),.*/\1/p' "${SCHEMA_DOC}")" "${schema_version}"
+assert_eq "schema_version" "$(jget "${PY_FRAG}" "d['schema_version']")" "${schema_version}"
 assert_eq "top module"     "$(jget "${PY_FRAG}" "d['module']")"          "einsums"
 
 solve="$(find_expr functions solve)"
