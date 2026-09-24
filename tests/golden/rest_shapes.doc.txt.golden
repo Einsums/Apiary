@@ -115,6 +115,11 @@
     |subscript, ``extents[k]``, and a call, *compute()*, each of which must be
     |absorbed into the span so the closing delimiter is not followed by a
     |character reST reads as a dangling start-string.
+    |
+    |A literal is the whole word Doxygen reads: ``O(1e-3)`` with its argument,
+    |``1e-10`` though it starts with a digit, ``std::map<int, double>`` across
+    |its space, and ``a->b`` through the arrow; sentence punctuation after one
+    |stays outside, as in ``size``. An unmatched closer ends it (see ``foo``).
 
 ### einsums::fixture::hanging_indent_wrap
   brief:

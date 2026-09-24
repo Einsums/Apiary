@@ -309,6 +309,11 @@ APIARY_EXPOSE APIARY_INSTANTIATE(double) T accumulate(T const *values, T scale =
  * subscript, @p extents[k], and a call, @a compute(), each of which must be
  * absorbed into the span so the closing delimiter is not followed by a
  * character reST reads as a dangling start-string.
+ *
+ * A literal is the whole word Doxygen reads: @c O(1e-3) with its argument,
+ * @c 1e-10 though it starts with a digit, @c std::map<int, double> across
+ * its space, and @c a->b through the arrow; sentence punctuation after one
+ * stays outside, as in @c size. An unmatched closer ends it (see @c foo).
  */
 APIARY_EXPOSE void fussy_inline_spans();
 

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -69,21 +70,81 @@ std::string indent_block(std::string const &body, std::string const &pad) {
 
 // ── inline command conversion (@c, @p, @ref, @a, @b → reST) ──────────────
 
+// The word a Doxygen `@c`/`@p` makes literal, starting at @p begin: its
+// end, one past the last character. Doxygen takes the whole word, so this
+// does too, and a span that stopped short would leave the closing ``-literal
+// followed by `(` or `<`, which reST rejects as a dangling start-string:
+//
+// - Brackets pair up, and whitespace inside them does not end the word
+//   (`std::map<int, double>`, `O(1e-3)`). `->` is an arrow, not a closer.
+// - A closer with no opener ends the word, so `(see @c foo)` keeps its `)`.
+// - Sentence punctuation after the word is prose, not code (`@c size.`).
+// - An opener that never closes cannot say where the word ends, so the
+//   first whitespace does.
+std::size_t code_word_end(std::string const &s, std::size_t begin) {
+    std::size_t end   = begin;
+    int         depth = 0;
+    for (; end < s.size(); ++end) {
+        char const c = s[end];
+        if (depth == 0 && std::isspace(static_cast<unsigned char>(c)) != 0) {
+            break;
+        }
+        if (c == '<' || c == '(' || c == '[') {
+            ++depth;
+        } else if ((c == '>' && !(end > begin && s[end - 1] == '-')) || c == ')' || c == ']') {
+            if (depth == 0) {
+                break;
+            }
+            --depth;
+        } else if (c == '\n') {
+            break;
+        }
+    }
+    if (depth != 0) {
+        end = begin;
+        while (end < s.size() && std::isspace(static_cast<unsigned char>(s[end])) == 0) {
+            ++end;
+        }
+    }
+    while (end > begin && std::string_view(".,;:!?").find(s[end - 1]) != std::string_view::npos) {
+        --end;
+    }
+    return end;
+}
+
+// Wrap the word after each `@c`/`@p` (or `\c`/`\p`) in a reST literal.
+std::string convert_code_spans(std::string const &s) {
+    static std::regex const re_cmd(R"([@\\][cp]\s+)");
+    std::string             out;
+    std::size_t             pos = 0;
+    for (std::sregex_iterator it(s.begin(), s.end(), re_cmd), last; it != last; ++it) {
+        auto const        at    = static_cast<std::size_t>(it->position());
+        std::size_t const begin = at + static_cast<std::size_t>(it->length());
+        if (at < pos) {
+            continue; // inside a word already consumed
+        }
+        std::size_t const end = code_word_end(s, begin);
+        if (end == begin) {
+            continue; // nothing to make literal; leave the command as written
+        }
+        out.append(s, pos, at - pos);
+        out += "``" + s.substr(begin, end - begin) + "``";
+        pos = end;
+    }
+    out.append(s, pos, std::string::npos);
+    return out;
+}
+
 std::string convert_inline(std::string s) {
     // Each pattern matches an `@cmd word` / `\cmd word` and wraps the word.
-    // `@c`/`@p` also absorb a trailing template-argument list (`@c
-    // std::complex<double>` → ``std::complex<double>``) and subscript (`@p
-    // extents[k]` → ``extents[k]``) so the closing ``-literal isn't
-    // immediately followed by `<` or `[`, which reST rejects as a dangling
-    // inline-literal start-string.
-    static std::regex const re_code(R"([@\\][cp]\s+([A-Za-z_][A-Za-z0-9_:.]*(?:<[^>]*>)?(?:\(\))?(?:\[[^\]]*\])?))");
+    // `@c`/`@p` take the whole word Doxygen does (convert_code_spans).
+    s = convert_code_spans(s);
     static std::regex const re_ref(R"([@\\]ref\s+([A-Za-z_][A-Za-z0-9_:.]*(?:\(\))?))");
     // Absorb a trailing ``()`` into the emphasised span (like @c/@p/@ref above)
     // so the closing ``*`` isn't immediately followed by ``(`` — which reST
     // rejects as an emphasis end-string (``*foo*()`` → unterminated emphasis).
     static std::regex const re_emph(R"([@\\][ae]\s+([A-Za-z_][A-Za-z0-9_:.]*(?:\(\))?))");
     static std::regex const re_bold(R"([@\\]b\s+([A-Za-z_][A-Za-z0-9_:.]*))");
-    s = std::regex_replace(s, re_code, "``$1``");
     s = std::regex_replace(s, re_ref, "``$1``");
     s = std::regex_replace(s, re_emph, "*$1*");
     s = std::regex_replace(s, re_bold, "**$1**");
