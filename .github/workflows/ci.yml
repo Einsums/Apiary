@@ -7,7 +7,16 @@ on:
 
 jobs:
   linux:
+    name: linux (LLVM ${{ matrix.llvm }})
     runs-on: ubuntu-latest
+    # One job per supported LLVM major, from CMakeLists' APIARY_LLVM_VERSION_MIN
+    # up to APIARY_LLVM_VERSION_TESTED_MAX. Every major must pass the same
+    # goldens: where Clang differs between majors, apiary adapts in
+    # src/ClangCompat.cpp so its output does not.
+    strategy:
+      fail-fast: false
+      matrix:
+        llvm: [22, 23]
     defaults:
       run:
         shell: bash -el {0}
@@ -25,19 +34,17 @@ jobs:
       # is on PATH, so without it the "the rendered reST must actually build"
       # check was never running in CI at all.
       #
-      # The LLVM major is pinned to match conda/recipe.yaml's llvm_major. Left
-      # unpinned the solver picks a different major per platform, and apiary's
-      # emitted type names are version-sensitive: LLVM 19 prints them
-      # unqualified where 22 fully qualifies them, so the goldens can only match
-      # one major at a time.
+      # The LLVM major is pinned per job. Left unpinned the solver picks a
+      # different major per platform and follows conda-forge to each new one,
+      # so a job would silently stop testing the major it is named for.
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: apiary-dev
           create-args: >-
             cmake
             ninja
-            clangdev=22
-            llvmdev=22
+            clangdev=${{ matrix.llvm }}
+            llvmdev=${{ matrix.llvm }}
             cxx-compiler
             zlib
             python
@@ -68,7 +75,12 @@ jobs:
   # apiary_detect_toolchain (forward the whole probed include list, because the
   # conda libc++ collides with the SDK's under -isysroot) and the only arm64 one.
   macos:
+    name: macos (LLVM ${{ matrix.llvm }})
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        llvm: [22, 23]
     defaults:
       run:
         shell: bash -el {0}
@@ -86,8 +98,8 @@ jobs:
           create-args: >-
             cmake
             ninja
-            clangdev=22
-            llvmdev=22
+            clangdev=${{ matrix.llvm }}
+            llvmdev=${{ matrix.llvm }}
             clang
             clangxx
             zlib
@@ -113,7 +125,12 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   windows:
+    name: windows (LLVM ${{ matrix.llvm }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        llvm: [22, 23]
     defaults:
       run:
         shell: pwsh
@@ -141,8 +158,8 @@ jobs:
           create-args: >-
             cmake
             ninja
-            clangdev=22
-            llvmdev=22
+            clangdev=${{ matrix.llvm }}
+            llvmdev=${{ matrix.llvm }}
             clang
             clangxx
             zlib
@@ -176,16 +193,18 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-  # LLVM drift detector. Everything above pins clangdev/llvmdev to 22 because
-  # apiary's emitted text is version-dependent: Clang's type printer changed how
-  # it qualifies names, and the goldens can only encode one major at a time.
-  # That pin is correct, and it is also why an LLVM bump is currently discovered
-  # by whoever attempts it, at the worst possible moment.
+  # LLVM drift detector. Everything above pins clangdev/llvmdev to one of the
+  # supported majors, which is correct, and is also why a new major would
+  # otherwise be discovered by whoever attempts it, at the worst possible
+  # moment.
   #
   # This job resolves the newest clangdev the solver offers and is allowed to
-  # fail. A red X here means the next major changed something apiary depends on
-  # - usually a type spelling, visible as a golden diff - and it says so weeks
-  # before anyone needs to do the bump.
+  # fail. A red X here means a major newer than the ones pinned above changed
+  # something apiary depends on - a moved header, a renamed API, a type
+  # spelling visible as a golden diff - and it says so before anyone needs the
+  # new major. The fix goes in src/ClangCompat.cpp, followed by a pinned job
+  # for that major above. While the newest major is one of those pinned, this
+  # job repeats it.
   #
   # Deliberately NOT an older major: CMakeLists floors at LLVM 22 with a
   # FATAL_ERROR, because below that the emitted type names do not compile. There
