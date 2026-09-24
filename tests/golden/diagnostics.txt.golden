@@ -15,3 +15,18 @@ apiary: 2 diagnostic error(s), 0 warning(s)
 apiary: 2 error(s); refusing to write the generated file.
 
 ### a check silenced
+
+### undocumented public entities (docs mode)
+undocumented_refs.hpp:3:7: undocumented CXXRecord 'vendor::Sink'
+undocumented_refs.hpp:7:12: undocumented Enum 'refs::Hint'
+undocumented_refs.hpp:8:7: undocumented CXXRecord 'refs::Engine'
+undocumented_refs.hpp:9:7: undocumented CXXRecord 'refs::Base'
+undocumented_refs.hpp:15:8: undocumented CXXRecord 'refs::Hidden'
+undocumented_refs.hpp:43:6: undocumented Function 'refs::hidden'
+apiary: 6 undocumented public entities.
+
+### undocumented entities a documented signature names (docs mode)
+undocumented_refs.hpp:9:7: undocumented CXXRecord 'refs::Base' referenced by 'refs::Car'
+undocumented_refs.hpp:8:7: undocumented CXXRecord 'refs::Engine' referenced by 'refs::Car::engine'
+undocumented_refs.hpp:7:12: undocumented Enum 'refs::Hint' referenced by 'refs::tune'
+apiary: 3 undocumented entities referenced from documented signatures.

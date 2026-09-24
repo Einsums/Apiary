@@ -903,7 +903,13 @@ bool Visitor::passes_docs_filter(clang::NamedDecl const *decl) const {
         // This is a public, in-module-header, non-detail/impl/anonymous entity
         // that SHOULD carry a doc comment but doesn't. In --report-undocumented
         // mode, surface it as a punch-list line (deduplicated per process).
-        if (_report_undocumented) {
+        // A forward declaration of an entity documented on another of its
+        // declarations (usually the definition) is not missing anything.
+        bool documented_elsewhere = false;
+        for (clang::Decl const *redecl : decl->redecls()) {
+            documented_elsewhere = documented_elsewhere || !extract_doc(redecl, _context).empty();
+        }
+        if (_report_undocumented && !documented_elsewhere) {
             clang::SourceManager const &sm  = _context.getSourceManager();
             clang::SourceLocation const loc = sm.getFileLoc(decl->getLocation());
             std::string const           key =
@@ -930,6 +936,139 @@ bool Visitor::passes_member_filter(clang::NamedDecl const *decl) const {
     }
     std::string const doc = extract_doc(decl, _context);
     return doc.find("@internal") == std::string::npos && doc.find("\\internal") == std::string::npos;
+}
+
+namespace {
+
+// Every class, enum, and class template a type names: ``Grid<Hint, 2> const &``
+// names ``Grid`` and ``Hint``. Typedefs are left alone (docs mode declares
+// every one, so a reference to an alias always resolves) and so is the
+// injected class name of the enclosing class.
+class NamedTypeCollector : public clang::RecursiveASTVisitor<NamedTypeCollector> {
+  public:
+    std::vector<clang::NamedDecl const *> found;
+
+    bool VisitRecordType(clang::RecordType *t) {
+        clang::TagDecl const *decl = t->getDecl();
+        if (auto const *spec = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(decl)) {
+            decl = spec->getSpecializedTemplate()->getTemplatedDecl();
+        }
+        found.push_back(decl);
+        return true;
+    }
+
+    bool VisitEnumType(clang::EnumType *t) {
+        found.push_back(t->getDecl());
+        return true;
+    }
+
+    bool VisitTemplateSpecializationType(clang::TemplateSpecializationType *t) {
+        if (auto const *tmpl = llvm::dyn_cast_or_null<clang::ClassTemplateDecl>(t->getTemplateName().getAsTemplateDecl())) {
+            found.push_back(tmpl->getTemplatedDecl());
+        }
+        return true;
+    }
+};
+
+} // namespace
+
+void Visitor::report_references(clang::QualType type, clang::NamedDecl const *referrer) {
+    if (!_report_undocumented_references || type.isNull()) {
+        return;
+    }
+    NamedTypeCollector collector;
+    collector.TraverseType(type);
+    for (clang::NamedDecl const *target : collector.found) {
+        report_reference(target, referrer);
+    }
+}
+
+void Visitor::report_references(clang::TemplateParameterList const *params, clang::NamedDecl const *referrer) {
+    if (!_report_undocumented_references || params == nullptr) {
+        return;
+    }
+    for (clang::NamedDecl const *p : *params) {
+        if (auto const *ttp = llvm::dyn_cast<clang::TemplateTypeParmDecl>(p)) {
+            if (clang::TypeConstraint const *tc = ttp->getTypeConstraint()) {
+                report_reference(tc->getNamedConcept(), referrer);
+            }
+        } else if (auto const *nttp = llvm::dyn_cast<clang::NonTypeTemplateParmDecl>(p)) {
+            report_references(nttp->getType(), referrer);
+        }
+    }
+}
+
+namespace {
+
+// The name of the outermost namespace enclosing @p decl, or "" at global scope.
+std::string outermost_namespace(clang::Decl const *decl) {
+    std::string out;
+    for (clang::DeclContext const *dc = decl->getDeclContext(); dc != nullptr; dc = dc->getParent()) {
+        if (auto const *ns = llvm::dyn_cast<clang::NamespaceDecl>(dc)) {
+            out = ns->getNameAsString();
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+void Visitor::report_reference(clang::NamedDecl const *target, clang::NamedDecl const *referrer) {
+    if (target == nullptr || target->isImplicit()) {
+        return;
+    }
+    // A nested type renders under its enclosing class, which documents it
+    // whether or not it carries its own comment.
+    if (!target->getDeclContext()->getRedeclContext()->isFileContext()) {
+        return;
+    }
+    // Another project's type (``spdlog::sinks::base_sink``) is not this
+    // reference's to document; a docs build resolves or ignores those
+    // wholesale. The outermost namespace is the project boundary.
+    if (outermost_namespace(target) != outermost_namespace(referrer)) {
+        return;
+    }
+    // A class or enum this translation unit only forward-declares may well be
+    // documented on a definition it cannot see. The run over the header that
+    // defines it judges it, and points at the definition.
+    if (auto const *tag = llvm::dyn_cast<clang::TagDecl>(target)) {
+        if (tag->getDefinition() == nullptr) {
+            return;
+        }
+        target = tag->getDefinition();
+    }
+    clang::SourceManager const &sm  = _context.getSourceManager();
+    clang::SourceLocation const loc = sm.getFileLoc(target->getLocation());
+    if (loc.isInvalid() || sm.isInSystemHeader(loc)) {
+        return;
+    }
+    std::string const qn = target->getQualifiedNameAsString();
+    if (qn.rfind("std::", 0) == 0 || qn.find("detail::") != std::string::npos || qn.find("impl::") != std::string::npos ||
+        qn.find("(anonymous namespace)") != std::string::npos) {
+        return;
+    }
+    // Docs mode declares every public concept, documented or not, so only an
+    // @internal one is missing from the reference. A class or enum needs a
+    // doc comment, on any of its declarations: the comment is often on the
+    // definition while a signature sees a forward declaration.
+    bool const needs_doc = !llvm::isa<clang::ConceptDecl>(target);
+    for (clang::Decl const *redecl : target->redecls()) {
+        std::string const doc      = extract_doc(redecl, _context);
+        bool const        internal = doc.find("@internal") != std::string::npos || doc.find("\\internal") != std::string::npos;
+        if (!internal && (!needs_doc || !doc.empty())) {
+            return;
+        }
+    }
+    if (!_undocumented_refs_seen.insert(qn).second) {
+        return;
+    }
+    llvm::StringRef kind = target->getDeclKindName();
+    if (auto const *record = llvm::dyn_cast<clang::CXXRecordDecl>(target);
+        record != nullptr && record->getDescribedClassTemplate() != nullptr) {
+        kind = "ClassTemplate";
+    }
+    llvm::errs() << sm.getFilename(loc) << ":" << sm.getSpellingLineNumber(loc) << ":" << sm.getSpellingColumnNumber(loc)
+                 << ": undocumented " << kind << " '" << qn << "' referenced by '" << referrer->getQualifiedNameAsString() << "'\n";
 }
 
 /// @brief Path with every backslash rewritten to a forward slash.
@@ -1087,6 +1226,16 @@ bool Visitor::TraverseCXXRecordDecl(clang::CXXRecordDecl *decl) {
     cls.requires_clause      = requires_clause_of(class_template_params(decl), _context);
     cls.bases                = collect_bases(decl, _context);
     cls.is_final             = decl->hasAttr<clang::FinalAttr>();
+    if (_docs_mode) {
+        report_references(class_template_params(decl), decl);
+        if (decl->hasDefinition()) {
+            for (clang::CXXBaseSpecifier const &base : decl->bases()) {
+                if (base.getAccessSpecifier() == clang::AS_public) {
+                    report_references(base.getType(), decl);
+                }
+            }
+        }
+    }
     cls.base_ids             = collect_base_ids(decl);
     cls.instantiations       = collect_instantiations(decl, _context, cls.directives, cls.template_param_names, _error_count);
 
@@ -1158,6 +1307,10 @@ bool Visitor::VisitCXXMethodDecl(clang::CXXMethodDecl *decl) {
     method.is_conversion         = clang::isa<clang::CXXConversionDecl>(decl);
     method.is_deleted            = decl->isDeleted();
     method.specifiers            = function_specifiers(decl, _context);
+    report_references(decl->getReturnType(), decl);
+    for (clang::ParmVarDecl const *p : decl->parameters()) {
+        report_references(p->getType(), decl);
+    }
     for (clang::CXXMethodDecl const *overridden : decl->overridden_methods()) {
         if (std::string id = compute_symbol_id(overridden); !id.empty()) {
             method.overridden_ids.push_back(std::move(id));
@@ -1171,6 +1324,7 @@ bool Visitor::VisitCXXMethodDecl(clang::CXXMethodDecl *decl) {
         method.template_param_names = template_param_names(ftpl->getTemplateParameters());
         method.template_param_decls = template_param_decls(ftpl->getTemplateParameters(), _context);
         method.requires_clause      = requires_clause_of(ftpl->getTemplateParameters(), _context);
+        report_references(ftpl->getTemplateParameters(), decl);
     }
 
     // Honor APIARY_VARIADIC_FROM: record the named template
@@ -1216,6 +1370,15 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
     fn.is_template           = decl->getDescribedFunctionTemplate() != nullptr;
     fn.is_deleted            = decl->isDeleted();
     fn.specifiers            = function_specifiers(decl, _context);
+    if (_docs_mode) {
+        report_references(decl->getReturnType(), decl);
+        for (clang::ParmVarDecl const *p : decl->parameters()) {
+            report_references(p->getType(), decl);
+        }
+        if (auto const *ftpl = decl->getDescribedFunctionTemplate()) {
+            report_references(ftpl->getTemplateParameters(), decl);
+        }
+    }
     // Resolve APIARY_INSTANTIATE_AS directives on a templated free
     // function into per-instantiation BoundInstantiation entries. Each
     // directive specifies an explicit Python name and the C++ type
@@ -1326,6 +1489,9 @@ bool Visitor::VisitFieldDecl(clang::FieldDecl *decl) {
     field.type      = translate_type(decl->getType(), _context);
     field.py_type   = translate_python_type(decl->getType(), _context);
     field.is_static = false; // FieldDecl is non-static by definition
+    if (_docs_mode) {
+        report_references(decl->getType(), decl);
+    }
     cls->fields.push_back(std::move(field));
     return true;
 }
@@ -1561,6 +1727,7 @@ bool Visitor::VisitVarDecl(clang::VarDecl *decl) {
         field.py_type      = translate_python_type(decl->getType(), _context);
         field.is_static    = true;
         field.is_constexpr = decl->isConstexpr();
+        report_references(decl->getType(), decl);
         cls->fields.push_back(std::move(field));
         return true;
     }

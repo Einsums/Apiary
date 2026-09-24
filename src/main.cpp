@@ -88,6 +88,15 @@ llvm::cl::opt<bool> g_report_undocumented("report-undocumented",
                                                          "per-module runs."),
                                           llvm::cl::cat(g_tool_category), llvm::cl::init(false));
 
+llvm::cl::opt<bool> g_report_undocumented_references(
+    "report-undocumented-references",
+    llvm::cl::desc("With --emit-cpp-docs-json, print to stderr every namespace-scope class, enum, or concept "
+                   "that a documented declaration names in its signature but that has no doc comment itself, as "
+                   "'file:line:col: undocumented <kind> <name> referenced by <entity>'. Such a reference has "
+                   "nothing to resolve to in the C++ reference, so a nitpicky Sphinx build fails on it; this "
+                   "points at the declaration to document. Does not change what is emitted."),
+    llvm::cl::cat(g_tool_category), llvm::cl::init(false));
+
 llvm::cl::opt<bool> g_emit_docs_json("emit-docs-json",
                                      llvm::cl::desc("Emit a documentation-oriented JSON description of the Python-facing "
                                                     "surface instead of pybind11. Consumed by the docs generator; see "
@@ -179,6 +188,7 @@ std::unordered_set<std::string> g_seen_macros;
 std::unordered_set<std::string> g_seen_variables;
 int                             g_error_count        = 0;
 int                             g_undocumented_count = 0;
+int                             g_undocumented_reference_count = 0;
 int                             g_annotated_seen         = 0;
 int                             g_annotated_filtered_out = 0;
 
@@ -198,10 +208,12 @@ class IrConsumer : public ASTConsumer {
         visitor.set_module_header_filter(filter);
         visitor.set_docs_mode(g_emit_cpp_docs_json);
         visitor.set_report_undocumented(g_report_undocumented);
+        visitor.set_report_undocumented_references(g_report_undocumented_references);
         visitor.TraverseDecl(ctx.getTranslationUnitDecl());
         apiary::Module local = std::move(visitor).take();
         g_error_count += visitor.error_count();
         g_undocumented_count += visitor.undocumented_count();
+        g_undocumented_reference_count += visitor.undocumented_reference_count();
         g_annotated_seen += visitor.annotated_seen();
         g_annotated_filtered_out += visitor.annotated_filtered_out();
         for (auto &c : local.classes) {
@@ -369,6 +381,17 @@ int main(int argc, char const **argv) {
         return write_output(apiary::dump(g_module));
     }
 
+    // Both reports are docs-mode only, so they are summarized before the docs
+    // JSON is written and the run returns.
+    if (g_report_undocumented) {
+        llvm::errs() << "apiary: " << g_undocumented_count << " undocumented public entit"
+                     << (g_undocumented_count == 1 ? "y" : "ies") << ".\n";
+    }
+    if (g_report_undocumented_references) {
+        llvm::errs() << "apiary: " << g_undocumented_reference_count << " undocumented entit"
+                     << (g_undocumented_reference_count == 1 ? "y" : "ies") << " referenced from documented signatures.\n";
+    }
+
     if (g_emit_docs_json || g_emit_cpp_docs_json) {
         return write_output(apiary::emit_docs_json(g_module, g_module_name));
     }
@@ -510,11 +533,6 @@ int main(int argc, char const **argv) {
         apiary::PyiOptions stub_opts;
         stub_opts.banner = "module: " + std::string{g_module_name};
         pending.push_back({g_stub_output, apiary::emit_pyi(g_module, stub_opts)});
-    }
-
-    if (g_report_undocumented) {
-        llvm::errs() << "apiary: " << g_undocumented_count << " undocumented public entit"
-                     << (g_undocumented_count == 1 ? "y" : "ies") << ".\n";
     }
 
     // Decide BEFORE writing. Emission is where the emitters report what they

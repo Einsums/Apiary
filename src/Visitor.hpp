@@ -63,6 +63,29 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     /// @param on Whether to enable report-undocumented mode.
     void set_report_undocumented(bool on) { _report_undocumented = on; }
 
+    /// @brief Enable "report undocumented references" mode (docs mode only).
+    ///
+    /// When on, every namespace-scope class, enum, or concept that a
+    /// documented declaration names in its signature (return and parameter
+    /// types, non-type template parameter types, type constraints, public
+    /// bases, public field types) but that is itself undocumented is printed
+    /// to stderr as
+    /// ``file:line:col: undocumented <kind> '<name>' referenced by '<entity>'``.
+    /// Such a reference has no declaration to resolve to in the reference, so
+    /// a nitpicky Sphinx build fails on it. Each referenced entity is reported
+    /// once per process. Types from system headers and from ``std``,
+    /// ``detail``, ``impl``, and anonymous namespaces are never reported, and
+    /// neither are typedefs, which docs mode declares whether or not they are
+    /// documented.
+    /// @param on Whether to enable report-undocumented-references mode.
+    void set_report_undocumented_references(bool on) { _report_undocumented_references = on; }
+
+    /// @brief Number of distinct undocumented entities referenced from
+    /// documented signatures this run (only meaningful when
+    /// ``set_report_undocumented_references(true)``).
+    /// @return The count of distinct undocumented referenced entities.
+    [[nodiscard]] int undocumented_reference_count() const { return static_cast<int>(_undocumented_refs_seen.size()); }
+
     /// @brief Move the built Module IR out of the visitor.
     /// @return The accumulated Module IR.
     Module take() && { return std::move(_module); }
@@ -196,6 +219,23 @@ class Visitor : public clang::RecursiveASTVisitor<Visitor> {
     // the reporting happens inside the ``const`` filter.
     bool                          _report_undocumented = false;
     mutable std::set<std::string> _undocumented_seen;
+
+    // ``--report-undocumented-references``: print the undocumented entities a
+    // documented signature names. ``_undocumented_refs_seen`` deduplicates by
+    // referenced entity and backs ``undocumented_reference_count()``.
+    bool                  _report_undocumented_references = false;
+    std::set<std::string> _undocumented_refs_seen;
+
+    // Report every undocumented entity named in @p type, on behalf of
+    // @p referrer (a documented declaration). No-op unless the report is on.
+    void report_references(clang::QualType type, clang::NamedDecl const *referrer);
+
+    // The same for the parts of a template parameter list that a signature
+    // shows: non-type parameter types and type constraints.
+    void report_references(clang::TemplateParameterList const *params, clang::NamedDecl const *referrer);
+
+    // Report @p target if it is an undocumented namespace-scope entity.
+    void report_reference(clang::NamedDecl const *target, clang::NamedDecl const *referrer);
 
     // Returns true if the decl's source location is in one of the module's
     // own headers (per ``--source-include`` flags). When the filter is

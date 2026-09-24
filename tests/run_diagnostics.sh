@@ -58,6 +58,60 @@ APIARY_EXPOSE APIARY_RENAME("divided") Money operator/(Money const &lhs, double 
 } // namespace einsums::fixture
 HPP
 
+# Docs-mode reports. A documented signature that names an undocumented type has
+# nothing to resolve that name to in the C++ reference; the reference report
+# must name it (and the documented entity that refers to it), and must stay
+# quiet about the undocumented names that are fine: typedefs, nested types,
+# detail/std names, a type documented on another declaration, one only
+# forward-declared here (its definition, unseen, may be documented), another
+# project's type, and anything referenced only from undocumented code.
+cat > "${WORK}/undocumented_refs.hpp" <<'HPP'
+#pragma once
+namespace vendor {
+class Sink {};
+} // namespace vendor
+namespace refs {
+class Elsewhere;
+enum class Hint { Fast, Slow };
+class Engine {};
+class Base {};
+template <typename T>
+concept Spinnable = true;
+namespace detail {
+struct Impl {};
+} // namespace detail
+struct Hidden {};
+using Speed = int;
+
+/// A wheel.
+class Wheel {};
+
+class Gear;
+
+/// A gear, documented on its definition only.
+class Gear {};
+
+/// A car.
+class Car : public Base {
+  public:
+    /// A part of the car.
+    struct Part {};
+
+    /// Fit a wheel.
+    void fit(Wheel const &w, Gear *g, detail::Impl *i, Speed s, Part p, Elsewhere *e, vendor::Sink *k);
+
+    /// The engine.
+    Engine engine;
+};
+
+/// Tune an engine.
+template <Hint H, Spinnable S>
+Engine tune(S s);
+
+void hidden(Hidden h);
+} // namespace refs
+HPP
+
 # Run the tool over one fixture and keep only apiary's own diagnostics.
 # Absolute paths are reduced to a basename so the golden survives a move, and
 # the "N binding statement(s)" progress line is dropped - it belongs to the
@@ -109,6 +163,12 @@ collect() {
     echo
     echo "### a check silenced"
     collect qualifiers.hpp --diagnostic=moved-from-self=ignored
+    echo
+    echo "### undocumented public entities (docs mode)"
+    collect_path "${WORK}/undocumented_refs.hpp" --emit-cpp-docs-json --report-undocumented
+    echo
+    echo "### undocumented entities a documented signature names (docs mode)"
+    collect_path "${WORK}/undocumented_refs.hpp" --emit-cpp-docs-json --report-undocumented-references
 } > "${WORK}/actual.txt"
 
 if [[ "${REGEN}" == "1" ]]; then

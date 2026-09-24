@@ -176,7 +176,8 @@ class ApiaryRun:
 
 
 def gen_header(tool: str, flags: list[str], header: Path, relheader: str, out_dir: Path,
-               tparams: set[str], undoc: set[str] | None = None, render_page: bool = True) -> bool:
+               tparams: set[str], undoc: set[str] | None = None, render_page: bool = True,
+               undoc_refs: set[str] | None = None) -> bool:
     title = relheader
     json_out = out_dir / (sanitized(relheader) + ".json")
     rst_out = out_dir / (sanitized(relheader) + ".rst")
@@ -184,15 +185,20 @@ def gen_header(tool: str, flags: list[str], header: Path, relheader: str, out_di
            "--source-include", relheader, str(header), *flags]
     if undoc is not None:
         cmd.insert(2, "--report-undocumented")
+    if undoc_refs is not None:
+        cmd.insert(2, "--report-undocumented-references")
     res = subprocess.run(cmd, capture_output=True, text=True)
-    if undoc is not None:
-        # The tool prints "file:line:col: undocumented <kind> <name>" to stderr
-        # (mixed with clang include-trace noise, which we drop). Collect into a
-        # shared set so the same entity reported by transitive includes across
-        # module runs is deduplicated.
-        for ln in res.stderr.splitlines():
-            if ": undocumented " in ln:
-                undoc.add(ln.strip())
+    # The tool prints "file:line:col: undocumented <kind> <name>" to stderr
+    # (mixed with clang include-trace noise, which we drop), with a trailing
+    # "referenced by <entity>" for the references report. Collect into shared
+    # sets so the same entity reported by transitive includes across module
+    # runs is deduplicated.
+    for ln in res.stderr.splitlines():
+        if ": undocumented " not in ln:
+            continue
+        target = undoc_refs if " referenced by " in ln else undoc
+        if target is not None:
+            target.add(ln.strip())
     write_if_changed(json_out, res.stdout)
     if not res.stdout.strip():
         return False
@@ -307,6 +313,11 @@ def main() -> int:
                     help="Also collect a deduplicated punch-list of public C++ entities missing a "
                          "doc comment. Prints the sorted list to stdout and writes it to "
                          "<out-dir>/undocumented.txt. Does not change the generated pages.")
+    ap.add_argument("--report-undocumented-references", action="store_true",
+                    help="Also collect the undocumented classes, enums, and concepts that documented "
+                         "signatures name. Each is a reference with nothing to resolve to, which a "
+                         "nitpicky Sphinx build rejects. Prints the sorted list to stdout and writes it "
+                         "to <out-dir>/undocumented_references.txt. Does not change the generated pages.")
     ap.add_argument("--layout", choices=("header", "entity"), default="header",
                     help="'header': one page per header (legacy). 'entity': one page per "
                          "class/concept/function overload set under <out-dir>/rst/.")
@@ -339,6 +350,7 @@ def main() -> int:
     total = 0
     tparams: set[str] = set()
     undoc: set[str] | None = set() if args.report_undocumented else None
+    undoc_refs: set[str] | None = set() if args.report_undocumented_references else None
     for mod in modules:
         lib, module = mod.split("/", 1)
         inc = source / "libs" / lib / module / "include"
@@ -351,7 +363,7 @@ def main() -> int:
             if rel is None:
                 continue
             if gen_header(args.tool, flags, header, rel, out_dir, tparams, undoc,
-                          render_page=not entity_layout):
+                          render_page=not entity_layout, undoc_refs=undoc_refs):
                 total += 1
                 module_jsons.append(out_dir / (sanitized(rel) + ".json"))
         if entity_layout:
@@ -374,6 +386,19 @@ def main() -> int:
             print(report)
         log(f"{len(undoc)} undocumented public entit{'y' if len(undoc) == 1 else 'ies'} "
             f"(written to {out_dir / 'undocumented.txt'})")
+    if undoc_refs is not None:
+        # Separate per-header runs can name different referrers for one
+        # undocumented entity; list each entity once, with its first referrer.
+        by_entity: dict[str, str] = {}
+        for ln in sorted(undoc_refs):
+            m = re.search(r": undocumented (\S+ '[^']*')", ln)
+            by_entity.setdefault(m.group(1) if m else ln, ln)
+        report = "\n".join(by_entity.values())
+        write_if_changed(out_dir / "undocumented_references.txt", report + ("\n" if report else ""))
+        if report:
+            print(report)
+        log(f"{len(by_entity)} undocumented entit{'y' if len(by_entity) == 1 else 'ies'} referenced "
+            f"from documented signatures (written to {out_dir / 'undocumented_references.txt'})")
     return 0
 
 
