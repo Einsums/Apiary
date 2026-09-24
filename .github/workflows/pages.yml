@@ -32,15 +32,18 @@ jobs:
       - uses: actions/checkout@v4
 
       # Same toolchain as CI (libTooling needs clangdev/llvmdev), plus the
-      # Python + Sphinx the doc generators and HTML build need.
+      # Python + Sphinx the doc generators and HTML build need. Pinned to the
+      # LLVM major CI pins, for the same reason: an unpinned solve follows
+      # conda-forge to each new LLVM, whose API apiary may not build against
+      # yet. CI's drift job is where a new major gets tried.
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: apiary-dev
           create-args: >-
             cmake
             ninja
-            clangdev
-            llvmdev
+            clangdev=22
+            llvmdev=22
             cxx-compiler
             zlib
             python
