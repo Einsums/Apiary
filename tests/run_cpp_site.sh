@@ -74,7 +74,7 @@ SITE="${WORK}/src/geom"
 # ---- page inventory --------------------------------------------------------
 # Pages rendered from Templates.hpp and Specifiers.hpp; the golden covers these.
 readonly DECL_PAGES=(
-    geom.advance geom.Grid geom.make_fixed geom.print geom.rebuild geom.repack geom.scaled geom.sum geom.unfold
+    geom.advance geom.Grid geom.make_fixed geom.print geom.rebuild geom.repack geom.scaled geom.Stack geom.sum geom.unfold
     geom.Box geom.exchange geom.length geom.magnitude geom.same_area geom.Shape geom.Hexagon
     geom.square geom.twice geom.widen types
 )
@@ -123,6 +123,10 @@ assert_grep "template <template <typename Elem, size_t Extent> typename Containe
 assert_grep "template <Scalar auto Step> Real advance(Real x)" "${SITE}/geom.advance.rst"
 assert_grep "template <Scalar S, int Offset = 0> Grid<S, 2> scaled(" "${SITE}/geom.scaled.rst"
 assert_grep ".. cpp:class:: template <typename T, size_t Rank = 2> Grid" "${SITE}/geom.Grid.rst"
+# A non-type parameter named in a base or a signature prints bare. LLVM 23
+# qualifies it with the class (``Stack::Rank``) unless apiary tells it not to.
+assert_grep ".. cpp:class:: template <typename T, size_t Rank> Stack : public Grid<T, Rank>" "${SITE}/geom.Stack.rst"
+assert_grep "Grid<T, Rank> top() const" "${SITE}/geom.Stack.rst"
 assert_grep "template <typename F, bool Unroll = false> void fill(" "${SITE}/geom.Grid.rst"
 assert_grep "template <size_t NewRank, typename... Dims> Grid<T, NewRank> reshape(" "${SITE}/geom.Grid.rst"
 assert_grep ".. cpp:type:: template <typename T, size_t N = 3> Square" "${SITE}/types.rst"

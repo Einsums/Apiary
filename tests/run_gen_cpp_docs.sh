@@ -46,13 +46,24 @@ ALPHA="${SRC}/libs/Demo/Alpha/include/Demo/Alpha"
 BETA="${SRC}/libs/Demo/Beta/include/Demo/Beta"
 mkdir -p "${ALPHA}" "${BETA}" "${WORK}/build"
 
+# One.hpp only forward-declares Widget and Mode; Two.hpp defines and documents
+# them. Parsed as one module, the forward declarations come first, and a doc
+# comment is found through any declaration, so they must not stand in for the
+# definitions: the pages list Widget's members and Mode's enumerators, from
+# Two.hpp.
 cat > "${ALPHA}/One.hpp" <<'HPP'
 #pragma once
 namespace demo {
+class Widget;
+enum class Mode : int;
+
 /// The first function.
 /// @tparam T The value type.
 template <typename T>
 T one(T x);
+
+/// Use a widget.
+void use(Widget const &w, Mode m);
 } // namespace demo
 HPP
 
@@ -66,6 +77,21 @@ cat > "${ALPHA}/Two.hpp" <<'HPP'
 namespace demo {
 /// The second function.
 int two(int x);
+
+/// A widget.
+class Widget {
+  public:
+    /// Spin the widget.
+    void spin();
+};
+
+/// How a widget runs.
+enum class Mode : int {
+    /// Slowly.
+    Slow,
+    /// Quickly.
+    Fast,
+};
 } // namespace demo
 HPP
 
@@ -117,6 +143,11 @@ assert_grep "int good()" "${SITE}/Beta/demo.good.rst"
 assert_grep ".. c:macro:: DEMO_TWICE(x)" "${SITE}/Alpha/macros.rst"
 assert_grep "Demo/Alpha/Two.hpp" "${SITE}/Alpha/macros.rst"
 assert_grep "T" "${WORK}/one/template_params.txt"
+# A forward declaration does not replace the documented definition.
+assert_grep "void spin()" "${SITE}/Alpha/demo.Widget.rst"
+assert_grep "Demo/Alpha/Two.hpp" "${SITE}/Alpha/demo.Widget.rst"
+assert_no_grep "Demo/Alpha/One.hpp" "${SITE}/Alpha/demo.Widget.rst"
+assert_grep "cpp:enumerator:: Fast" "${SITE}/Alpha/enums.rst"
 
 # The same output however many modules run at once.
 gen "${WORK}/many" --layout entity --jobs 4

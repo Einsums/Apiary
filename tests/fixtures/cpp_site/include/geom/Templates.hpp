@@ -39,6 +39,18 @@ class Grid {
     Grid<T, NewRank> reshape(Dims... dims) const;
 };
 
+/// A grid that grows one layer at a time. Its base and its method name the
+/// non-type parameter ``Rank``, which must print as ``Rank``, never qualified
+/// by the class (``Stack::Rank`` is not C++).
+/// @tparam T The element type.
+/// @tparam Rank The number of dimensions.
+template <typename T, size_t Rank>
+class Stack : public Grid<T, Rank> {
+  public:
+    /// The top layer.
+    Grid<T, Rank> top() const;
+};
+
 /// Return the mode-``mode`` unfolding of a grid.
 /// @tparam mode The mode to unfold along.
 /// @tparam CRank The rank of the source.

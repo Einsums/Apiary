@@ -5,6 +5,8 @@
 
 #include "DocExtractor.hpp"
 
+#include "ClangCompat.hpp"
+
 #include <algorithm>
 #include <array>
 #include <string>
@@ -69,14 +71,14 @@ bool is_banner_line(llvm::StringRef line) {
 } // namespace
 
 std::string extract_doc(clang::Decl const *decl, clang::ASTContext &ctx) {
-    clang::RawComment const *raw = ctx.getRawCommentForDeclNoCache(decl);
+    clang::RawComment const *raw = clang_compat::raw_comment_for(decl, ctx);
     if (raw == nullptr) {
         // For templated entities the doc comment is attached to the describing
         // TemplateDecl, not the inner pattern decl — e.g. a member function
         // template's comment lives on its FunctionTemplateDecl, not the
         // CXXMethodDecl the visitor walks. Retry through the describing template.
         if (clang::TemplateDecl const *td = decl->getDescribedTemplate()) {
-            raw = ctx.getRawCommentForDeclNoCache(td);
+            raw = clang_compat::raw_comment_for(td, ctx);
         }
     }
     if (raw == nullptr) {

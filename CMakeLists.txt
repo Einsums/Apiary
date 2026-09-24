@@ -81,6 +81,19 @@ if(LLVM_VERSION_MAJOR VERSION_LESS APIARY_LLVM_VERSION_MIN)
         "(conda-forge: clangdev=${APIARY_LLVM_VERSION_MIN} llvmdev=${APIARY_LLVM_VERSION_MIN}).")
 endif()
 
+# The newest major CI builds and tests, one pinned job per major from the
+# floor up to this. A newer one is allowed, because it usually works and
+# refusing it would block anyone trying it, but it is untested, so say so.
+# Differences between majors belong in src/ClangCompat.cpp; raise this
+# alongside a pinned CI job for the new major.
+set(APIARY_LLVM_VERSION_TESTED_MAX 23)
+if(LLVM_VERSION_MAJOR VERSION_GREATER APIARY_LLVM_VERSION_TESTED_MAX)
+    message(WARNING
+        "apiary: LLVM ${LLVM_VERSION} is newer than any major apiary is tested against "
+        "(${APIARY_LLVM_VERSION_MIN} through ${APIARY_LLVM_VERSION_TESTED_MAX}). "
+        "It may build and work; if it does not, the fix belongs in src/ClangCompat.cpp.")
+endif()
+
 message(STATUS "apiary: using LLVM ${LLVM_VERSION} from ${LLVM_DIR}")
 message(STATUS "apiary: using Clang from ${Clang_DIR}")
 
@@ -89,6 +102,7 @@ add_executable(apiary
     src/main.cpp
     src/IR.cpp
     src/AnnotationParser.cpp
+    src/ClangCompat.cpp
     src/DocComment.cpp
     src/Diagnostics.cpp
     src/DocExtractor.cpp

@@ -6,6 +6,7 @@
 #include "Visitor.hpp"
 
 #include "AnnotationParser.hpp"
+#include "ClangCompat.hpp"
 #include "DocExtractor.hpp"
 #include "InstantiateParser.hpp"
 #include "TypeTranslator.hpp"
@@ -25,7 +26,6 @@
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
-#include "clang/Index/USRGeneration.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/raw_ostream.h"
@@ -59,7 +59,7 @@ DirectiveList parse_attached_directives(clang::Decl const *decl) {
 std::string print_expr(clang::Expr const *e, clang::ASTContext const &ctx) {
     std::string              printed;
     llvm::raw_string_ostream os(printed);
-    clang::PrintingPolicy    policy(ctx.getLangOpts());
+    clang::PrintingPolicy    policy = clang_compat::printing_policy(ctx);
     policy.SuppressTagKeyword     = true;
     policy.FullyQualifiedName     = true;
     policy.SuppressUnwrittenScope = false;
@@ -556,7 +556,7 @@ std::string print_template_argument(clang::TemplateArgument const &arg, clang::A
     }
     std::string              printed;
     llvm::raw_string_ostream os(printed);
-    clang::PrintingPolicy    policy(ctx.getLangOpts());
+    clang::PrintingPolicy    policy = clang_compat::printing_policy(ctx);
     policy.SuppressTagKeyword     = true;
     policy.FullyQualifiedName     = true;
     policy.SuppressUnwrittenScope = true;
@@ -571,7 +571,7 @@ std::string print_template_argument(clang::TemplateArgument const &arg, clang::A
 std::string print_type_constraint(clang::TypeConstraint const &tc, clang::ASTContext const &ctx) {
     std::string              out;
     llvm::raw_string_ostream os(out);
-    clang::PrintingPolicy    policy(ctx.getLangOpts());
+    clang::PrintingPolicy    policy = clang_compat::printing_policy(ctx);
     policy.SuppressUnwrittenScope = true;
     tc.getNamedConcept()->printQualifiedName(os, policy);
     if (clang::ASTTemplateArgumentListInfo const *args = tc.getConceptReference()->getTemplateArgsAsWritten()) {
@@ -812,7 +812,7 @@ void strip_namespace_component(std::string &usr, std::string const &name) {
 // order, and an identifier that changes with visit order is not stable.
 std::string compute_symbol_id(clang::Decl const *decl) {
     llvm::SmallString<128> buf;
-    if (clang::index::generateUSRForDecl(decl, buf)) {
+    if (clang_compat::generate_usr(decl, buf)) {
         return {}; // declaration should be ignored / no USR
     }
     std::string usr(buf.str());
@@ -903,13 +903,7 @@ bool Visitor::passes_docs_filter(clang::NamedDecl const *decl) const {
         // This is a public, in-module-header, non-detail/impl/anonymous entity
         // that SHOULD carry a doc comment but doesn't. In --report-undocumented
         // mode, surface it as a punch-list line (deduplicated per process).
-        // A forward declaration of an entity documented on another of its
-        // declarations (usually the definition) is not missing anything.
-        bool documented_elsewhere = false;
-        for (clang::Decl const *redecl : decl->redecls()) {
-            documented_elsewhere = documented_elsewhere || !extract_doc(redecl, _context).empty();
-        }
-        if (_report_undocumented && !documented_elsewhere) {
+        if (_report_undocumented) {
             clang::SourceManager const &sm  = _context.getSourceManager();
             clang::SourceLocation const loc = sm.getFileLoc(decl->getLocation());
             std::string const           key =
@@ -1049,15 +1043,13 @@ void Visitor::report_reference(clang::NamedDecl const *target, clang::NamedDecl 
     }
     // Docs mode declares every public concept, documented or not, so only an
     // @internal one is missing from the reference. A class or enum needs a
-    // doc comment, on any of its declarations: the comment is often on the
-    // definition while a signature sees a forward declaration.
-    bool const needs_doc = !llvm::isa<clang::ConceptDecl>(target);
-    for (clang::Decl const *redecl : target->redecls()) {
-        std::string const doc      = extract_doc(redecl, _context);
-        bool const        internal = doc.find("@internal") != std::string::npos || doc.find("\\internal") != std::string::npos;
-        if (!internal && (!needs_doc || !doc.empty())) {
-            return;
-        }
+    // doc comment, which extract_doc finds on any of its declarations: the
+    // comment is often on the definition while a signature sees a forward
+    // declaration.
+    std::string const doc      = extract_doc(target, _context);
+    bool const        internal = doc.find("@internal") != std::string::npos || doc.find("\\internal") != std::string::npos;
+    if (!internal && (llvm::isa<clang::ConceptDecl>(target) || !doc.empty())) {
+        return;
     }
     if (!_undocumented_refs_seen.insert(qn).second) {
         return;
@@ -1181,6 +1173,13 @@ bool Visitor::TraverseCXXRecordDecl(clang::CXXRecordDecl *decl) {
     }
     // Anonymous structs and forward declarations don't carry binding info.
     if (!decl->hasDefinition() || decl->getDeclName().isEmpty()) {
+        return clang::RecursiveASTVisitor<Visitor>::TraverseCXXRecordDecl(decl);
+    }
+    // Docs mode documents a class once, at its definition. A forward
+    // declaration has no members to show, and a doc comment is found through
+    // any declaration, so without this ``class Graph;`` in one header would
+    // stand in for the documented definition in another.
+    if (_docs_mode && !decl->isThisDeclarationADefinition()) {
         return clang::RecursiveASTVisitor<Visitor>::TraverseCXXRecordDecl(decl);
     }
     bool const wanted = _docs_mode ? passes_docs_filter(decl) : has_any_pybind_annotation(decl);
@@ -1500,6 +1499,11 @@ bool Visitor::VisitEnumDecl(clang::EnumDecl *decl) {
     if (decl->isImplicit() || !decl->isComplete()) {
         return true;
     }
+    // As for classes: an opaque declaration (``enum class E : int;``) is
+    // complete but lists no enumerators, so docs mode documents the definition.
+    if (_docs_mode && !decl->isThisDeclarationADefinition()) {
+        return true;
+    }
     bool const member = current_class() != nullptr;
     if (_docs_mode ? !(member ? passes_member_filter(decl) : passes_docs_filter(decl))
                    : !binds_here(decl)) {
@@ -1694,7 +1698,7 @@ std::string template_arg_text(clang::TemplateArgument const &arg, clang::ASTCont
     }
     std::string              buffer;
     llvm::raw_string_ostream os(buffer);
-    arg.print(ctx.getPrintingPolicy(), os, /*IncludeType=*/false);
+    arg.print(clang_compat::stable_policy(ctx.getPrintingPolicy()), os, /*IncludeType=*/false);
     return buffer;
 }
 

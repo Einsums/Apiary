@@ -205,6 +205,40 @@ Defined in header ``geom/Templates.hpp``.
 
    :tparam S: A scalar type.
    :tparam Offset: An additive offset applied after scaling.
+==> geom.Stack.rst <==
+..
+    ----------------------------------------------------------------------------------------------
+     Copyright (c) The Einsums Developers. All rights reserved.
+     Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+    ----------------------------------------------------------------------------------------------
+
+
+.. _api_cpp_geom_Stack:
+
+===========
+geom::Stack
+===========
+
+.. note::
+   Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
+
+Defined in header ``geom/Templates.hpp``.
+
+.. cpp:namespace:: geom
+
+.. cpp:class:: template <typename T, size_t Rank> Stack : public Grid<T, Rank>
+
+   A grid that grows one layer at a time. Its base and its method name the
+   non-type parameter ``Rank``, which must print as ``Rank``, never qualified
+   by the class (``Stack::Rank`` is not C++).
+
+   :tparam T: The element type.
+   :tparam Rank: The number of dimensions.
+
+
+   .. cpp:function:: Grid<T, Rank> top() const
+
+      The top layer.
 ==> geom.sum.rst <==
 ..
     ----------------------------------------------------------------------------------------------

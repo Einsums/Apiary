@@ -5,6 +5,8 @@
 
 #include "TypeTranslator.hpp"
 
+#include "ClangCompat.hpp"
+
 #include <array>
 #include <string>
 #include <string_view>
@@ -16,7 +18,7 @@
 namespace apiary {
 
 std::string translate_type(clang::QualType type, clang::ASTContext const &ctx) {
-    clang::PrintingPolicy policy(ctx.getLangOpts());
+    clang::PrintingPolicy policy = clang_compat::printing_policy(ctx);
     policy.SuppressTagKeyword     = true;  // drop "class "/"struct " prefixes
     policy.SuppressScope          = false; // keep ::ns:: qualifiers for clarity
     policy.FullyQualifiedName     = true;  // canonical names so the emitter can match
