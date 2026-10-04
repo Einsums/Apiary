@@ -36,6 +36,9 @@ assert_contains() { grep -qE -- "$2" "$1" || { echo "--- $1 ---" >&2; cat "$1" >
 assert_absent()   { ! grep -qE -- "$2" "$1" || fail "forbidden in $1: $2"; }
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
+# A page left from a module that no longer exists, which the render must remove.
+mkdir -p "${WORK}/rst"
+echo "stale" > "${WORK}/rst/mathx.removed.rst"
 "${TOOL}" --emit-docs-json --module mathx "${EX}/include/mathx/Vec.hpp" \
     -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>/dev/null > "${WORK}/cpp.json"
 "${PY}" "${SCRIPTS_DIR}/apiary_py_extract.py" --package mathx \
@@ -61,6 +64,8 @@ assert_contains "${RST}/mathx.rst" "rubric:: Transform"
 # Availability: @since on the class, versioned deprecation on the Python alias.
 assert_contains "${RST}/mathx.rst" "versionadded:: 1.0.0"
 assert_contains "${RST}/mathx.extras.rst" "\.\. deprecated:: 1.2.0"
+# A page for a module that is gone is removed, not left for Sphinx to build as an orphan.
+[[ ! -e "${RST}/mathx.removed.rst" ]] || fail "stale page mathx.removed.rst survived the render"
 # Navigation summary + module overview.
 assert_contains "${RST}/mathx.rst" "^Summary$"
 assert_contains "${RST}/index.rst" "^Modules$"

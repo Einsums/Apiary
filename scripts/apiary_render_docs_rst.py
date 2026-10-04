@@ -722,7 +722,9 @@ def report_coverage(curations: dict, groups: dict, top: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="+", help="merged docs-JSON file (or '-' for stdin)")
-    ap.add_argument("--outdir", required=True, help="directory to write .rst pages into")
+    ap.add_argument("--outdir", required=True,
+                    help="directory to write .rst pages into. The renderer owns it: any .rst there "
+                         "that this run does not write is deleted, so do not point it at hand-written pages")
     ap.add_argument("--cpp-source-url-template", default=None,
                     help="URL template for C++-origin source links, with {file} and {line} "
                          "placeholders, e.g. 'https://github.com/org/einsums/blob/main/{file}#L{line}'")
@@ -778,10 +780,12 @@ def main() -> int:
     # Top-level module first, then submodules alphabetically.
     modules = sorted(groups, key=lambda m: (m != top, m))
     module_briefs: dict[str, str] = {}
+    written: set[str] = {"index.rst"}
     for module in modules:
         g = groups[module]
         page = render_page(module, g, curations.get(module))
         write_if_changed(outdir / f"{module}.rst", page)
+        written.add(f"{module}.rst")
         log(f"wrote {module}.rst ({len(g['classes'])} classes, "
             f"{len(g['functions'])} functions, {len(g['enums'])} enums)")
         # Index summary line: the authored overview's first sentence, else counts.
@@ -793,10 +797,18 @@ def main() -> int:
 
     for article in articles:
         write_if_changed(outdir / f"{article.slug}.rst", render_article(article))
+        written.add(f"{article.slug}.rst")
         log(f"wrote article {article.slug}.rst")
 
     write_if_changed(outdir / "index.rst", render_index(modules, articles, module_briefs))
     log(f"wrote index.rst with {len(modules)} module(s), {len(articles)} article(s)")
+
+    # The outdir holds only this renderer's pages, so a page it did not write this run belongs to
+    # a module or article that is gone. Left behind, Sphinx would still build it, as an orphan
+    # outside every toctree.
+    for stale in sorted(p for p in outdir.glob("*.rst") if p.name not in written):
+        stale.unlink()
+        log(f"removed stale {stale.name}")
     return 0
 
 
