@@ -136,6 +136,7 @@ def collect(docs: list[dict]) -> dict[str, dict[str, Entity]]:
         else:
             bucket[key] = Entity(kind, e)
 
+    redundant = base.redundant_typedefs(docs)
     for doc in docs:
         for cl in doc.get("classes", []):
             if not cl.get("is_external"):
@@ -147,7 +148,8 @@ def collect(docs: list[dict]) -> dict[str, dict[str, Entity]]:
         for en in doc.get("enums", []):
             add("enum", en)
         for td in doc.get("typedefs", []):
-            add("typedef", td)
+            if (td.get("qualified_name") or td["name"]) not in redundant:
+                add("typedef", td)
         for m in doc.get("macros", []):
             add("macro", m)
     return kinds

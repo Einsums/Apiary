@@ -346,6 +346,24 @@ def render_function(out: list[str], fn: dict, base: str = "") -> None:
     out.append("")
 
 
+def names_own_tag(td: dict) -> bool:
+    """``typedef struct X X;``: a C header's way of naming a struct, union or
+    enum without its keyword. In C++ the tag is already that name."""
+    name = td["name"]
+    return (td.get("underlying_type") or "").strip() in (f"struct {name}", f"union {name}", f"enum {name}")
+
+
+def redundant_typedefs(docs: list[dict]) -> set[str]:
+    """Typedefs that only name their own struct, union or enum when that type
+    is documented itself. Declaring both is a duplicate C++ declaration; an
+    opaque handle, whose struct is never defined, keeps its typedef."""
+    tags = {e.get("qualified_name") or e["name"]
+            for doc in docs for kind in ("classes", "enums") for e in doc.get(kind, [])}
+    return {td.get("qualified_name") or td["name"]
+            for doc in docs for td in doc.get("typedefs", [])
+            if names_own_tag(td) and (td.get("qualified_name") or td["name"]) in tags}
+
+
 def render_typedef(out: list[str], td: dict) -> None:
     ns = namespace_of(td.get("qualified_name", td["name"]))
     name = td["name"]
@@ -359,8 +377,7 @@ def render_typedef(out: list[str], td: dict) -> None:
     # ``typedef struct handle handle;`` is how a C header names an opaque type.
     # ``handle = struct handle`` says nothing the name does not; declare the
     # name, as the type it is.
-    self_named = underlying in (f"struct {name}", f"union {name}", f"enum {name}")
-    plain = complex_underlying or self_named or not underlying
+    plain = complex_underlying or names_own_tag(td) or not underlying
     decl = f"{tmpl}{name}" if plain else f"{tmpl}{name} = {underlying}"
     out.append(f".. cpp:type:: {decl}")
     emit_doc(out, td, IND)
@@ -517,8 +534,10 @@ def render_page(title: str, doc: dict, embed: bool = False) -> str:
     def bucket(ns: str) -> dict[str, list[dict]]:
         return by_ns.setdefault(ns, {"typedefs": [], "concepts": [], "enums": [], "classes": [], "functions": []})
 
+    redundant = redundant_typedefs([doc])
     for td in doc.get("typedefs", []):
-        bucket(namespace_of(td.get("qualified_name", td["name"])))["typedefs"].append(td)
+        if (td.get("qualified_name") or td["name"]) not in redundant:
+            bucket(namespace_of(td.get("qualified_name", td["name"])))["typedefs"].append(td)
     for c in doc.get("concepts", []):
         bucket(namespace_of(c.get("qualified_name", c["name"])))["concepts"].append(c)
     for en in doc.get("enums", []):

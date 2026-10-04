@@ -16,6 +16,18 @@ extern "C" {
 /// An opaque handle to a collection of shapes.
 typedef struct geom_shapes geom_shapes; /* NOLINT(modernize-use-using): a C header */
 
+/// A point, defined here and typedef'd to its own name.
+typedef struct geom_point { /* NOLINT(modernize-use-using) */
+    int x; ///< Across.
+    int y; ///< Down.
+} geom_point;
+
+/// How hard to try, typedef'd to its own name.
+typedef enum geom_effort { /* NOLINT(modernize-use-using) */
+    GEOM_FAST, ///< Quickly.
+    GEOM_BEST  ///< Thoroughly.
+} geom_effort;
+
 /// Called once for each shape a visit reaches.
 typedef void (*geom_visit_fn)(void *user, geom_shapes *shapes, int index); /* NOLINT(modernize-use-using) */
 

@@ -80,7 +80,7 @@ readonly DECL_PAGES=(
     geom.Box geom.exchange geom.length geom.magnitude geom.same_area geom.Shape geom.Hexagon
     geom.square geom.twice geom.widen types
 )
-for page in index geom.Circle geom.Scalar geom.scale enums macros operators geom_visit geom_scale "${DECL_PAGES[@]}"; do
+for page in index geom.Circle geom.Scalar geom.scale enums macros operators geom_visit geom_scale geom_point "${DECL_PAGES[@]}"; do
     assert_file "${SITE}/${page}.rst"
 done
 
@@ -121,6 +121,13 @@ if grep -qF "geom_shapes = struct" "${SITE}/types.rst"; then
     fail "the opaque handle rendered as an alias of its own struct"
 fi
 assert_grep ".. cpp:type:: geom_visit_fn = void (*)(void *, geom_shapes *, int)" "${SITE}/types.rst"
+# A struct or enum typedef'd to its own name is documented once, as itself: a
+# typedef beside it would be a duplicate declaration.
+assert_grep ".. cpp:class:: geom_point" "${SITE}/geom_point.rst"
+assert_grep ".. cpp:enum:: geom_effort" "${SITE}/enums.rst"
+if grep -qE "cpp:type:: geom_(point|effort)" "${SITE}/types.rst"; then
+    fail "a struct or enum was declared again as a typedef of its own name"
+fi
 assert_grep "void geom_visit(geom_shapes *shapes, geom_visit_fn fn, void *user)" "${SITE}/geom_visit.rst"
 # A C function and the C++ function it wraps get distinct labels; the same
 # label twice is a duplicate under -W.
