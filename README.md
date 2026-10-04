@@ -476,6 +476,9 @@ build/lib/mylib/
 └── py.typed               # PEP 561 marker
 ```
 
+The step merges exactly the `STUBS` passed to `apiary_aggregate_extension`, never every fragment in `FRAG_DIR`.
+Removing a module from that list reruns it in an existing build tree: the removed module's classes leave `_core.pyi`, and a submodule's `.pyi` is deleted once no module contributes to it.
+
 ### What pyright sees
 
 Type translation runs per-instantiation:
@@ -659,11 +662,13 @@ src/
                         for the aggregator to split.
 
 scripts/
-  apiary_aggregate_stubs.py    Reads every ``*.pyi`` fragment in
-                        ``--frag-dir`` and merges by submodule sentinel
-                        into per-submodule files in ``--pkg-dir``.
+  apiary_aggregate_stubs.py    Merges the ``*.pyi`` fragments it is
+                        given (or ``@<file>`` listing them) by submodule
+                        sentinel into per-submodule files in ``--pkg-dir``.
                         Writes a shared header per output and the
-                        PEP-561 ``py.typed`` marker.
+                        PEP-561 ``py.typed`` marker; with ``--manifest``,
+                        deletes the stubs a previous run wrote that this
+                        one no longer does.
 
 tests/
   fixtures/             Annotated headers used by the emitter tests.

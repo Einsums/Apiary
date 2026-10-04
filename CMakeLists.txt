@@ -461,8 +461,23 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                 # Builds two extensions from scratch; well past the 1500s default
                 # on a cold CI runner is unlikely, but the codegen is not fast.
                 set_tests_properties(apiary_examples PROPERTIES TIMEOUT 900)
+                # Drops modules from a built consumer and rebuilds the same
+                # tree; its stubs and docs must lose the removed modules. Same
+                # installed-Apiary setup, and the same requirements, as above.
+                add_test(NAME apiary_module_removal
+                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_module_removal.sh"
+                            "${CMAKE_CURRENT_SOURCE_DIR}"
+                            "${CMAKE_CURRENT_BINARY_DIR}"
+                            "${CMAKE_COMMAND}"
+                            "${Python_EXECUTABLE}"
+                            "${CMAKE_GENERATOR}"
+                            "$<IF:$<BOOL:${CMAKE_BUILD_TYPE}>,${CMAKE_BUILD_TYPE},Release>"
+                            "${CMAKE_C_COMPILER}"
+                            "${CMAKE_CXX_COMPILER}"
+                )
+                set_tests_properties(apiary_module_removal PROPERTIES TIMEOUT 900)
             else()
-                message(STATUS "apiary: pybind11 not importable - skipping apiary_examples test")
+                message(STATUS "apiary: pybind11 not importable - skipping apiary_examples and apiary_module_removal tests")
             endif()
         endif()
     endif()
@@ -471,6 +486,12 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # fixture against a golden. Prefer a CMake-found interpreter, else python3.
     add_test(NAME apiary_doc_lint
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_doc_lint.sh"
+                "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
+    )
+    # apiary_aggregate_stubs.py: merges only the fragments it is named and prunes
+    # the stubs it no longer writes. Pure Python, like the doc_lint suite.
+    add_test(NAME apiary_aggregate_stubs
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_aggregate_stubs.sh"
                 "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
     )
     # Static Python frontend: apiary_py_extract.py -> apiary_merge_docs_json.py ->

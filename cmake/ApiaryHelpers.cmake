@@ -592,6 +592,20 @@ function(apiary_add_python_docs)
     endif()
 endfunction()
 
+# Internal: write CONTENT to PATH only when it differs from what is there.
+# A file generated at configure time is an input to the build, and a fresh
+# mtime on identical content makes everything that depends on it rebuild on
+# every reconfigure.
+function(_apiary_write_if_changed path content)
+    if(EXISTS "${path}")
+        file(READ "${path}" _old)
+        if(_old STREQUAL content)
+            return()
+        endif()
+    endif()
+    file(WRITE "${path}" "${content}")
+endfunction()
+
 # Assemble per-module bindings into one Python extension.
 #
 #   apiary_aggregate_extension(
@@ -681,6 +695,22 @@ function(apiary_aggregate_extension)
     # 3. .pyi aggregation (ALL) — optional.
     if(_A_STUBS_TARGET)
         set(_stamp "${_A_FRAG_DIR}/.stubs.stamp")
+        # The aggregator merges exactly the STUBS named here, read from this
+        # list (one path per line), not every fragment in FRAG_DIR: a module
+        # dropped from the build leaves its fragment behind. The list is also
+        # what makes dropping a module rerun the aggregator at all, since that
+        # removes an input rather than making one newer. It is rewritten only
+        # when its content changes, so each change to the module set triggers
+        # exactly one re-aggregation.
+        set(_frag_list "${_A_FRAG_DIR}/.stubs.fragments")
+        list(JOIN _A_STUBS "\n" _frag_lines)
+        if(_frag_lines)
+            string(APPEND _frag_lines "\n")
+        endif()
+        _apiary_write_if_changed("${_frag_list}" "${_frag_lines}")
+        # Records the stubs each run writes, so the next one deletes a
+        # submodule's .pyi once no module contributes to it.
+        set(_stub_manifest "${_A_FRAG_DIR}/.stubs.manifest")
         # Optional consumer-provided stub overlay (e.g. runtime-patched
         # ergonomics the C++ codegen can't see). Apiary stays generic: the
         # overlay content + the target-class regex come from the caller.
@@ -694,12 +724,14 @@ function(apiary_aggregate_extension)
         add_custom_command(
             OUTPUT ${_stamp}
             COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py"
-                    --frag-dir "${_A_FRAG_DIR}"
+                    "@${_frag_list}"
                     --pkg-dir "${_A_PKG_DIR}"
                     --py-helpers-dir "${_A_PY_HELPERS_DIR}"
+                    --manifest "${_stub_manifest}"
                     ${_overlay_args}
             COMMAND ${CMAKE_COMMAND} -E touch ${_stamp}
-            DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py" ${_A_STUBS} ${_A_PY_HELPER_DEPENDS} ${_A_STUB_OVERLAY}
+            DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py" "${_frag_list}"
+                    ${_A_STUBS} ${_A_PY_HELPER_DEPENDS} ${_A_STUB_OVERLAY}
             COMMENT "apiary: aggregating .pyi stubs into ${_A_PKG_DIR}"
             VERBATIM
         )

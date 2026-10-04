@@ -10,7 +10,7 @@ Each codegen invocation emits a single .pyi covering one Einsums module.
 Inside, entities are grouped under ``# %%submodule: <name>`` sentinels —
 empty name means top-level (binds into ``einsums._core``).
 
-This script merges every fragment in --frag-dir into the einsums package
+This script merges the fragments it is given into the einsums package
 layout under --pkg-dir:
 
     einsums/_core.pyi      ← top-level entities
@@ -20,6 +20,13 @@ layout under --pkg-dir:
 
 Imports are deduplicated; the script writes a single shared header at
 the top of each output file. Empty submodules are skipped.
+
+The fragments are named explicitly, never found by listing a directory: a
+module dropped from the build leaves its fragment on disk, and merging it would
+put classes the extension no longer has back into the stubs. For the same
+reason, --manifest records the files a run writes, so the next run deletes the
+ones it no longer writes (a submodule whose last module was removed). Long
+fragment lists can be passed in a file, one path per line, as ``@<file>``.
 
 If a submodule has a sibling hand-written helper module at
 ``--py-helpers-dir/<sub>.py`` (e.g. ``einsums/graph.py`` providing
@@ -223,9 +230,14 @@ def inject_class_methods(core_text: str, methods_block: str, class_re: re.Patter
     return "\n".join(out)
 
 
-def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
-              overlay_path: Path | None = None, overlay_class_re: "re.Pattern[str] | None" = None) -> dict[str, Path]:
-    """Read every *.pyi in `frag_dir` and write per-submodule files into `pkg_dir`.
+def aggregate(fragments: list[Path], pkg_dir: Path, py_helpers_dir: Path | None = None,
+              overlay_path: Path | None = None,
+              overlay_class_re: "re.Pattern[str] | None" = None) -> tuple[dict[str, Path], list[Path]]:
+    """Merge the `fragments` into per-submodule files in `pkg_dir`.
+
+    Returns the per-submodule stubs by submodule name, and every file the run
+    produced (those, ``py.typed``, ``__init__.pyi`` and helper sub-package
+    stubs), whether or not its content changed.
 
     When ``py_helpers_dir`` is given, any ``<sub>.py`` file there whose name
     matches a generated submodule has its public surface appended to the
@@ -233,7 +245,9 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
     ``.py``) still sees hand-written helpers.
     """
     by_sub: dict[str, list[str]] = {}
-    for frag in sorted(frag_dir.glob("*.pyi")):
+    # Sorted, so the merged order does not depend on the order the build lists
+    # its modules in.
+    for frag in sorted(set(fragments)):
         for sub, body in parse_fragment(frag).items():
             by_sub.setdefault(sub, []).append(f"# from: {frag.name}\n{body}")
 
@@ -247,6 +261,7 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
 
     pkg_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}
+    outputs: list[Path] = []
     for sub, parts in by_sub.items():
         out_name = "_core.pyi" if sub == "" else f"{sub}.pyi"
         out_path = pkg_dir / out_name
@@ -265,10 +280,12 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
             text = inject_class_methods(text, overlay_methods, overlay_class_re)
         write_if_changed(out_path, text)
         written[sub] = out_path
+        outputs.append(out_path)
 
     # PEP 561: empty marker file telling type-checkers this package
     # ships its own stubs.
     write_if_changed(pkg_dir / "py.typed", "")
+    outputs.append(pkg_dir / "py.typed")
 
     # __init__.pyi: re-export everything from _core so ``import einsums``
     # gives pyright the full top-level surface, plus an explicit
@@ -297,6 +314,7 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
                     sub_dir = pkg_dir / child.name
                     sub_dir.mkdir(parents=True, exist_ok=True)
                     write_if_changed(sub_dir / "__init__.pyi", SHARED_HEADER + helper_stub.rstrip() + "\n")
+                    outputs.append(sub_dir / "__init__.pyi")
     all_sub_names = sorted(set(submodule_names) | set(pkg_helper_names))
     init_pyi = pkg_dir / "__init__.pyi"
     init_body = SHARED_HEADER + "from einsums._core import *  # noqa: F401,F403\n"
@@ -308,14 +326,47 @@ def aggregate(frag_dir: Path, pkg_dir: Path, py_helpers_dir: Path | None = None,
     if overlay_funcs:
         init_body += "\n# Overlay module-level functions (runtime-patched)\n" + overlay_funcs.rstrip() + "\n"
     write_if_changed(init_pyi, init_body)
+    outputs.append(init_pyi)
 
-    return written
+    return written, outputs
+
+
+def prune_stale(manifest: Path, pkg_dir: Path, outputs: list[Path]) -> list[Path]:
+    """Delete the files the previous run recorded in `manifest` that this run
+    did not produce, then record this run's `outputs` there.
+
+    The package directory also holds files this script never wrote (the
+    package's own ``.py`` sources, the compiled extension), so it removes only
+    what the manifest names. A sub-package directory left empty by a removal
+    goes too. Returns the files removed.
+    """
+    pkg_root = pkg_dir.resolve()
+    current = {p.resolve().relative_to(pkg_root).as_posix() for p in outputs}
+    previous: list[str] = []
+    if manifest.is_file():
+        previous = [line for line in manifest.read_text(encoding="utf-8").splitlines() if line]
+    removed: list[Path] = []
+    for rel in previous:
+        if rel in current:
+            continue
+        stale = pkg_root / rel
+        # A manifest is only ever written by this function, but it is a file in
+        # a build tree; never let an edited one reach outside the package.
+        if not stale.resolve().is_relative_to(pkg_root) or not stale.is_file():
+            continue
+        stale.unlink()
+        removed.append(stale)
+        parent = stale.parent
+        if parent != pkg_root and not any(parent.iterdir()):
+            parent.rmdir()
+    write_if_changed(manifest, "".join(f"{rel}\n" for rel in sorted(current)))
+    return removed
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--frag-dir", required=True, type=Path,
-                   help="Directory containing per-module .pyi fragments.")
+    p = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars="@")
+    p.add_argument("fragments", nargs="+", type=Path,
+                   help="Per-module .pyi fragments to merge, or @<file> naming one per line.")
     p.add_argument("--pkg-dir", required=True, type=Path,
                    help="Destination einsums/ package directory.")
     p.add_argument("--py-helpers-dir", type=Path, default=None,
@@ -330,10 +381,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--overlay-class-regex", default=None,
                    help="Regex matched against ``class <Name>:`` lines in "
                         "_core.pyi; matching classes receive the overlay methods.")
+    p.add_argument("--manifest", type=Path, default=None,
+                   help="File recording the stubs this run writes. The next run "
+                        "deletes the ones it no longer writes, so a removed "
+                        "submodule's .pyi does not outlive it.")
     args = p.parse_args(argv)
 
-    if not args.frag_dir.is_dir():
-        print(f"aggregate_stubs: {args.frag_dir} is not a directory", file=sys.stderr)
+    missing = [f for f in args.fragments if not f.is_file()]
+    if missing:
+        for f in missing:
+            print(f"aggregate_stubs: fragment {f} does not exist", file=sys.stderr)
         return 1
     if args.py_helpers_dir is not None and not args.py_helpers_dir.is_dir():
         print(f"aggregate_stubs: {args.py_helpers_dir} is not a directory", file=sys.stderr)
@@ -343,13 +400,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     overlay_re = re.compile(args.overlay_class_regex) if args.overlay_class_regex else None
 
-    written = aggregate(args.frag_dir, args.pkg_dir, args.py_helpers_dir, args.overlay, overlay_re)
-    if written:
-        names = ", ".join(sorted(p.name for p in written.values()))
-        print(f"aggregate_stubs: wrote {names} to {args.pkg_dir}")
-    else:
-        print("aggregate_stubs: no .pyi fragments found", file=sys.stderr)
+    written, outputs = aggregate(args.fragments, args.pkg_dir, args.py_helpers_dir, args.overlay, overlay_re)
+    if not written:
+        print("aggregate_stubs: the fragments declare nothing", file=sys.stderr)
         return 1
+    names = ", ".join(sorted(p.name for p in written.values()))
+    print(f"aggregate_stubs: wrote {names} to {args.pkg_dir}")
+    if args.manifest is not None:
+        for stale in prune_stale(args.manifest, args.pkg_dir, outputs):
+            print(f"aggregate_stubs: removed stale {stale.relative_to(args.pkg_dir.resolve()).as_posix()}")
     return 0
 
 
