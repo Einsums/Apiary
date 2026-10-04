@@ -24,6 +24,12 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+# Under Git Bash, MSYS rewrites path-looking arguments for a native Windows
+# Python, but not the paths inside a file it reads: those must be written in
+# the C:/... form it understands. A no-op elsewhere. (As in run_examples.sh.)
+native() {
+    if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
 assert_contains() { grep -qE -- "$2" "$1" || { echo "--- $1 ---" >&2; cat "$1" >&2; fail "expected in $1: $2"; }; }
 assert_absent()   { ! grep -qE -- "$2" "$1" || { echo "--- $1 ---" >&2; cat "$1" >&2; fail "forbidden in $1: $2"; }; }
 
@@ -76,8 +82,8 @@ run() { "${PY}" "${AGG}" "$@" --pkg-dir "${PKG}" --manifest "${MANIFEST}" >"${WO
     || { cat "${WORK}/out.log" >&2; fail "aggregate_stubs exited non-zero: $*"; }; }
 
 # ── All three modules, the list passed as @file ──────────────────────────────
-printf '%s\n' "${FRAG}/demo_a.pyi" "${FRAG}/demo_b.pyi" "${FRAG}/demo_c.pyi" > "${FRAG}/list"
-run "@${FRAG}/list" --py-helpers-dir "${HELPERS}"
+for frag in demo_a demo_b demo_c; do native "${FRAG}/${frag}.pyi"; echo; done > "${FRAG}/list"
+run "@$(native "${FRAG}/list")" --py-helpers-dir "${HELPERS}"
 assert_contains "${PKG}/_core.pyi" "^class A:"
 assert_contains "${PKG}/_core.pyi" "^class B:"
 assert_contains "${PKG}/shared.pyi" "^class SharedA:"
