@@ -49,6 +49,7 @@ readonly CASES=(
     "fixture_std_types|std_types.hpp|std_types.cpp.golden"
     "fixture_cross_module|cross_module.hpp|cross_module.cpp.golden"
     "fixture_docstrings|docstrings.hpp|docstrings.cpp.golden"
+    "fixture_exceptions|exceptions.hpp|exceptions.cpp.golden"
     "fixture_variadic_pack|variadic_pack.hpp|variadic_pack.cpp.golden"
 )
 

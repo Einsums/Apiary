@@ -19,4 +19,13 @@ assert g2.say("you") == "Hey, you!"
 # Free function.
 assert greeter.shout("loud") == "LOUD!"
 
+# A C++ exception marked APIARY_EXCEPTION arrives as its own Python type.
+assert issubclass(greeter.GreetingError, Exception)
+try:
+    g.say("")
+except greeter.GreetingError as e:
+    assert str(e) == "nobody to greet", str(e)
+else:
+    raise AssertionError("say('') did not raise GreetingError")
+
 print("greeter example: OK")

@@ -55,6 +55,8 @@ _DEF = re.compile(r'(\w+)\.def(?:_static)?\( ?"([^"]+)"')
 # so match lazily up to the `>(` that opens the registration call.
 _CLASS = re.compile(r'py::class_<.*?>\( ?(\w+), "([^"]+)"')
 _ENUM = re.compile(r'py::enum_<.*?>\( ?(\w+), "([^"]+)"')
+# An APIARY_EXCEPTION class registers as an exception type, not a py::class_.
+_EXCEPTION = re.compile(r'py::register_exception<.*?>\( ?(\w+), "([^"]+)"')
 _SUBMODULE = re.compile(r'auto (\w+) = (\w+)\.def_submodule\("([^"]+)"\)')
 
 
@@ -96,7 +98,7 @@ def cpp_surface(cpp: str) -> set[str]:
         var_to_path[var] = f"{prefix}.{name}" if prefix else name
 
     out: set[str] = set()
-    for pattern in (_CLASS, _ENUM):
+    for pattern in (_CLASS, _ENUM, _EXCEPTION):
         for var, name in pattern.findall(cpp):
             out.add(f"{var_to_path.get(var, '')}:{name}")
     for var, name in _DEF.findall(cpp):
@@ -136,6 +138,7 @@ PYBIND11_MODULE(m, m) {
   auto _sub_deep = _sub_core.def_submodule("deep");
 
   py::enum_<ns::Layout>(m, "Layout").value("RowMajor", ns::Layout::RowMajor);
+  py::register_exception<ns::ShapeError>(_sub_core, "ShapeError");
 
   py::class_<ns::Tensor<double, std::allocator<double>>>(
       _sub_core, "Tensor_double")
@@ -155,6 +158,7 @@ PYBIND11_MODULE(m, m) {
 
 _PARSER_EXPECTED = {
     ":Layout",                 # enum at the top level
+    "core:ShapeError",         # exception type in a submodule
     "core:Tensor_double",      # class in a submodule, nested template args
     ":plain",                  # ordinary module-level def
     "core.deep:wrapped_name",  # def wrapped by clang-format, nested submodule

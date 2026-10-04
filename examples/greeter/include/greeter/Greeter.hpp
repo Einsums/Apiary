@@ -8,10 +8,20 @@
 #include <apiary/Annotations.hpp>
 
 #include <cctype>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace greeter {
+
+/// Raised by ``Greeter.say`` when there is nobody to greet.
+///
+/// ``APIARY_EXCEPTION`` binds it as a Python exception type: C++ code throws
+/// it, and Python catches ``greeter.GreetingError``.
+class APIARY_EXPOSE APIARY_EXCEPTION GreetingError : public std::runtime_error {
+  public:
+    using std::runtime_error::runtime_error;
+};
 
 /// A friendly greeter — the obligatory binding-tool "hello world".
 ///
@@ -26,8 +36,13 @@ class APIARY_EXPOSE APIARY_RENAME("Greeter") Greeter {
     /// Greet with a custom word.
     APIARY_EXPOSE explicit Greeter(std::string greeting) : _greeting(std::move(greeting)) {}
 
-    /// Return ``"<greeting>, <name>!"``.
-    APIARY_EXPOSE std::string say(std::string const &name) const { return _greeting + ", " + name + "!"; }
+    /// Return ``"<greeting>, <name>!"``. Raises GreetingError when ``name`` is empty.
+    APIARY_EXPOSE std::string say(std::string const &name) const {
+        if (name.empty()) {
+            throw GreetingError("nobody to greet");
+        }
+        return _greeting + ", " + name + "!";
+    }
 
     /// The greeting word, exposed as a read/write Python property ``greeting``.
     APIARY_GETTER("greeting") std::string const &greeting() const { return _greeting; }

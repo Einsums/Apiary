@@ -5,8 +5,8 @@ Python extension named `greeter`, using Apiary's CMake helpers end to end:
 `apiary_detect_toolchain` → `apiary_add_bindings` → `apiary_aggregate_extension`.
 
 It exercises the common annotations: a renamed class with constructors, a
-method, a getter/setter property, and a free function (see the `APIARY_*`
-markers in the header).
+method, a getter/setter property, a free function, and an exception type that
+C++ throws and Python catches (see the `APIARY_*` markers in the header).
 
 ## Build & run
 
