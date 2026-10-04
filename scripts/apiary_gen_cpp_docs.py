@@ -5,7 +5,12 @@
 # ----------------------------------------------------------------------------------------------
 """Generate the C++ API reference pages for selected modules (Option 2).
 
-Each selected ``lib/module`` is parsed once by ``apiary --emit-cpp-docs-json``,
+A module is a directory of public headers, named ``lib/module``. By default
+they are found the way Einsums lays them out, ``libs/<lib>/<module>/include``
+(``--modules`` picks some); ``--include-dir LIB/MODULE=DIR`` names them
+instead, for a project with its own layout.
+
+Each selected module is parsed once by ``apiary --emit-cpp-docs-json``,
 through a generated umbrella that includes every one of its headers, and the
 modules are generated in parallel (``--jobs``). Then reStructuredText is
 rendered in one of two layouts:
@@ -20,9 +25,10 @@ rendered in one of two layouts:
   ``.site.manifest`` prunes pages whose entity disappeared.
 
 Compile flags are taken from a representative ``apiary`` codegen
-command already present in the build's ``build.ninja`` (the Tensor module's,
-whose transitive include set covers the whole library) — so we don't
-re-derive per-module flags here.
+command already present in the build's ``build.ninja``: the one for the
+register function ``--flags-from`` names (by default Einsums' Tensor module,
+whose transitive include set covers the whole library), so the system flags
+it carries are the build's own.
 
 Usage::
 
@@ -30,6 +36,11 @@ Usage::
                     --out-dir <dir> --modules Einsums/BLASVendor Einsums/Concepts \
                     [--layout entity --index-label-template "modules_{lib}_{module}_api" \
                      --backlink-label-template "modules_{lib}_{module}"]
+
+    apiary_gen_cpp_docs.py --source-dir <repo> --build-dir <build> --tool <apiary> \
+                    --out-dir <dir> --layout entity --include-dir Waggle/API=include \
+                    --flags-from waggle_register_core --module-name waggle \
+                    --header-glob '*.h' --header-glob '*.hpp' --exclude-header Waggle/Metal.h
 """
 
 from __future__ import annotations
@@ -44,7 +55,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from apiary_io import write_if_changed
 
@@ -55,16 +66,15 @@ def log(msg: str) -> None:
     print(f"gen_cpp_docs: {msg}", file=sys.stderr)
 
 
-def universal_flags(build_dir: Path, source_dir: Path) -> list[str]:
+def universal_flags(build_dir: Path, register_function: str, include_dirs: list[Path]) -> list[str]:
     """Compile flags for parsing any module's headers.
 
-    Start from a representative apiary command in build.ninja (it
-    carries the resource-dir / isysroot / -std / system flags libtooling
-    needs), then append EVERY module's include dir — both source and
-    build-tree (for generated ``Defines.hpp``). The Tensor command alone
-    only covers Tensor's transitive deps, so headers of modules Tensor
-    doesn't depend on (ComputeGraph, Comm, GPU, ...) wouldn't resolve their
-    own includes and would parse to nothing."""
+    Start from the apiary command in build.ninja for ``register_function``
+    (it carries the resource-dir / isysroot / -std / system flags libtooling
+    needs), then append every module's include dir in ``include_dirs``. One
+    command only covers its own module's transitive deps, so headers of
+    modules it doesn't depend on (in Einsums: ComputeGraph, Comm, GPU, ...)
+    wouldn't resolve their own includes and would parse to nothing."""
     # Reading the build graph directly ties this to the Ninja generator. Say so
     # plainly rather than surfacing a bare FileNotFoundError, which under a
     # Visual Studio or Makefile build looks like a missing build dir.
@@ -78,13 +88,16 @@ def universal_flags(build_dir: Path, source_dir: Path) -> list[str]:
     # (ApiaryRun guarantees no argument contains a semicolon). Splitting on ';'
     # gives clean tokens and preserves Windows backslashes verbatim. Fall back to
     # the older space-separated direct invocation for builds that don't wrap.
-    m = re.search(r'-DAPIARY_COMMAND=([^"\n]*apiary_register_Tensor[^"\n]*)', ninja)
+    fn = re.escape(register_function)
+    m = re.search(rf'-DAPIARY_COMMAND=([^"\n]*;--register-function;{fn};[^"\n]*)', ninja)
     if m:
         toks = m.group(1).split(";")
     else:
-        m = re.search(r"apiary --register-function apiary_register_Tensor [^\n]*", ninja)
+        m = re.search(rf"apiary --register-function {fn} [^\n]*", ninja)
         if not m:
-            raise SystemExit("gen_cpp_docs: no Tensor pybind command in build.ninja (need EINSUMS_BUILD_PYTHON)")
+            raise SystemExit(f"gen_cpp_docs: build.ninja has no apiary command for the register function "
+                             f"{register_function}. --flags-from names the one whose compile flags to use, and "
+                             f"the part of the build that generates it must be configured.")
         # POSIX lexing treats the backslashes in a Windows path as escapes and
         # eats them, silently corrupting every -I flag. Non-POSIX mode preserves
         # them but leaves quotes attached to the token, so strip those back off.
@@ -92,15 +105,16 @@ def universal_flags(build_dir: Path, source_dir: Path) -> list[str]:
         if os.name == "nt":
             toks = [t.strip('"') for t in toks]
     if "--" not in toks:
-        raise SystemExit("gen_cpp_docs: Tensor pybind command has no '--' compile-flags separator")
-    flags = toks[toks.index("--"):]
+        raise SystemExit(f"gen_cpp_docs: the apiary command for {register_function} has no '--' "
+                         "compile-flags separator")
+    # A trailing space can ride along from the ninja line.
+    flags = [f.strip() for f in toks[toks.index("--"):] if f.strip()]
     seen = {f for f in flags if f.startswith("-I")}
-    for base in (source_dir / "libs", build_dir / "libs"):
-        for inc in sorted(base.glob("*/*/include")):
-            flag = f"-I{inc}"
-            if flag not in seen:
-                seen.add(flag)
-                flags.append(flag)
+    for inc in include_dirs:
+        flag = f"-I{inc}"
+        if flag not in seen:
+            seen.add(flag)
+            flags.append(flag)
     return flags
 
 
@@ -108,13 +122,19 @@ def sanitized(relheader: str) -> str:
     return relheader.replace("/", "_").replace(".", "_")
 
 
-def header_relpath(header: Path) -> str | None:
-    """The include-relative path (after ``include/``) — what --source-include
-    and Breathe's autodoxygenfile key on."""
-    parts = header.parts
-    if "include" not in parts:
-        return None
-    return "/".join(parts[parts.index("include") + 1:])
+def module_headers(inc: Path, globs: list[str], exclude: set[str]) -> dict[Path, str]:
+    """A module's headers, each mapped to its include-relative path (what
+    ``#include <...>`` and --source-include name), skipping ``exclude``."""
+    headers: dict[Path, str] = {}
+    for pattern in globs:
+        for header in inc.rglob(pattern):
+            rel = header.relative_to(inc).as_posix()
+            if header.is_file() and rel not in exclude:
+                headers[header.resolve()] = rel
+    # By path components, so a directory's headers follow a same-named header
+    # (Passes.hpp, then Passes/X.hpp) as they always have: the umbrella
+    # includes them in this order, and that order shows in the output.
+    return dict(sorted(headers.items(), key=lambda item: PurePosixPath(item[1]).parts))
 
 
 def collect_template_params(doc: dict, out: set[str]) -> None:
@@ -177,7 +197,7 @@ class ApiaryRun:
     clang_error: bool = False
 
 
-def run_apiary(tool: str, flags: list[str], source: Path, relheaders: list[str],
+def run_apiary(tool: str, module_name: str, flags: list[str], source: Path, relheaders: list[str],
                report_undoc: bool, report_refs: bool, *, allow_parse_errors: bool = False) -> ApiaryRun:
     """Run ``apiary --emit-cpp-docs-json`` over one source file, documenting
     the declarations of the headers in ``relheaders`` (include-relative).
@@ -185,7 +205,7 @@ def run_apiary(tool: str, flags: list[str], source: Path, relheaders: list[str],
     apiary writes nothing when clang reports an error, unless
     ``allow_parse_errors``: then it writes what it could parse, and
     ``clang_error`` says the result may be incomplete."""
-    cmd = [tool, "--emit-cpp-docs-json", "--module", "einsums"]
+    cmd = [tool, "--emit-cpp-docs-json", "--module", module_name]
     if allow_parse_errors:
         cmd.append("--allow-parse-errors")
     if report_undoc:
@@ -253,7 +273,8 @@ def split_by_header(doc: dict, headers: dict[Path, str]) -> dict[str, dict]:
 
 
 def render_header_page(json_path: Path, relheader: str, rst_out: Path) -> bool:
-    """Render one header's page (``--layout header``)."""
+    """Render one header's page (``--layout header``). Embedded, so it carries
+    no title or note of its own; the including page supplies both."""
     render = subprocess.run(
         [sys.executable, str(SCRIPTS / "apiary_render_cpp_rst.py"), str(json_path),
          "--title", relheader, "--output", str(rst_out), "--embed"],
@@ -277,7 +298,18 @@ class ModuleResult:
     note: str = ""
 
 
-def gen_module(tool: str, flags: list[str], lib: str, module: str, inc: Path, out_dir: Path,
+@dataclass
+class Parse:
+    """How every module is parsed: the tool, the --module it is given, its
+    compile flags, and which headers of a module's directory it documents."""
+    tool: str
+    module_name: str
+    flags: list[str]
+    header_globs: list[str]
+    exclude: set[str]
+
+
+def gen_module(parse: Parse, lib: str, module: str, inc: Path, out_dir: Path,
                entity_layout: bool, report_undoc: bool, report_refs: bool) -> ModuleResult:
     """Parse one module's headers and write its JSON and (header layout) pages.
 
@@ -287,11 +319,7 @@ def gen_module(tool: str, flags: list[str], lib: str, module: str, inc: Path, ou
     If the umbrella yields nothing (the headers do not compile together), the
     module falls back to one parse per header."""
     result = ModuleResult(lib, module)
-    headers: dict[Path, str] = {}
-    for header in sorted(inc.rglob("*.hpp")):
-        rel = header_relpath(header)
-        if rel is not None:
-            headers[header.resolve()] = rel
+    headers = module_headers(inc, parse.header_globs, parse.exclude)
     if not headers:
         return result
     rels = list(headers.values())
@@ -310,7 +338,7 @@ def gen_module(tool: str, flags: list[str], lib: str, module: str, inc: Path, ou
 
     umbrella = out_dir / "umbrellas" / f"{lib}_{module}.hpp"
     write_umbrella(umbrella, rels)
-    whole = run_apiary(tool, flags, umbrella, rels, report_undoc, report_refs)
+    whole = run_apiary(parse.tool, parse.module_name, parse.flags, umbrella, rels, report_undoc, report_refs)
     # Headers that conflict when included together (a redefinition, a macro
     # one of them expects undefined) make clang report an error, and apiary
     # then writes nothing. Only a clean parse is trusted to be complete.
@@ -323,7 +351,8 @@ def gen_module(tool: str, flags: list[str], lib: str, module: str, inc: Path, ou
         result.note = "headers do not parse together; parsed one at a time"
         with_errors: list[str] = []
         for path, rel in headers.items():
-            run = run_apiary(tool, flags, path, [rel], report_undoc, report_refs, allow_parse_errors=True)
+            run = run_apiary(parse.tool, parse.module_name, parse.flags, path, [rel], report_undoc, report_refs,
+                             allow_parse_errors=True)
             if run.clang_error:
                 with_errors.append(rel)
             if absorb(run) is None:
@@ -374,12 +403,15 @@ def run_text(doc: dict) -> str:
 
 
 def render_module_site(lib: str, module: str, jsons: list[Path], rst_dir: Path,
-                       index_label_tpl: str, backlink_label_tpl: str) -> None:
+                       index_label_tpl: str, backlink_label_tpl: str, index_title_tpl: str,
+                       generated_from: str) -> None:
     """Render one module's per-entity pages under ``<rst-dir>/<lib>/<module>/``."""
     outdir = rst_dir / lib / module
     cmd = [sys.executable, str(SCRIPTS / "apiary_render_cpp_site.py"),
            "--outdir", str(outdir), "--module-title", module,
-           "--index-label", index_label_tpl.format(lib=lib, module=module)]
+           "--index-label", index_label_tpl.format(lib=lib, module=module),
+           "--index-title", index_title_tpl.format(lib=lib, module=module),
+           "--generated-from", generated_from]
     backlink = backlink_label_tpl.format(lib=lib, module=module) if backlink_label_tpl else ""
     if backlink:
         cmd += ["--backlink-label", backlink]
@@ -414,15 +446,15 @@ def entity_counts(jsons: list[Path]) -> tuple[int, int]:
 
 
 def write_root_index(rst_dir: Path, modules: list[tuple[str, str, list[Path]]],
-                     root_title: str, root_label: str, index_label_tpl: str) -> None:
+                     root_title: str, root_label: str, index_label_tpl: str, generated_from: str) -> None:
     # Alphabetical regardless of the order the caller wired the modules in.
     modules = sorted(modules, key=lambda m: (m[0].lower(), m[1].lower()))
     ind = "   "
     out = [f".. _{root_label}:", "", "=" * len(root_title), root_title, "=" * len(root_title), "",
            ".. note::",
-           f"{ind}Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.",
+           f"{ind}Generated from {generated_from} by ``apiary --emit-cpp-docs-json``.",
            "",
-           "The C++ API reference is organized per module.", "",
+           "The reference is organized per module.", "",
            "Modules", "-------", ""]
     for lib, module, jsons in modules:
         label = index_label_tpl.format(lib=lib, module=module)
@@ -454,12 +486,14 @@ def prune_stale(rst_dir: Path, rendered: set[tuple[str, str]]) -> None:
             lib_dir.rmdir()
 
 
-def prune_stale_json(out_dir: Path, written: set[Path]) -> None:
+def prune_stale_json(out_dir: Path, written: set[Path], header_globs: list[str]) -> None:
     """Delete docs JSON a previous run wrote that this one did not: a header
     or module that went away, or the per-header files of a module now parsed
-    whole. Only this script's own file names are touched."""
+    whole. Only this script's own file names are touched: a header's JSON is
+    its path with ``/`` and ``.`` as ``_``, so it ends in its extension."""
+    own = (".module.json", *(f"_{g.rsplit('.', 1)[1]}.json" for g in header_globs if "." in g))
     for path in out_dir.glob("*.json"):
-        if path.name.endswith(("_hpp.json", ".module.json")) and path not in written:
+        if path.name.endswith(own) and path not in written:
             path.unlink()
 
 
@@ -473,6 +507,21 @@ def main() -> int:
                     help="lib/module pairs, e.g. Einsums/BLASVendor. When omitted, every "
                          "libs/<lib>/<module>/include directory is discovered automatically "
                          "(handy for a full --report-undocumented sweep without pasting the list).")
+    ap.add_argument("--include-dir", action="append", default=[], metavar="LIB/MODULE=DIR",
+                    help="document the headers under DIR (relative to --source-dir) as the module "
+                         "LIB/MODULE, instead of the libs/<lib>/<module>/include layout. Repeatable.")
+    ap.add_argument("--header-glob", action="append", default=None, metavar="PATTERN",
+                    help="which files in a module's directory are headers (default: '*.hpp'). "
+                         "Repeatable, e.g. '*.h' and '*.hpp' for a C and a C++ API.")
+    ap.add_argument("--exclude-header", action="append", default=[], metavar="PATH",
+                    help="an include-relative header not to document, e.g. one in another language. "
+                         "Repeatable.")
+    ap.add_argument("--flags-from", default="apiary_register_Tensor", metavar="REGISTER_FUNCTION",
+                    help="the register function whose apiary command in build.ninja supplies the compile "
+                         "flags (default: %(default)s)")
+    ap.add_argument("--module-name", default="einsums",
+                    help="the --module apiary is given: the Python module the API belongs to "
+                         "(default: %(default)s)")
     ap.add_argument("--report-undocumented", action="store_true",
                     help="Also collect a deduplicated punch-list of public C++ entities missing a "
                          "doc comment. Prints the sorted list to stdout and writes it to "
@@ -496,19 +545,52 @@ def main() -> int:
                     help="entity layout: title of the landing page at <out-dir>/rst/index.rst")
     ap.add_argument("--root-label", default="api_cpp",
                     help="entity layout: Sphinx label of the landing page")
+    ap.add_argument("--index-title-template", default="{module} C++ API",
+                    help="entity layout: title of each module's index page (default: '%(default)s')")
+    ap.add_argument("--generated-from", default="the C++ headers",
+                    help="entity layout: what each page's note says it was generated from "
+                         "(default: '%(default)s')")
     args = ap.parse_args()
 
     source = Path(args.source_dir)
+    build = Path(args.build_dir)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    flags = universal_flags(Path(args.build_dir), source)
 
-    modules = args.modules
-    if modules is None:
-        # Auto-discover: every libs/<lib>/<module>/include directory.
-        modules = sorted(f"{inc.parts[-3]}/{inc.parts[-2]}"
-                         for inc in (source / "libs").glob("*/*/include"))
-        log(f"auto-discovered {len(modules)} modules under {source / 'libs'}")
+    jobs: list[tuple[str, str, Path]] = []
+    if args.include_dir:
+        if args.modules:
+            raise SystemExit("gen_cpp_docs: --modules picks from the libs/ layout; --include-dir names "
+                             "modules itself, so give one or the other")
+        for spec in args.include_dir:
+            name, sep, directory = spec.partition("=")
+            lib, slash, module = name.partition("/")
+            if not (sep and slash and lib and module and directory):
+                raise SystemExit(f"gen_cpp_docs: --include-dir {spec!r} is not LIB/MODULE=DIR")
+            jobs.append((lib, module, source / directory))
+        # Their include dirs are all the parse needs on top of the build's flags.
+        include_dirs = [inc for _, _, inc in jobs]
+    else:
+        modules = args.modules
+        if modules is None:
+            # Auto-discover: every libs/<lib>/<module>/include directory.
+            modules = sorted(f"{inc.parts[-3]}/{inc.parts[-2]}"
+                             for inc in (source / "libs").glob("*/*/include"))
+            log(f"auto-discovered {len(modules)} modules under {source / 'libs'}")
+        for mod in modules:
+            lib, module = mod.split("/", 1)
+            jobs.append((lib, module, source / "libs" / lib / module / "include"))
+        # Every module's, source and build tree (for a generated Defines.hpp),
+        # whichever are documented: one module's headers include another's.
+        include_dirs = [inc for base in (source / "libs", build / "libs") for inc in sorted(base.glob("*/*/include"))]
+    missing = [f"{lib}/{module}" for lib, module, inc in jobs if not inc.is_dir()]
+    for mod in missing:
+        log(f"skip {mod}: no include dir")
+    jobs = [job for job in jobs if job[2].is_dir()]
+
+    parse = Parse(tool=args.tool, module_name=args.module_name,
+                  flags=universal_flags(build, args.flags_from, include_dirs),
+                  header_globs=args.header_glob or ["*.hpp"], exclude=set(args.exclude_header))
 
     entity_layout = args.layout == "entity"
     rst_dir = out_dir / "rst"
@@ -517,24 +599,16 @@ def main() -> int:
     tparams: set[str] = set()
     undoc: set[str] | None = set() if args.report_undocumented else None
     undoc_refs: set[str] | None = set() if args.report_undocumented_references else None
-    jobs: list[tuple[str, str, Path]] = []
-    for mod in modules:
-        lib, module = mod.split("/", 1)
-        inc = source / "libs" / lib / module / "include"
-        if not inc.is_dir():
-            log(f"skip {mod}: no include dir")
-            continue
-        jobs.append((lib, module, inc))
 
     # Modules are independent, and each is one parse plus its render, so they
     # run side by side. Results are merged in module order, so the output
     # does not depend on which finishes first.
     def module_job(lib: str, module: str, inc: Path) -> ModuleResult:
-        res = gen_module(args.tool, flags, lib, module, inc, out_dir, entity_layout,
+        res = gen_module(parse, lib, module, inc, out_dir, entity_layout,
                          undoc is not None, undoc_refs is not None)
         if entity_layout:
-            render_module_site(lib, module, res.jsons, rst_dir,
-                               args.index_label_template, args.backlink_label_template)
+            render_module_site(lib, module, res.jsons, rst_dir, args.index_label_template,
+                               args.backlink_label_template, args.index_title_template, args.generated_from)
         return res
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
@@ -553,10 +627,10 @@ def main() -> int:
         if entity_layout:
             site_modules.append((res.lib, res.module, res.jsons))
         log(f"{res.lib}/{res.module}: generated pages" + (f" ({res.note})" if res.note else ""))
-    prune_stale_json(out_dir, written)
+    prune_stale_json(out_dir, written, parse.header_globs)
     if entity_layout:
         write_root_index(rst_dir, site_modules, args.root_title, args.root_label,
-                         args.index_label_template)
+                         args.index_label_template, args.generated_from)
         prune_stale(rst_dir, {(lib, module) for lib, module, _ in site_modules})
     # The collected template-parameter names — the docs build adds these to
     # nitpick_ignore (they are never cpp cross-reference targets).

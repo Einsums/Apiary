@@ -174,4 +174,82 @@ assert_no_grep "one(" "${WORK}/hdr/Demo_Alpha_Two_hpp.rst"
 assert_grep "DEMO_TWICE" "${WORK}/hdr/Demo_Alpha_Two_hpp.rst"
 assert_grep "int good()" "${WORK}/hdr/Demo_Beta_Good_hpp.rst"
 
+# ---- a project with its own layout -----------------------------------------
+# One include directory rather than libs/<lib>/<module>/include, a C header and
+# the C++ wrapper over it, a header in another language, and the flags of a
+# register function of the project's own: the shape of Waggle.
+PROJ="${WORK}/proj"
+mkdir -p "${PROJ}/include/Proj" "${PROJ}/build"
+cat > "${PROJ}/include/Proj/proj.h" <<'HPP'
+#pragma once
+#ifdef __cplusplus
+extern "C" {
+#endif
+/// An opaque handle.
+typedef struct proj_handle proj_handle;
+/// Start the library.
+int proj_init(void);
+#ifdef __cplusplus
+}
+#endif
+HPP
+cat > "${PROJ}/include/Proj/Proj.hpp" <<'HPP'
+#pragma once
+#include <Proj/proj.h>
+namespace proj {
+/// Start the library, the C++ way.
+inline int init() { return proj_init(); }
+} // namespace proj
+HPP
+# Objective-C++, which a C++ parse cannot read.
+printf '#pragma once\n@interface ProjDevice\n@end\n' > "${PROJ}/include/Proj/Device.h"
+cat > "${PROJ}/build/build.ninja" <<NINJA
+build x: CUSTOM_COMMAND
+  COMMAND = cmake -DAPIARY_COMMAND=apiary;--register-function;proj_register_core;x.hpp;--;-std=c++20;-nostdinc++ -P run.cmake
+NINJA
+
+proj() {
+    local out="$1"
+    shift
+    "${PY}" "${GEN}" --source-dir "${PROJ}" --build-dir "${PROJ}/build" --tool "${TOOL}" --out-dir "${out}" \
+        --include-dir Proj/API=include --module-name proj \
+        --header-glob '*.h' --header-glob '*.hpp' --exclude-header Proj/Device.h "$@" 2> "${out}.log"
+}
+proj "${WORK}/proj-out" --layout entity --flags-from proj_register_core \
+    --index-title-template "{lib} API" --generated-from "the Proj headers" --root-title "Proj API Reference" \
+    || { cat "${WORK}/proj-out.log" >&2; fail "generator exited non-zero for the project layout"; }
+PSITE="${WORK}/proj-out/rst/Proj/API"
+# Parsed whole: the excluded header never reached the umbrella.
+assert_grep "Proj/API: generated pages" "${WORK}/proj-out.log"
+assert_no_grep "Proj/API: generated pages (" "${WORK}/proj-out.log"
+assert_no_grep "Device" "${WORK}/proj-out/umbrellas/Proj_API.hpp"
+assert_grep '"module": "proj"' "${WORK}/proj-out/Proj_API.module.json"
+# Its own title and source, on the index, its pages, and the landing page.
+[[ "$(sed -n '/^=/{n;p;q;}' "${PSITE}/index.rst")" == "Proj API" ]] || fail "the module index is not titled 'Proj API'"
+assert_grep "Generated from the Proj headers by" "${PSITE}/proj_init.rst"
+assert_grep "Generated from the Proj headers by" "${WORK}/proj-out/rst/index.rst"
+# The C function and its C++ wrapper, each with a page and a label of its own.
+assert_grep ".. _api_cpp_proj_init:" "${PSITE}/proj_init.rst"
+assert_grep ".. _api_cpp_proj.init:" "${PSITE}/proj.init.rst"
+assert_grep ".. cpp:type:: proj_handle" "${PSITE}/types.rst"
+
+# A header's JSON is named for its extension, and a stale one is still pruned.
+mkdir -p "${WORK}/proj-hdr"
+echo '{}' > "${WORK}/proj-hdr/Proj_Gone_h.json"
+proj "${WORK}/proj-hdr" --layout header --flags-from proj_register_core \
+    || { cat "${WORK}/proj-hdr.log" >&2; fail "generator exited non-zero for the header layout"; }
+assert_grep "int proj_init()" "${WORK}/proj-hdr/Proj_proj_h.rst"
+[[ ! -e "${WORK}/proj-hdr/Proj_Gone_h.json" ]] || fail "stale per-header JSON of a .h header survived a rerun"
+
+# What is wrong is named after the option that fixes it.
+if proj "${WORK}/proj-bad" --flags-from no_such_register; then
+    fail "an unknown --flags-from was accepted"
+fi
+assert_grep "no apiary command for the register function no_such_register" "${WORK}/proj-bad.log"
+if "${PY}" "${GEN}" --source-dir "${PROJ}" --build-dir "${PROJ}/build" --tool "${TOOL}" --out-dir "${WORK}/proj-bad" \
+        --include-dir include 2> "${WORK}/proj-bad.log"; then
+    fail "an --include-dir without a LIB/MODULE name was accepted"
+fi
+assert_grep "is not LIB/MODULE=DIR" "${WORK}/proj-bad.log"
+
 echo "PASS: run_gen_cpp_docs"
