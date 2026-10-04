@@ -81,6 +81,8 @@ runtime_names() {
         'import demo, demo._core as c; print(sorted(n for n in dir(c) if not n.startswith("_")))'
 }
 
+extension() { find "${PKG}" -maxdepth 1 -name '_core*' ! -name '*.pyi' | head -1; }
+mtime() { "${PY}" -c 'import os, sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$1"; }
 
 # ── Every module ─────────────────────────────────────────────────────────────
 configure -DWITH_GONE=ON -DWITH_SOLO=ON
@@ -91,6 +93,17 @@ assert_contains "${PKG}/solo.pyi" "^class Solo:"
 assert_contains "${PKG}/__init__.pyi" "^from \. import solo as solo$"
 assert_contains "${DOCS}/demo.rst" "py:class:: Gone"
 [[ -f "${DOCS}/demo.solo.rst" ]] || fail "first build: no page for the solo submodule"
+
+# ── A reconfigure that changes nothing rebuilds nothing ──────────────────────
+# The register header is written at configure time; rewriting identical
+# content would recompile the extension's main TU and relink it.
+ext="$(extension)"
+[[ -n "${ext}" ]] || fail "no _core extension under ${PKG}"
+before="$(mtime "${ext}")"
+sleep 1
+configure -DWITH_GONE=ON -DWITH_SOLO=ON
+build
+[[ "$(mtime "${ext}")" == "${before}" ]] || fail "an unchanged reconfigure relinked the extension"
 
 # ── Remove two modules from the same tree ────────────────────────────────────
 # GNU Make 3.81 (macOS) compares whole seconds, and the reconfigure below
