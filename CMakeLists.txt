@@ -133,7 +133,8 @@ target_include_directories(apiary PRIVATE
 set(APIARY_LLVM_RESOURCE_DIR "${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}" CACHE INTERNAL
     "Clang builtin headers of the LLVM apiary is built against")
 set(APIARY_LLVM_VERSION_MAJOR "${LLVM_VERSION_MAJOR}" CACHE INTERNAL "LLVM major apiary is built against")
-target_compile_definitions(apiary PRIVATE APIARY_LLVM_RESOURCE_DIR="${APIARY_LLVM_RESOURCE_DIR}")
+target_compile_definitions(apiary PRIVATE APIARY_LLVM_RESOURCE_DIR="${APIARY_LLVM_RESOURCE_DIR}"
+                                          APIARY_VERSION_STRING="${APIARY_VERSION}")
 
 # Libtooling pulls in everything we need: ASTMatchers + Frontend +
 # Tooling + Driver + Sema. We don't link the full LLVM since libtooling's

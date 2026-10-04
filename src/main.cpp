@@ -39,6 +39,7 @@
 #include "clang/Tooling/ArgumentsAdjusters.h"
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
@@ -380,6 +381,11 @@ int write_output(std::string const &content) {
 } // namespace
 
 int main(int argc, char const **argv) {
+    // LLVM's printer names only LLVM, which says nothing about which apiary
+    // is installed.
+    llvm::cl::SetVersionPrinter([](llvm::raw_ostream &os) {
+        os << "apiary " << APIARY_VERSION_STRING << " (LLVM " << LLVM_VERSION_STRING << ")\n";
+    });
     // Answered before CommonOptionsParser, which requires at least one source
     // path: asking what the diagnostic checks ARE should not require naming a
     // header to run them against.

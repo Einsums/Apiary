@@ -24,6 +24,13 @@ readonly INCLUDE_DIR="$2"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly FIXTURE_DIR="${SCRIPT_DIR}/fixtures"
 
+# --version names apiary's own version, as CMakeLists.txt sets it, and the LLVM
+# it was built against.
+expected_version="$(sed -nE 's/^set\(APIARY_VERSION ([0-9.]+)\)$/\1/p' "${SCRIPT_DIR}/../CMakeLists.txt")"
+version_line="$("${TOOL}" --version)"
+[[ "${version_line}" =~ ^apiary\ ${expected_version//./\\.}\ \(LLVM\ [0-9]+\.[0-9]+\.[0-9]+.*\)$ ]] \
+    || { echo "FAIL: --version printed '${version_line}', expected 'apiary ${expected_version} (LLVM <version>)'" >&2; exit 1; }
+
 run_tool() {
     # The tool may exit non-zero when a fixture pulls in a system header
     # we can't find with -nostdinc++ (the AST is still populated and the
