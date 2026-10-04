@@ -1,5 +1,5 @@
 context:
-  version: "1.1.0"
+  version: "1.2.0"
   # LLVM/Clang major apiary's libTooling code is built against. apiary is a leaf
   # *tool* — consumers run it, they do not link its LLVM — so it may pin its own
   # toolchain independent of the rest of an environment.
@@ -14,7 +14,7 @@ source:
   sha256: 23a0a6ff0cfbb760b1a2605bfc686c776ce8934d47b8b807cc0f72a6828181c9
 
 build:
-  number: 1
+  number: 0
   script:
     - if: unix
       then: |
