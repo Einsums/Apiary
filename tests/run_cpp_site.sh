@@ -127,6 +127,21 @@ assert_grep "void geom_visit(geom_shapes *shapes, geom_visit_fn fn, void *user)"
 assert_grep ".. _api_cpp_geom_scale:" "${SITE}/geom_scale.rst"
 assert_grep ".. _api_cpp_geom.scale:" "${SITE}/geom.scale.rst"
 
+# ---- a reference's own title and source ------------------------------------
+# A C header's reference says so, on the index and on every page, rather than
+# "<module> C++ API" and "Generated from the C++ headers".
+CSITE="${WORK}/csite"
+"${PY}" "${SCRIPTS_DIR}/apiary_render_cpp_site.py" --outdir "${CSITE}" \
+    --module-title geom --index-label geom_c_api --label-prefix api_c \
+    --index-title "geom C API" --generated-from "the C header" "${WORK}/capi.json" 2>/dev/null
+[[ "$(sed -n '/^=/{n;p;q;}' "${CSITE}/index.rst")" == "geom C API" ]] || fail "the C reference's index is not titled 'geom C API'"
+for page in "${CSITE}"/*.rst; do
+    assert_grep "Generated from the C header by" "${page}"
+done
+if grep -rqF "C++" "${CSITE}"; then
+    fail "the C reference still mentions C++: $(grep -rlF "C++" "${CSITE}" | head -1)"
+fi
+
 # ---- template parameters render as declared --------------------------------
 # Every kind of template parameter keeps its kind: a non-type parameter its
 # type, a pack its ``...``, a template template parameter its parameter list,

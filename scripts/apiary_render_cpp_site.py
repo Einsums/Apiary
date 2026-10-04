@@ -49,11 +49,13 @@ from apiary_io import write_if_changed  # noqa: E402
 IND = base.IND
 LICENSE_HEADER = base.LICENSE_HEADER
 
-GENERATED_NOTE = [
-    ".. note::",
-    f"{IND}Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.",
-    "",
-]
+# What every page says it was generated from, unless --generated-from names
+# something else (a C header, a whole library).
+DEFAULT_GENERATED_FROM = "the C++ headers"
+
+
+def generated_note(source: str) -> list[str]:
+    return [".. note::", f"{IND}Generated from {source} by ``apiary --emit-cpp-docs-json``.", ""]
 
 
 def log(msg: str) -> None:
@@ -195,9 +197,9 @@ def assign_slugs(paged: list[Entity]) -> dict[str, Entity]:
 # -- Page rendering ----------------------------------------------------------
 
 
-def page_head(title: str, label: str) -> list[str]:
+def page_head(title: str, label: str, note: list[str]) -> list[str]:
     bar = "=" * len(title)
-    return [LICENSE_HEADER, "", f".. _{label}:", "", bar, title, bar, "", *GENERATED_NOTE]
+    return [LICENSE_HEADER, "", f".. _{label}:", "", bar, title, bar, "", *note]
 
 
 def defined_in(headers: set[str]) -> list[str]:
@@ -239,9 +241,9 @@ def dedup_signatures(fns: list[dict]) -> list[dict]:
     return [by_sig[s] for s in order]
 
 
-def render_entity_page(e: Entity, label: str) -> str | None:
+def render_entity_page(e: Entity, label: str, note: list[str]) -> str | None:
     title = e.qualified_name
-    out = page_head(title, label)
+    out = page_head(title, label, note)
     out += defined_in(e.headers)
     ns = base.namespace_of(e.qualified_name)
     out += namespace_block(ns)
@@ -260,10 +262,10 @@ def render_entity_page(e: Entity, label: str) -> str | None:
     return "\n".join(out).rstrip() + "\n"
 
 
-def render_group_page(title: str, label: str, entities: list[Entity], renderer) -> str:
+def render_group_page(title: str, label: str, entities: list[Entity], renderer, note: list[str]) -> str:
     """A catch-all page (enums / types / operators / macros): entities grouped
     by namespace, each declared here and nowhere else."""
-    out = page_head(title, label)
+    out = page_head(title, label, note)
     headers = {h for e in entities for h in e.headers}
     out += defined_in(headers)
     if renderer is base.render_macro:  # macros are C-domain, not namespaced
@@ -280,8 +282,8 @@ def render_group_page(title: str, label: str, entities: list[Entity], renderer) 
     return "\n".join(out).rstrip() + "\n"
 
 
-def render_operator_page(label: str, sets: list[Entity]) -> str | None:
-    out = page_head("Operators", label)
+def render_operator_page(label: str, sets: list[Entity], note: list[str]) -> str | None:
+    out = page_head("Operators", label, note)
     headers = {h for e in sets for h in e.headers}
     out += defined_in(headers)
     wrote = False
@@ -312,12 +314,11 @@ def summary_item(role: str, target: str, brief: str) -> str:
     return line
 
 
-def render_index(module_title: str, index_label: str, backlink_label: str,
+def render_index(title: str, index_label: str, backlink_label: str,
                  sections: list[tuple[str, list[tuple[str, str, str]]]],
-                 toctree: list[str]) -> str:
-    title = f"{module_title} C++ API"
+                 toctree: list[str], note: list[str]) -> str:
     bar = "=" * len(title)
-    out = [LICENSE_HEADER, "", f".. _{index_label}:", "", bar, title, bar, "", *GENERATED_NOTE]
+    out = [LICENSE_HEADER, "", f".. _{index_label}:", "", bar, title, bar, "", *note]
     if backlink_label:
         # Explicit link text: a bare :ref: fails when the label does not
         # directly precede a section title.
@@ -344,8 +345,10 @@ def render_index(module_title: str, index_label: str, backlink_label: str,
 
 
 def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: str,
-                backlink_label: str, label_prefix: str) -> list[Path]:
+                backlink_label: str, label_prefix: str, *, index_title: str | None = None,
+                generated_from: str = DEFAULT_GENERATED_FROM) -> list[Path]:
     kinds = collect(docs)
+    note = generated_note(generated_from)
 
     # Entities that get their own page.
     paged: list[Entity] = list(kinds["class"].values()) + list(kinds["concept"].values())
@@ -389,7 +392,7 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
     section_of = {"class": "Classes", "concept": "Concepts", "function": "Functions"}
     for slug in sorted(by_slug, key=str.lower):
         e = by_slug[slug]
-        text = render_entity_page(e, label_of(label_prefix, slug))
+        text = render_entity_page(e, label_of(label_prefix, slug), note)
         if text is None:
             continue
         write(slug + ".rst", text)
@@ -399,7 +402,7 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
     # Catch-all pages exist once per module, so their labels are scoped by
     # the module's (globally unique) index label, not the shared prefix.
     if operator_sets:
-        text = render_operator_page(f"{index_label}_operators", operator_sets)
+        text = render_operator_page(f"{index_label}_operators", operator_sets, note)
         if text is not None:
             write("operators.rst", text)
             toctree.append("operators")
@@ -415,7 +418,7 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
         entities = list(kinds[kind].values())
         if not entities:
             continue
-        write(stem + ".rst", render_group_page(heading, f"{index_label}_{stem}", entities, renderer))
+        write(stem + ".rst", render_group_page(heading, f"{index_label}_{stem}", entities, renderer, note))
         toctree.append(stem)
         for e in sorted(entities, key=lambda x: x.qualified_name):
             if kind == "macro":
@@ -425,7 +428,8 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
 
     ordered_sections = [(h, sections[h]) for h in
                         ("Classes", "Concepts", "Functions", "Operators", "Enumerations", "Types", "Macros")]
-    write("index.rst", render_index(module_title, index_label, backlink_label, ordered_sections, toctree))
+    write("index.rst", render_index(index_title or f"{module_title} C++ API", index_label, backlink_label,
+                                    ordered_sections, toctree, note))
 
     # Prune pages this run did not produce: an entity that was renamed or
     # removed would otherwise keep a page that still builds and still resolves
@@ -448,6 +452,11 @@ def main() -> int:
     ap.add_argument("--backlink-label", default="",
                     help="label of the module's narrative page; empty for no backlink")
     ap.add_argument("--label-prefix", default="api_cpp", help="prefix for per-entity page labels")
+    ap.add_argument("--index-title", default=None,
+                    help="title of the index page (default: '<module-title> C++ API'), e.g. 'C API' for a C header")
+    ap.add_argument("--generated-from", default=DEFAULT_GENERATED_FROM,
+                    help="what every page's note says it was generated from (default: '%(default)s'), "
+                         "e.g. 'the C header'")
     args = ap.parse_args()
 
     docs = []
@@ -456,7 +465,8 @@ def main() -> int:
         if text.strip():
             docs.append(json.loads(text))
     written = render_site(docs, Path(args.outdir), args.module_title,
-                          args.index_label, args.backlink_label, args.label_prefix)
+                          args.index_label, args.backlink_label, args.label_prefix,
+                          index_title=args.index_title, generated_from=args.generated_from)
     log(f"wrote {len(written)} pages into {args.outdir}")
     return 0
 
