@@ -39,7 +39,10 @@ def _run(script: str, *args) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--outdir", required=True, help="directory for the rendered .rst (and the merged docs.json)")
+    ap.add_argument("--outdir", required=True,
+                    help="directory for the rendered .rst (and the merged docs.json). The renderer owns "
+                         "it: any .rst there that this run does not write is deleted, so do not point it "
+                         "at hand-written pages")
     # Python frontend (optional): extract a package's hand-written layer.
     ap.add_argument("--package", help="top-level package import name to extract")
     ap.add_argument("--package-dir", help="filesystem directory of --package (contains __init__.py)")
