@@ -82,7 +82,9 @@ run() { "${PY}" "${AGG}" "$@" --pkg-dir "${PKG}" --manifest "${MANIFEST}" >"${WO
     || { cat "${WORK}/out.log" >&2; fail "aggregate_stubs exited non-zero: $*"; }; }
 
 # ── All three modules, the list passed as @file ──────────────────────────────
-for frag in demo_a demo_b demo_c; do native "${FRAG}/${frag}.pyi"; echo; done > "${FRAG}/list"
+# $(...) drops the newline cygpath ends its output with.
+printf '%s\n' "$(native "${FRAG}/demo_a.pyi")" "$(native "${FRAG}/demo_b.pyi")" "$(native "${FRAG}/demo_c.pyi")" \
+    > "${FRAG}/list"
 run "@$(native "${FRAG}/list")" --py-helpers-dir "${HELPERS}"
 assert_contains "${PKG}/_core.pyi" "^class A:"
 assert_contains "${PKG}/_core.pyi" "^class B:"
@@ -136,6 +138,14 @@ if "${PY}" "${AGG}" "${FRAG}/missing.pyi" --pkg-dir "${PKG}" >"${WORK}/err.log" 
     fail "a missing fragment was accepted"
 fi
 assert_contains "${WORK}/err.log" "fragment .*missing\.pyi does not exist"
+# A blank line in a list names nothing; an empty fragment path is an error.
+printf '\n%s\n\n' "$(native "${FRAG}/demo_a.pyi")" > "${FRAG}/blank-lines"
+"${PY}" "${AGG}" "@$(native "${FRAG}/blank-lines")" --pkg-dir "${WORK}/pkg-blank" >"${WORK}/err.log" 2>&1 \
+    || { cat "${WORK}/err.log" >&2; fail "blank lines in an @file were not skipped"; }
+if "${PY}" "${AGG}" "" --pkg-dir "${WORK}/pkg-blank" >"${WORK}/err.log" 2>&1; then
+    fail "an empty fragment path was accepted"
+fi
+assert_contains "${WORK}/err.log" "argument fragments: must not be empty"
 # An empty --py-helpers-dir would read as ".", the working directory.
 if "${PY}" "${AGG}" "${FRAG}/demo_a.pyi" --pkg-dir "${PKG}" --py-helpers-dir "" >"${WORK}/err.log" 2>&1; then
     fail "an empty --py-helpers-dir was accepted"

@@ -407,6 +407,14 @@ def prune_stale(manifest: Path, pkg_dir: Path, outputs: list[Path]) -> list[Path
     return removed
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    def convert_arg_line_to_args(self, arg_line: str) -> list[str]:
+        # A blank line in an @file names nothing, rather than an empty path
+        # (which Path reads as "."): a list can end in one, or have one per
+        # entry when a tool's output keeps its newline.
+        return [arg_line] if arg_line.strip() else []
+
+
 def _nonempty_path(value: str) -> Path:
     # Path("") is ".", so an empty value would quietly scan the working directory.
     if not value:
@@ -415,8 +423,8 @@ def _nonempty_path(value: str) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars="@")
-    p.add_argument("fragments", nargs="+", type=Path,
+    p = _ArgumentParser(description=__doc__, fromfile_prefix_chars="@")
+    p.add_argument("fragments", nargs="+", type=_nonempty_path,
                    help="Per-module .pyi fragments to merge, or @<file> naming one per line.")
     p.add_argument("--pkg-dir", required=True, type=Path,
                    help="Destination package directory (holding the _core extension).")
