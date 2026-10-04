@@ -31,6 +31,16 @@ typedef enum geom_effort { /* NOLINT(modernize-use-using) */
 /// Called once for each shape a visit reaches.
 typedef void (*geom_visit_fn)(void *user, geom_shapes *shapes, int index); /* NOLINT(modernize-use-using) */
 
+/// How many shapes exist. Declared here and defined in the library, so a
+/// parse of the header sees only this declaration.
+extern int geom_count;
+
+/// The name of each kind of shape.
+extern char const *geom_kind_names[4];
+
+/// Called with each shape's index as it is removed; may be null.
+extern void (*geom_on_remove)(int index);
+
 /// Call @p fn with @p user for every shape in @p shapes.
 void geom_visit(geom_shapes *shapes, geom_visit_fn fn, void *user);
 

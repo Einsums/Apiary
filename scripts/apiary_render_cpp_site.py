@@ -125,7 +125,7 @@ def is_identifier(name: str) -> bool:
 def collect(docs: list[dict]) -> dict[str, dict[str, Entity]]:
     """Merge all documents into per-kind maps keyed by qualified name."""
     kinds: dict[str, dict[str, Entity]] = {
-        "class": {}, "concept": {}, "function": {}, "enum": {}, "typedef": {}, "macro": {},
+        "class": {}, "concept": {}, "function": {}, "enum": {}, "typedef": {}, "variable": {}, "macro": {},
     }
 
     def add(kind: str, e: dict) -> None:
@@ -150,6 +150,8 @@ def collect(docs: list[dict]) -> dict[str, dict[str, Entity]]:
         for td in doc.get("typedefs", []):
             if (td.get("qualified_name") or td["name"]) not in redundant:
                 add("typedef", td)
+        for v in doc.get("variables", []):
+            add("variable", v)
         for m in doc.get("macros", []):
             add("macro", m)
     return kinds
@@ -378,7 +380,7 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
 
     sections: dict[str, list[tuple[str, str, str]]] = {
         "Classes": [], "Concepts": [], "Functions": [], "Operators": [],
-        "Enumerations": [], "Types": [], "Macros": [],
+        "Enumerations": [], "Types": [], "Variables": [], "Macros": [],
     }
     toctree: list[str] = []
 
@@ -414,6 +416,7 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
     group_specs = [
         ("enum", "Enumerations", "enums", base.render_enum),
         ("typedef", "Types", "types", base.render_typedef),
+        ("variable", "Variables", "variables", base.render_variable),
         ("macro", "Macros", "macros", base.render_macro),
     ]
     for kind, heading, stem, renderer in group_specs:
@@ -429,7 +432,8 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
                 sections[heading].append(("cpp:any", f"~{e.qualified_name}", brief_of(e.data)))
 
     ordered_sections = [(h, sections[h]) for h in
-                        ("Classes", "Concepts", "Functions", "Operators", "Enumerations", "Types", "Macros")]
+                        ("Classes", "Concepts", "Functions", "Operators", "Enumerations", "Types", "Variables",
+                         "Macros")]
     write("index.rst", render_index(index_title or f"{module_title} C++ API", index_label, backlink_label,
                                     ordered_sections, toctree, note))
 

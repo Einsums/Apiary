@@ -64,6 +64,9 @@ T one(T x);
 
 /// Use a widget.
 void use(Widget const &w, Mode m);
+
+/// How many widgets there are at most.
+inline constexpr int max_widgets = 4;
 } // namespace demo
 HPP
 
@@ -168,6 +171,7 @@ diff -r "${WORK}/one/rst" "${WORK}/many/rst" || fail "a rerun changed the pages"
 # entity is declared.
 gen "${WORK}/hdr" --layout header
 assert_grep "T one(T x)" "${WORK}/hdr/Demo_Alpha_One_hpp.rst"
+assert_grep ".. cpp:var:: inline constexpr int max_widgets" "${WORK}/hdr/Demo_Alpha_One_hpp.rst"
 assert_no_grep "two(" "${WORK}/hdr/Demo_Alpha_One_hpp.rst"
 assert_grep "int two(int x)" "${WORK}/hdr/Demo_Alpha_Two_hpp.rst"
 assert_no_grep "one(" "${WORK}/hdr/Demo_Alpha_Two_hpp.rst"

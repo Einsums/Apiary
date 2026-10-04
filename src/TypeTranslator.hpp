@@ -21,6 +21,15 @@ namespace apiary {
 ///       is in effect) and pybind11-specific type substitutions.
 std::string translate_type(clang::QualType type, clang::ASTContext const &ctx);
 
+/// @brief `type` declaring `name`, spelled as translate_type() spells the type.
+///
+/// The name goes where C++ puts it, which for an array or a function pointer
+/// is inside the type: `char ETN_MAGIC[8]`, `void (*callback)(int)`.
+/// @param type The declared type.
+/// @param name The name it declares.
+/// @param ctx  The AST context the type belongs to.
+std::string translate_declarator(clang::QualType type, llvm::StringRef name, clang::ASTContext const &ctx);
+
 /// @brief Best-effort Python-stub form of `type`, suitable for emission in a `.pyi` file consumed by pyright.
 /// @param type The Clang type to translate.
 /// @param ctx The AST context owning `type`.

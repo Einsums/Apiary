@@ -17,13 +17,29 @@
 
 namespace apiary {
 
-std::string translate_type(clang::QualType type, clang::ASTContext const &ctx) {
-    clang::PrintingPolicy policy = clang_compat::printing_policy(ctx);
+namespace {
+
+// How a type is spelled in generated code and docs.
+clang::PrintingPolicy type_policy(clang::ASTContext const &ctx) {
+    clang::PrintingPolicy policy  = clang_compat::printing_policy(ctx);
     policy.SuppressTagKeyword     = true;  // drop "class "/"struct " prefixes
     policy.SuppressScope          = false; // keep ::ns:: qualifiers for clarity
     policy.FullyQualifiedName     = true;  // canonical names so the emitter can match
     policy.SuppressUnwrittenScope = true;
-    return type.getAsString(policy);
+    return policy;
+}
+
+} // namespace
+
+std::string translate_type(clang::QualType type, clang::ASTContext const &ctx) {
+    return type.getAsString(type_policy(ctx));
+}
+
+std::string translate_declarator(clang::QualType type, llvm::StringRef name, clang::ASTContext const &ctx) {
+    std::string              out;
+    llvm::raw_string_ostream os(out);
+    type.print(os, type_policy(ctx), name);
+    return os.str();
 }
 
 namespace {

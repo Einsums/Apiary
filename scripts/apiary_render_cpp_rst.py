@@ -385,6 +385,26 @@ def render_typedef(out: list[str], td: dict) -> None:
     out.append("")
 
 
+def render_variable(out: list[str], v: dict) -> None:
+    """A namespace-scope variable, or variable template, as ``cpp:var``."""
+    ns = namespace_of(v.get("qualified_name", v["name"]))
+    tmpl = relativize(entity_template(v), ns)
+    # The declarator puts the name where C++ does, inside an array or function
+    # pointer type; JSON from an older apiary has only the type.
+    declarator = relativize((v.get("declarator") or f"{v.get('type') or ''} {v['name']}").strip(), ns)
+    specifiers = ""
+    if v.get("is_constexpr"):
+        # constexpr implies const; clang still prints the const.
+        declarator = declarator.removeprefix("const ")
+        specifiers = "inline constexpr " if v.get("is_inline") else "constexpr "
+    elif v.get("is_inline"):
+        specifiers = "inline "
+    out.append(f".. cpp:var:: {tmpl}{specifiers}{declarator}")
+    emit_doc(out, v, IND)
+    emit_constraints(out, v, IND, ns)
+    out.append("")
+
+
 def render_concept(out: list[str], c: dict) -> None:
     tmpl = relativize(entity_template(c), namespace_of(c.get("qualified_name", c["name"]))) or "template <typename T> "
     out.append(f".. cpp:concept:: {tmpl}{c['name']}")
@@ -532,7 +552,8 @@ def render_page(title: str, doc: dict, embed: bool = False) -> str:
     by_ns: dict[str, dict[str, list[dict]]] = {}
 
     def bucket(ns: str) -> dict[str, list[dict]]:
-        return by_ns.setdefault(ns, {"typedefs": [], "concepts": [], "enums": [], "classes": [], "functions": []})
+        return by_ns.setdefault(ns, {"typedefs": [], "concepts": [], "enums": [], "classes": [], "functions": [],
+                                     "variables": []})
 
     redundant = redundant_typedefs([doc])
     for td in doc.get("typedefs", []):
@@ -548,6 +569,8 @@ def render_page(title: str, doc: dict, embed: bool = False) -> str:
         bucket(namespace_of(cl.get("qualified_name", cl["name"])))["classes"].append(cl)
     for fn in doc.get("functions", []):
         bucket(namespace_of(fn.get("qualified_name", fn["name"])))["functions"].append(fn)
+    for v in doc.get("variables", []):
+        bucket(namespace_of(v.get("qualified_name", v["name"])))["variables"].append(v)
 
     for ns in sorted(by_ns):
         g = by_ns[ns]
@@ -563,6 +586,8 @@ def render_page(title: str, doc: dict, embed: bool = False) -> str:
             render_class(out, cl)
         for fn in sorted(g["functions"], key=lambda x: x["name"]):
             render_function(out, fn)
+        for v in sorted(g["variables"], key=lambda x: x["name"]):
+            render_variable(out, v)
     return "\n".join(out).rstrip() + "\n"
 
 

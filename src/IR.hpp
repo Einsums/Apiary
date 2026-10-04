@@ -557,6 +557,9 @@ struct BoundVariable : BoundEntityCommon {
     std::string              type;
     /// The same type after canonicalization.
     std::string              type_canonical;
+    /// The type declaring the variable's name, which for an array or a
+    /// function pointer sits inside it: `char ETN_MAGIC[8]`.
+    std::string              declarator;
     /// Template arguments of the type, when it names a class template
     /// specialization: `ConfigOption<std::string>` yields `std::string`.
     std::vector<std::string> type_template_args;
@@ -564,6 +567,15 @@ struct BoundVariable : BoundEntityCommon {
     bool is_constexpr = false;
     bool is_inline    = false;
     bool is_const     = false;
+
+    /// True for variable templates (``template <typename T> constexpr bool IsComplexV``).
+    bool                            is_template = false;
+    /// Template parameter names for variable templates.
+    std::vector<std::string>        template_param_names;
+    /// Template parameters as declared, for the C++ reference's ``template <...>``.
+    std::vector<BoundTemplateParam> template_param_decls;
+    /// The requires-clause of the template head, if any.
+    std::string                     requires_clause;
 
     /// How the variable was initialized. See @ref BoundInitializer.
     BoundInitializer initializer;

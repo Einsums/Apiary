@@ -134,6 +134,22 @@ assert_grep "void geom_visit(geom_shapes *shapes, geom_visit_fn fn, void *user)"
 assert_grep ".. _api_cpp_geom_scale:" "${SITE}/geom_scale.rst"
 assert_grep ".. _api_cpp_geom.scale:" "${SITE}/geom.scale.rst"
 
+# ---- variables ---------------------------------------------------------------
+# Namespace-scope variables are part of the API: a constant, a variable
+# template with its template header, and a C global known only by its extern
+# declaration. A specialization is not a second declaration.
+assert_file "${SITE}/variables.rst"
+assert_grep ".. cpp:var:: inline constexpr int max_rank" "${SITE}/variables.rst"
+assert_grep ".. cpp:var:: template <typename T> inline constexpr bool is_circle_v" "${SITE}/variables.rst"
+assert_grep ":tparam T: The type to test." "${SITE}/variables.rst"
+assert_grep ".. cpp:var:: int geom_count" "${SITE}/variables.rst"
+# An array or a function pointer declares its name inside its type.
+assert_grep ".. cpp:var:: inline constexpr char magic[4]" "${SITE}/variables.rst"
+assert_grep ".. cpp:var:: const char *geom_kind_names[4]" "${SITE}/variables.rst"
+assert_grep ".. cpp:var:: void (*geom_on_remove)(int)" "${SITE}/variables.rst"
+[[ "$(grep -c "is_circle_v" "${SITE}/variables.rst")" == 1 ]] || fail "a variable template's specialization was declared as well"
+assert_grep ":cpp:any:\`~geom::max_rank\`" "${SITE}/index.rst"
+
 # ---- a reference's own title and source ------------------------------------
 # A C header's reference says so, on the index and on every page, rather than
 # "<module> C++ API" and "Generated from the C++ headers".

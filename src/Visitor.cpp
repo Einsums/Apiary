@@ -1742,8 +1742,16 @@ bool Visitor::VisitVarDecl(clang::VarDecl *decl) {
         return true;
     }
     // An `extern` re-declaration carries neither the initializer nor, usually,
-    // the doc comment; the definition is the one to record.
-    if (decl->isThisDeclarationADefinition() == clang::VarDecl::DeclarationOnly) {
+    // the doc comment; the definition is the one to record. A header, though,
+    // usually holds only the declaration (a C header's `extern int count;`),
+    // and then it is the API: record the first one.
+    if (decl->isThisDeclarationADefinition() == clang::VarDecl::DeclarationOnly &&
+        (decl->getDefinition() != nullptr || decl != decl->getCanonicalDecl())) {
+        return true;
+    }
+    // A variable template's specializations are its values for particular
+    // arguments, documented by the template itself.
+    if (clang::isa<clang::VarTemplateSpecializationDecl>(decl)) {
         return true;
     }
     if (!decl_in_module_headers(decl)) {
@@ -1767,9 +1775,16 @@ bool Visitor::VisitVarDecl(clang::VarDecl *decl) {
     fill_common(var, decl);
     var.type           = translate_type(decl->getType(), _context);
     var.type_canonical = translate_type(decl->getType().getCanonicalType(), _context);
+    var.declarator     = translate_declarator(decl->getType(), decl->getName(), _context);
     var.is_constexpr   = decl->isConstexpr();
     var.is_inline      = decl->isInline();
     var.is_const       = decl->getType().isConstQualified();
+    if (auto const *vt = decl->getDescribedVarTemplate()) {
+        var.is_template          = true;
+        var.template_param_names = template_param_names(vt->getTemplateParameters());
+        var.template_param_decls = template_param_decls(vt->getTemplateParameters(), _context);
+        var.requires_clause      = requires_clause_of(vt->getTemplateParameters(), _context);
+    }
 
     if (auto const *spec = clang::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(decl->getType()->getAsCXXRecordDecl())) {
         for (auto const &arg : spec->getTemplateArgs().asArray()) {

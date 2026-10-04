@@ -42,9 +42,17 @@ already-merged document is a no-op). `schema_version` is currently **6**.
 }
 ```
 
-**variable** (`py:data`): a documentable entity plus `py_type` and `value`
-(the constant's source, when simple). The C++ frontend emits none; the static
-Python frontend fills them from module-level constants (skipping `__all__`).
+**variable** (`py:data` / `cpp:var`): a documentable entity. The static
+Python frontend fills `py_type` and `value` (the constant's source, when
+simple) from module-level constants (skipping `__all__`). The C++ frontend
+emits every documented namespace-scope variable, including one declared
+`extern` (inside `extern "C"` too) whose definition the parse does not see,
+with `type`, `type_canonical`, `declarator` (the type declaring the name,
+which for an array sits inside it: `char ETN_MAGIC[8]`), `type_template_args`, `is_constexpr`,
+`is_inline`, `is_const` and `initializer`. A variable template also carries
+`is_template`, `template_params[]`, `template_param_decls[]` and
+`requires_clause`, like an alias template; its specializations are not
+emitted.
 The Python frontend also now extracts **nested classes** (`nested_classes`),
 **`enum.Enum` subclasses** (as `enums` with `enumerators`), and **class-level
 annotated attributes** (as `fields`) — previously silently dropped. Data

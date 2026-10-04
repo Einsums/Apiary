@@ -58,4 +58,21 @@ class Circle {
 /// must merge into the same overload-set page.
 Circle scale(Circle const &c, Real factor);
 
+/// The most dimensions a shape can have.
+inline constexpr int max_rank = 3;
+
+/// The bytes that start a saved shape. An array declares its name inside
+/// its type.
+inline constexpr char magic[4] = {'G', 'E', 'O', '\0'}; // NOLINT(modernize-avoid-c-arrays)
+
+/// Whether @p T is a circle.
+/// @tparam T The type to test.
+template <typename T>
+inline constexpr bool is_circle_v = false;
+
+/// A circle is one. A specialization is a value of the template, not a
+/// variable of its own, so it is not documented separately.
+template <>
+inline constexpr bool is_circle_v<Circle> = true;
+
 } // namespace geom
