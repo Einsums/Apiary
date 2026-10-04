@@ -95,5 +95,10 @@ if "${PY}" "${AGG}" "${FRAG}/missing.pyi" --pkg-dir "${PKG}" >"${WORK}/err.log" 
     fail "a missing fragment was accepted"
 fi
 assert_contains "${WORK}/err.log" "fragment .*missing\.pyi does not exist"
+# An empty --py-helpers-dir would read as ".", the working directory.
+if "${PY}" "${AGG}" "${FRAG}/demo_a.pyi" --pkg-dir "${PKG}" --py-helpers-dir "" >"${WORK}/err.log" 2>&1; then
+    fail "an empty --py-helpers-dir was accepted"
+fi
+assert_contains "${WORK}/err.log" "--py-helpers-dir: must not be empty"
 
 echo "ok: aggregate_stubs merges only the named fragments and prunes what it no longer writes"

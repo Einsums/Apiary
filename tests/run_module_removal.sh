@@ -121,4 +121,10 @@ assert_contains "${DOCS}/demo.rst" "py:class:: Kept"
 assert_absent   "${DOCS}/demo.rst" "py:class:: Gone"
 [[ ! -e "${DOCS}/demo.solo.rst" ]] || fail "the solo submodule's page survived its removal"
 
+# ── The stubs describe this package, and only it ─────────────────────────────
+# The staged package sits in the build directory, so the aggregator must not
+# take it for a helper package: only PY_HELPERS_DIR names those.
+[[ ! -e "${PKG}/demo" ]] || fail "the staged package was stubbed as a helper package of itself"
+assert_absent   "${PKG}/__init__.pyi" "import demo"
+
 echo "ok: removing modules from a built tree removes their stubs and pages"

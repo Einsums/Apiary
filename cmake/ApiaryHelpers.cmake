@@ -712,24 +712,28 @@ function(apiary_aggregate_extension)
         # Records the stubs each run writes, so the next one deletes a
         # submodule's .pyi once no module contributes to it.
         set(_stub_manifest "${_A_FRAG_DIR}/.stubs.manifest")
+        set(_extra_args "")
+        # Only when given: an empty --py-helpers-dir reads as ".", the build
+        # directory, whose package-shaped subdirectories would become stubs.
+        if(_A_PY_HELPERS_DIR)
+            list(APPEND _extra_args --py-helpers-dir "${_A_PY_HELPERS_DIR}")
+        endif()
         # Optional consumer-provided stub overlay (e.g. runtime-patched
         # ergonomics the C++ codegen can't see). Apiary stays generic: the
         # overlay content + the target-class regex come from the caller.
-        set(_overlay_args "")
         if(_A_STUB_OVERLAY)
-            list(APPEND _overlay_args --overlay "${_A_STUB_OVERLAY}")
+            list(APPEND _extra_args --overlay "${_A_STUB_OVERLAY}")
         endif()
         if(_A_STUB_OVERLAY_CLASS_REGEX)
-            list(APPEND _overlay_args --overlay-class-regex "${_A_STUB_OVERLAY_CLASS_REGEX}")
+            list(APPEND _extra_args --overlay-class-regex "${_A_STUB_OVERLAY_CLASS_REGEX}")
         endif()
         add_custom_command(
             OUTPUT ${_stamp}
             COMMAND ${Python_EXECUTABLE} "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py"
                     "@${_frag_list}"
                     --pkg-dir "${_A_PKG_DIR}"
-                    --py-helpers-dir "${_A_PY_HELPERS_DIR}"
                     --manifest "${_stub_manifest}"
-                    ${_overlay_args}
+                    ${_extra_args}
             COMMAND ${CMAKE_COMMAND} -E touch ${_stamp}
             DEPENDS "${APIARY_SCRIPTS_DIR}/apiary_aggregate_stubs.py" "${_frag_list}"
                     ${_A_STUBS} ${_A_PY_HELPER_DEPENDS} ${_A_STUB_OVERLAY}

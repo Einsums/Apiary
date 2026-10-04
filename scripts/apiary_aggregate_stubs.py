@@ -363,13 +363,20 @@ def prune_stale(manifest: Path, pkg_dir: Path, outputs: list[Path]) -> list[Path
     return removed
 
 
+def _nonempty_path(value: str) -> Path:
+    # Path("") is ".", so an empty value would quietly scan the working directory.
+    if not value:
+        raise argparse.ArgumentTypeError("must not be empty")
+    return Path(value)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars="@")
     p.add_argument("fragments", nargs="+", type=Path,
                    help="Per-module .pyi fragments to merge, or @<file> naming one per line.")
     p.add_argument("--pkg-dir", required=True, type=Path,
                    help="Destination einsums/ package directory.")
-    p.add_argument("--py-helpers-dir", type=Path, default=None,
+    p.add_argument("--py-helpers-dir", type=_nonempty_path, default=None,
                    help="Source directory of hand-written <sub>.py helper "
                         "modules. When set, public top-level decls in "
                         "<sub>.py are merged into <sub>.pyi.")
