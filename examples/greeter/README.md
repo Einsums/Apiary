@@ -33,6 +33,14 @@ Under `build/gen/`:
 - `include/greeter/Modules.hpp` — the `greeter_register_all()` aggregator the
   `src/module.cpp` `PYBIND11_MODULE` body includes.
 
+And the importable package, `build/greeter/`:
+
+- `_core.cpython-*.so` — the extension, bound under `greeter._core`.
+- `__init__.py` — copied from `python/greeter/`, re-exporting `_core`.
+- `_core.pyi`, `__init__.pyi`, `py.typed` — the stubs a type checker reads for
+  `import greeter`. They describe a package with a `_core` extension, which is
+  why the example is laid out as one.
+
 ## Scaling to multiple modules
 
 Call `apiary_add_bindings` once per module (each with its own

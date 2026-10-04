@@ -10,7 +10,7 @@
 
 #include <pybind11/pybind11.h>
 
-PYBIND11_MODULE(greeter, m) {
+PYBIND11_MODULE(_core, m) {
     m.doc() = "Apiary example extension";
     greeter_register_all(m);
 }

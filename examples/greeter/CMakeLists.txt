@@ -37,10 +37,12 @@ target_link_libraries(greeter INTERFACE apiary::annotations)
 apiary_detect_toolchain(CXX_STANDARD 20)
 
 set(_gen "${CMAKE_CURRENT_BINARY_DIR}/gen")
+set(_pkg "${CMAKE_CURRENT_BINARY_DIR}/greeter")   # the importable package dir
 
 # Generate the binding TU (+ .pyi + docs JSON) for this module's headers.
 apiary_add_bindings(
     BINDING DOCS_JSON
+    MODULE            greeter
     HEADERS           "${CMAKE_CURRENT_SOURCE_DIR}/include/greeter/Greeter.hpp"
     SOURCE_INCLUDES   greeter/Greeter.hpp
     REGISTER_FUNCTION greeter_register_core
@@ -62,13 +64,23 @@ apiary_aggregate_extension(
     MODULES_HEADER      "${_gen}/include/greeter/Modules.hpp"
     MODULES_INCLUDE_DIR "${_gen}/include"
     STUBS ${_stub}  STUBS_TARGET greeter_stubs
-    FRAG_DIR "${_gen}"  PKG_DIR "${CMAKE_CURRENT_BINARY_DIR}"
+    FRAG_DIR "${_gen}"  PKG_DIR "${_pkg}"
+    PY_HELPERS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/python/greeter"
 )
 
-# Name the extension ``greeter`` and land it where ``import greeter`` finds it
-# (PYTHONPATH=build), then link the library it binds.
+# The extension is the package's ``_core``, beside the stubs that describe it:
+# ``greeter/_core.pyi`` and ``greeter/__init__.pyi``, which a type checker
+# reads for ``import greeter`` (PYTHONPATH=build). Then link the library it
+# binds.
 set_target_properties(greeter_ext PROPERTIES
-    OUTPUT_NAME greeter
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    OUTPUT_NAME _core
+    LIBRARY_OUTPUT_DIRECTORY "${_pkg}"
 )
 target_link_libraries(greeter_ext PRIVATE greeter)
+
+# Stage the package's Python side beside the extension.
+add_custom_target(greeter_python ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/python/greeter" "${_pkg}"
+    COMMENT "greeter: staging Python package into ${_pkg}"
+)
+add_dependencies(greeter_python greeter_ext)

@@ -137,6 +137,17 @@ for case in "${CASES[@]}"; do
     grep -q "OK" "${WORK}/${name}.run.log" \
         || { cat "${WORK}/${name}.run.log" >&2; fail "${name}: test did not report OK"; }
 
+    # The stubs sit in the package, beside the _core they describe, where a
+    # type checker looks for ``import greeter``.
+    if [[ "${name}" == greeter ]]; then
+        for want in "class Greeter:|${bin}/greeter/_core.pyi" "class GreetingError\(Exception\)|${bin}/greeter/_core.pyi" \
+                    "^from \._core import \*|${bin}/greeter/__init__.pyi"; do
+            pattern="${want%|*}" file="${want##*|}"
+            [[ -f "${file}" ]] || fail "greeter: no stub at ${file}"
+            grep -qE -- "${pattern}" "${file}" || { cat "${file}" >&2; fail "greeter: ${file} lacks ${pattern}"; }
+        done
+    fi
+
     # mathx's stub must carry what its hand-written __init__.py adds, or a
     # type checker, which reads __init__.pyi instead, never sees it.
     if [[ "${name}" == mathx ]]; then
