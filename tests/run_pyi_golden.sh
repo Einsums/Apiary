@@ -61,20 +61,47 @@ readonly CASES=(
     "fixture_docstrings|docstrings.hpp|docstrings.pyi.golden"
 )
 
-# Run the tool with --stub-output to a temp file and emit the stub on
-# stdout. The .cpp output is discarded — that's covered by run_golden.sh.
+# Run the tool with --stub-output, writing the stub to $1. The .cpp output is
+# discarded - that's covered by run_golden.sh.
+#
+# A non-zero exit and an empty stub are both hard failures, as in
+# run_golden.sh. An empty file parses as valid Python, so without this a tool
+# that could not run at all passed the parse check, and under REGEN=1 wiped
+# every golden and reported "OK: all pass".
 run_tool() {
-    local module="$1" fixture="$2"
-    local tmp_cpp tmp_pyi
+    local out="$1" module="$2" fixture="$3"
+    local tmp_cpp err status
     tmp_cpp="$(mktemp)"
-    tmp_pyi="$(mktemp)"
+    err="$(mktemp)"
+
+    set +e
     "${TOOL}" --module "${module}" \
               --output "${tmp_cpp}" \
-              --stub-output "${tmp_pyi}" \
+              --stub-output "${out}" \
               "${FIXTURE_DIR}/${fixture}" \
-              -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>/dev/null || true
-    cat "${tmp_pyi}"
-    rm -f "${tmp_cpp}" "${tmp_pyi}"
+              -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2> "${err}"
+    status=$?
+    set -e
+    rm -f "${tmp_cpp}"
+
+    if (( status != 0 )); then
+        echo "ERROR ${fixture}: apiary exited ${status}" >&2
+        cat "${err}" >&2
+        rm -f "${err}"
+        return 1
+    fi
+    if [[ ! -s "${out}" ]]; then
+        echo "ERROR ${fixture}: apiary exited 0 but wrote no stub." >&2
+        echo "  tool:    ${TOOL}" >&2
+        echo "  include: ${INCLUDE_DIR}" >&2
+        if [[ -s "${err}" ]]; then
+            echo "--- apiary stderr ---" >&2
+            cat "${err}" >&2
+        fi
+        rm -f "${err}"
+        return 1
+    fi
+    rm -f "${err}"
 }
 
 tmp_actual="$(mktemp)"
@@ -92,7 +119,11 @@ fi
 failures=0
 for case in "${CASES[@]}"; do
     IFS='|' read -r module fixture golden <<<"${case}"
-    run_tool "${module}" "${fixture}" > "${tmp_actual}"
+    : > "${tmp_actual}"
+    if ! run_tool "${tmp_actual}" "${module}" "${fixture}"; then
+        failures=$((failures + 1))
+        continue
+    fi
     # Validate BEFORE the golden comparison, and before REGEN gets a chance to
     # bless it: an invalid stub must never become a committed golden.
     if [[ "${can_parse}" == "1" ]]; then
