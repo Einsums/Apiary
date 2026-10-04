@@ -32,10 +32,13 @@ version_line="$("${TOOL}" --version)"
     || { echo "FAIL: --version printed '${version_line}', expected 'apiary ${expected_version} (LLVM <version>)'" >&2; exit 1; }
 
 run_tool() {
-    # The tool may exit non-zero when a fixture pulls in a system header
-    # we can't find with -nostdinc++ (the AST is still populated and the
-    # IR dump is correct in that case, so we let the assertions decide).
-    "${TOOL}" --dump-ir "$1" -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>/dev/null || true
+    # The fixtures are self-contained, so -nostdinc++ costs them nothing, and
+    # a parse error writes no IR: say why rather than fail every assertion.
+    local err
+    err="$(mktemp)"
+    "${TOOL}" --dump-ir "$1" -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>"${err}" \
+        || { cat "${err}" >&2; rm -f "${err}"; echo "FAIL: apiary could not parse $1" >&2; exit 1; }
+    rm -f "${err}"
 }
 
 assert_contains() {
