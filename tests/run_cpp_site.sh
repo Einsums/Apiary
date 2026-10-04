@@ -80,7 +80,7 @@ readonly DECL_PAGES=(
     geom.Box geom.exchange geom.length geom.magnitude geom.same_area geom.Shape geom.Hexagon
     geom.square geom.twice geom.widen types
 )
-for page in index geom.Circle geom.Scalar geom.scale enums macros operators geom_visit "${DECL_PAGES[@]}"; do
+for page in index geom.Circle geom.Scalar geom.scale enums macros operators geom_visit geom_scale "${DECL_PAGES[@]}"; do
     assert_file "${SITE}/${page}.rst"
 done
 
@@ -122,6 +122,10 @@ if grep -qF "geom_shapes = struct" "${SITE}/types.rst"; then
 fi
 assert_grep ".. cpp:type:: geom_visit_fn = void (*)(void *, geom_shapes *, int)" "${SITE}/types.rst"
 assert_grep "void geom_visit(geom_shapes *shapes, geom_visit_fn fn, void *user)" "${SITE}/geom_visit.rst"
+# A C function and the C++ function it wraps get distinct labels; the same
+# label twice is a duplicate under -W.
+assert_grep ".. _api_cpp_geom_scale:" "${SITE}/geom_scale.rst"
+assert_grep ".. _api_cpp_geom.scale:" "${SITE}/geom.scale.rst"
 
 # ---- template parameters render as declared --------------------------------
 # Every kind of template parameter keeps its kind: a non-type parameter its

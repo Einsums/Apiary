@@ -6,7 +6,7 @@
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_advance:
+.. _api_cpp_geom.advance:
 
 =============
 geom::advance
@@ -33,7 +33,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_Grid:
+.. _api_cpp_geom.Grid:
 
 ==========
 geom::Grid
@@ -82,7 +82,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_make_fixed:
+.. _api_cpp_geom.make_fixed:
 
 ================
 geom::make_fixed
@@ -108,7 +108,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_print:
+.. _api_cpp_geom.print:
 
 ===========
 geom::print
@@ -134,7 +134,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_rebuild:
+.. _api_cpp_geom.rebuild:
 
 =============
 geom::rebuild
@@ -160,7 +160,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_repack:
+.. _api_cpp_geom.repack:
 
 ============
 geom::repack
@@ -186,7 +186,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_scaled:
+.. _api_cpp_geom.scaled:
 
 ============
 geom::scaled
@@ -213,7 +213,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_Stack:
+.. _api_cpp_geom.Stack:
 
 ===========
 geom::Stack
@@ -247,7 +247,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_sum:
+.. _api_cpp_geom.sum:
 
 =========
 geom::sum
@@ -273,7 +273,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_unfold:
+.. _api_cpp_geom.unfold:
 
 ============
 geom::unfold
@@ -302,7 +302,7 @@ Defined in header ``geom/Templates.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_Box:
+.. _api_cpp_geom.Box:
 
 =========
 geom::Box
@@ -354,7 +354,7 @@ Defined in header ``geom/Specifiers.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_exchange:
+.. _api_cpp_geom.exchange:
 
 ==============
 geom::exchange
@@ -381,7 +381,7 @@ Defined in header ``geom/Specifiers.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_length:
+.. _api_cpp_geom.length:
 
 ============
 geom::length
@@ -410,7 +410,7 @@ Defined in header ``geom/Specifiers.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_magnitude:
+.. _api_cpp_geom.magnitude:
 
 ===============
 geom::magnitude
@@ -436,7 +436,7 @@ Defined in header ``geom/Specifiers.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_same_area:
+.. _api_cpp_geom.same_area:
 
 ===============
 geom::same_area
@@ -460,7 +460,7 @@ Defined in header ``geom/Specifiers.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_Shape:
+.. _api_cpp_geom.Shape:
 
 ===========
 geom::Shape
@@ -516,7 +516,7 @@ Defined in header ``geom/Specifiers.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_Hexagon:
+.. _api_cpp_geom.Hexagon:
 
 =============
 geom::Hexagon
@@ -557,7 +557,7 @@ Defined in header ``geom/Specifiers.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_square:
+.. _api_cpp_geom.square:
 
 ============
 geom::square
@@ -583,7 +583,7 @@ Defined in header ``geom/Specifiers.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_twice:
+.. _api_cpp_geom.twice:
 
 ===========
 geom::twice
@@ -616,7 +616,7 @@ Defined in header ``geom/Specifiers.hpp``.
     ----------------------------------------------------------------------------------------------
 
 
-.. _api_cpp_geom_widen:
+.. _api_cpp_geom.widen:
 
 ===========
 geom::widen

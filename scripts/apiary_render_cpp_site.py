@@ -161,7 +161,10 @@ def slug_of(qualified_name: str) -> str:
 
 
 def label_of(prefix: str, slug: str) -> str:
-    return prefix + "_" + re.sub(r"[^A-Za-z0-9_]", "_", slug)
+    """The page's Sphinx label. The slug's ``.`` (for ``::``) and ``-`` (a kind
+    suffix) are kept: mapping them to ``_`` gave a C function and its C++
+    wrapper, ``lib_init`` and ``lib::init``, the same label."""
+    return prefix + "_" + re.sub(r"[^A-Za-z0-9_.\-]", "_", slug)
 
 
 def assign_slugs(paged: list[Entity]) -> dict[str, Entity]:
@@ -373,6 +376,15 @@ def render_site(docs: list[dict], outdir: Path, module_title: str, index_label: 
         "Enumerations": [], "Types": [], "Macros": [],
     }
     toctree: list[str] = []
+
+    # Sphinx compares labels case-insensitively, and a duplicate is a warning
+    # that -W turns into a failed build naming neither entity.
+    labels: dict[str, str] = {}
+    for slug, e in by_slug.items():
+        label = label_of(label_prefix, slug).lower()
+        if label in labels:
+            raise SystemExit(f"render_cpp_site: {e.qualified_name} and {labels[label]} would share the label {label}")
+        labels[label] = e.qualified_name
 
     section_of = {"class": "Classes", "concept": "Concepts", "function": "Functions"}
     for slug in sorted(by_slug, key=str.lower):

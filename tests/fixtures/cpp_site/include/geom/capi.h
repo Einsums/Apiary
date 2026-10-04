@@ -22,6 +22,10 @@ typedef void (*geom_visit_fn)(void *user, geom_shapes *shapes, int index); /* NO
 /// Call @p fn with @p user for every shape in @p shapes.
 void geom_visit(geom_shapes *shapes, geom_visit_fn fn, void *user);
 
+/// Scale every shape in @p shapes by @p factor: the C counterpart of geom::scale,
+/// whose page label must differ from this one's.
+void geom_scale(geom_shapes *shapes, int factor);
+
 #ifdef __cplusplus
 }
 #endif
