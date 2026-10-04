@@ -6,17 +6,17 @@
 
 """Aggregate per-module .pyi fragments into per-submodule stub files.
 
-Each codegen invocation emits a single .pyi covering one Einsums module.
+Each codegen invocation emits a single .pyi covering one module.
 Inside, entities are grouped under ``# %%submodule: <name>`` sentinels —
-empty name means top-level (binds into ``einsums._core``).
+empty name means top-level (binds into the package's ``_core`` extension).
 
-This script merges the fragments it is given into the einsums package
-layout under --pkg-dir:
+This script merges the fragments it is given into the package layout
+under --pkg-dir (``<pkg>`` below, e.g. ``einsums``):
 
-    einsums/_core.pyi      ← top-level entities
-    einsums/<submodule>.pyi ← per-submodule entities (e.g. linalg, graph)
-    einsums/__init__.pyi   ← re-exports + py.typed marker
-    einsums/py.typed       ← PEP 561 marker
+    <pkg>/_core.pyi        ← top-level entities
+    <pkg>/<submodule>.pyi  ← per-submodule entities (e.g. linalg, graph)
+    <pkg>/__init__.pyi     ← re-exports + py.typed marker
+    <pkg>/py.typed         ← PEP 561 marker
 
 Imports are deduplicated; the script writes a single shared header at
 the top of each output file. Empty submodules are skipped.
@@ -267,14 +267,14 @@ def aggregate(fragments: list[Path], pkg_dir: Path, py_helpers_dir: Path | None 
         out_path = pkg_dir / out_name
         text = SHARED_HEADER + "\n".join(parts).rstrip() + "\n"
         # Hand-written helper modules only exist for named submodules
-        # (graph.py, …) — there is no top-level einsums-package helper
+        # (graph.py, …) - there is no top-level package helper
         # that needs to merge into _core.pyi.
         if py_helpers_dir is not None and sub:
             helper_py = py_helpers_dir / f"{sub}.py"
             if helper_py.is_file():
                 helper_stub = render_py_helpers(helper_py)
                 if helper_stub:
-                    text += f"\n# helpers from einsums/{sub}.py\n{helper_stub.rstrip()}\n"
+                    text += f"\n# helpers from {pkg_dir.name}/{sub}.py\n{helper_stub.rstrip()}\n"
         # Attach the overlay's runtime-patched methods to matching _core classes.
         if sub == "" and overlay_class_re is not None:
             text = inject_class_methods(text, overlay_methods, overlay_class_re)
@@ -287,12 +287,13 @@ def aggregate(fragments: list[Path], pkg_dir: Path, py_helpers_dir: Path | None 
     write_if_changed(pkg_dir / "py.typed", "")
     outputs.append(pkg_dir / "py.typed")
 
-    # __init__.pyi: re-export everything from _core so ``import einsums``
+    # __init__.pyi: re-export everything from _core so ``import <pkg>``
     # gives pyright the full top-level surface, plus an explicit
     # re-export of each generated submodule. At runtime the package's
-    # __getattr__ lazy-binds these to einsums._core.<sub>, so pyright
-    # needs the static hint to know they exist as attributes of einsums.
-    # The `as X` form is PEP 484's explicit re-export marker.
+    # __getattr__ lazy-binds these to <pkg>._core.<sub>, so pyright
+    # needs the static hint to know they exist as attributes of <pkg>.
+    # The `as X` form is PEP 484's explicit re-export marker. The import
+    # is relative: the stubs describe whichever package --pkg-dir is.
     submodule_names = sorted(sub for sub in written if sub)
     # Pure-Python helper sub-packages (e.g. ``einsums/testing/``) have no
     # C++ fragment, so they never appear in ``written``. Surface them so
@@ -317,7 +318,7 @@ def aggregate(fragments: list[Path], pkg_dir: Path, py_helpers_dir: Path | None 
                     outputs.append(sub_dir / "__init__.pyi")
     all_sub_names = sorted(set(submodule_names) | set(pkg_helper_names))
     init_pyi = pkg_dir / "__init__.pyi"
-    init_body = SHARED_HEADER + "from einsums._core import *  # noqa: F401,F403\n"
+    init_body = SHARED_HEADER + "from ._core import *  # noqa: F401,F403\n"
     if all_sub_names:
         init_body += "\n"
         for sub in all_sub_names:
@@ -375,7 +376,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("fragments", nargs="+", type=Path,
                    help="Per-module .pyi fragments to merge, or @<file> naming one per line.")
     p.add_argument("--pkg-dir", required=True, type=Path,
-                   help="Destination einsums/ package directory.")
+                   help="Destination package directory (holding the _core extension).")
     p.add_argument("--py-helpers-dir", type=_nonempty_path, default=None,
                    help="Source directory of hand-written <sub>.py helper "
                         "modules. When set, public top-level decls in "

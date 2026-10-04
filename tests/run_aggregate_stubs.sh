@@ -65,6 +65,9 @@ assert_contains "${PKG}/_core.pyi" "^class B:"
 assert_contains "${PKG}/shared.pyi" "^class SharedA:"
 assert_contains "${PKG}/solo.pyi" "^class C:"
 [[ -f "${PKG}/tools/__init__.pyi" ]] || fail "helper package stub tools/__init__.pyi was not written"
+# The re-export names the package's own _core, whatever the package is called.
+assert_contains "${PKG}/__init__.pyi" "^from \._core import \*"
+assert_absent   "${PKG}/__init__.pyi" "einsums"
 assert_contains "${PKG}/__init__.pyi" "^from \. import solo as solo$"
 assert_contains "${PKG}/__init__.pyi" "^from \. import tools as tools$"
 

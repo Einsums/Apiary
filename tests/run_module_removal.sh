@@ -126,5 +126,8 @@ assert_absent   "${DOCS}/demo.rst" "py:class:: Gone"
 # take it for a helper package: only PY_HELPERS_DIR names those.
 [[ ! -e "${PKG}/demo" ]] || fail "the staged package was stubbed as a helper package of itself"
 assert_absent   "${PKG}/__init__.pyi" "import demo"
+# The re-export names the package's own _core.
+assert_contains "${PKG}/__init__.pyi" "^from \._core import \*"
+assert_absent   "${PKG}/__init__.pyi" "einsums"
 
 echo "ok: removing modules from a built tree removes their stubs and pages"
