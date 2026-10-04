@@ -36,7 +36,8 @@ set(APIARY_HELPERS_DIR "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL
 #   APIARY_RESOURCE_DIR        - clang -resource-dir (builtin headers): apiary's
 #                                own, else a borrowed Clang's (with a warning
 #                                when its major differs from apiary's libclang)
-#   APIARY_EXTRA_ISYSTEM       - active conda env's include dir (third-party)
+#   APIARY_EXTRA_ISYSTEM       - include dirs named in CMAKE_CXX_FLAGS (a conda
+#                                compiler's environment include dir, say)
 #   APIARY_CXX_INCLUDE_DIRS    - the compiler's C++ stdlib search dirs
 #
 # Without these even ``#include <string>`` fails when the build compiler is
@@ -118,12 +119,27 @@ function(apiary_detect_toolchain)
         endif()
     endif()
 
-    # Third-party headers (the consuming project's conda deps) live in the
-    # active env include dir; mirror the project's ``-isystem ${CONDA}/include``.
+    # Include directories the project compiles with but declares on no target,
+    # in the order it names them: those in CMAKE_CXX_FLAGS. A conda compiler's
+    # activation puts its environment's include dir there (-isystem
+    # $PREFIX/include), which is where a project's conda dependencies are.
+    # Taken from the flags rather than from $CONDA_PREFIX, which names the
+    # environment active in the shell that runs CMake: not necessarily the
+    # project's.
     set(_extra_isystem "")
-    if(DEFINED ENV{CONDA_PREFIX} AND EXISTS "$ENV{CONDA_PREFIX}/include")
-        set(_extra_isystem "$ENV{CONDA_PREFIX}/include")
-    endif()
+    separate_arguments(_project_flags NATIVE_COMMAND "${CMAKE_CXX_FLAGS}")
+    set(_next_is_dir FALSE)
+    foreach(_flag IN LISTS _project_flags)
+        if(_next_is_dir)
+            list(APPEND _extra_isystem "${_flag}")
+            set(_next_is_dir FALSE)
+        elseif(_flag STREQUAL "-isystem" OR _flag STREQUAL "-I")
+            set(_next_is_dir TRUE)
+        elseif(_flag MATCHES "^-isystem(.+)$" OR _flag MATCHES "^-I(.+)$")
+            list(APPEND _extra_isystem "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _extra_isystem)
 
     # The resource-dir does NOT carry the C++ standard library. Ask the real
     # project compiler for its ``#include <...>`` search list and forward the
@@ -204,7 +220,7 @@ function(apiary_detect_toolchain)
     endif()
 
     set(APIARY_RESOURCE_DIR     "${_resource_dir}"  CACHE INTERNAL "Clang -resource-dir for apiary codegen")
-    set(APIARY_EXTRA_ISYSTEM    "${_extra_isystem}" CACHE INTERNAL "Extra -isystem dir for apiary codegen")
+    set(APIARY_EXTRA_ISYSTEM    "${_extra_isystem}" CACHE INTERNAL "Extra -isystem dirs for apiary codegen")
     set(APIARY_CXX_INCLUDE_DIRS "${_cxx_dirs}"      CACHE INTERNAL "C++ stdlib include dirs for apiary codegen")
 
     message(STATUS "apiary: resource-dir: ${APIARY_RESOURCE_DIR}")
@@ -223,9 +239,9 @@ function(apiary_detect_toolchain)
     if(APIARY_RESOURCE_DIR)
         list(APPEND _flags "-resource-dir" "${APIARY_RESOURCE_DIR}")
     endif()
-    if(APIARY_EXTRA_ISYSTEM)
-        list(APPEND _flags "-isystem" "${APIARY_EXTRA_ISYSTEM}")
-    endif()
+    foreach(_d IN LISTS APIARY_EXTRA_ISYSTEM)
+        list(APPEND _flags "-isystem" "${_d}")
+    endforeach()
     foreach(_d IN LISTS APIARY_CXX_INCLUDE_DIRS)
         list(APPEND _flags "-isystem" "${_d}")
     endforeach()

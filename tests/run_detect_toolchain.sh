@@ -126,6 +126,23 @@ if [[ "$(uname -s)" == Darwin ]]; then
         "RESULT flags=-resource-dir;${OWN};-isystem;${LIBCXX};-isystem;${OWN}/include;-isystem;${WORK}/sdk/usr/include"
 fi
 
+# ── Include dirs the project compiles with come from its flags ──────────────
+# Not from $CONDA_PREFIX, the environment active in the shell, which need not
+# be the project's: a conda compiler puts its own in CMAKE_CXX_FLAGS.
+mkdir -p "${WORK}/shell-env/include" "${WORK}/flags-a" "${WORK}/flags-b"
+CONDA_PREFIX="${WORK}/shell-env" "${CMAKE}" -S "${FIXTURE}" -B "${WORK}/build-cxxflags" \
+    -DAPIARY_HELPERS="${SRC}/cmake/ApiaryHelpers.cmake" \
+    -DFAKE_APIARY="${WORK}/apiary-own" -DFAKE_CXX="${WORK}/bin/clang++" \
+    "-DCMAKE_CXX_FLAGS=-O2 -isystem ${WORK}/flags-a -I${WORK}/flags-b" >"${WORK}/cxxflags.log" 2>&1 \
+    || { cat "${WORK}/cxxflags.log" >&2; fail "cxxflags: configure failed"; }
+if [[ "$(uname -s)" == Darwin ]]; then
+    tail_flags=";-isystem;${OWN}/include"
+else
+    tail_flags=""
+fi
+assert_line "${WORK}/cxxflags.log" \
+    "RESULT flags=-resource-dir;${OWN};-isystem;${WORK}/flags-a;-isystem;${WORK}/flags-b;-isystem;${LIBCXX}${tail_flags}"
+
 # ── Neither apiary nor a Clang has any: said so ──────────────────────────────
 configure none -DFAKE_APIARY="${WORK}/apiary-none" -DFAKE_CXX="${WORK}/bin/g++"
 assert_line     "${WORK}/none.log" "RESULT resource-dir="
