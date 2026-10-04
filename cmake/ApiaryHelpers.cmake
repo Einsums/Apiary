@@ -158,6 +158,12 @@ function(apiary_detect_toolchain)
     else()
         set(_probe_flags "-std=c++${_A_CXX_STANDARD}" "-E" "-x" "c++" "-v")
     endif()
+    # The SDK the project builds against, not the compiler's default. They
+    # differ whenever a project pins one (conda-forge does, through
+    # CONDA_BUILD_SYSROOT), and a newer SDK's headers need a newer Clang.
+    if(APPLE AND CMAKE_OSX_SYSROOT AND IS_DIRECTORY "${CMAKE_OSX_SYSROOT}")
+        list(APPEND _probe_flags "-isysroot" "${CMAKE_OSX_SYSROOT}")
+    endif()
     execute_process(
         COMMAND "${CMAKE_CXX_COMPILER}" ${_probe_flags} "${_null_device}"
         OUTPUT_QUIET

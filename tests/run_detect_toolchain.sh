@@ -60,13 +60,24 @@ SH
 fake_apiary "${WORK}/apiary-own" "${OWN}"
 fake_apiary "${WORK}/apiary-none" "${WORK}/apiary-prefix/lib/clang/none"
 
-# A clang++ (or g++) that answers -print-resource-dir and the -E -v probe.
+# A clang++ (or g++) that answers -print-resource-dir and the -E -v probe,
+# whose search list ends in <sysroot>/usr/include when given -isysroot.
 fake_cxx() {
     cat > "$1" <<SH
 #!/bin/sh
+sysroot=""
+prev=""
+for arg in "\$@"; do
+    [ "\$prev" = "-isysroot" ] && sysroot="\$arg"
+    prev="\$arg"
+done
 case "\$*" in
   *-print-resource-dir*) echo "${CLANG21}" ;;
-  *) printf '#include <...> search starts here:\n ${LIBCXX}\n ${CLANG21}/include\nEnd of search list.\n' >&2 ;;
+  *) {
+       printf '#include <...> search starts here:\n ${LIBCXX}\n ${CLANG21}/include\n'
+       [ -n "\$sysroot" ] && printf ' %s/usr/include\n' "\$sysroot"
+       printf 'End of search list.\n'
+     } >&2 ;;
 esac
 SH
     chmod +x "$1"
@@ -104,6 +115,15 @@ if [[ "$(uname -s)" == Darwin ]]; then
     assert_line "${WORK}/borrow.log" "RESULT flags=-resource-dir;${CLANG21};-isystem;${LIBCXX};-isystem;${CLANG21}/include"
 else
     assert_line "${WORK}/borrow.log" "RESULT flags=-resource-dir;${CLANG21};-isystem;${LIBCXX}"
+fi
+
+# ── macOS: the probe uses the SDK the project builds against ────────────────
+if [[ "$(uname -s)" == Darwin ]]; then
+    mkdir -p "${WORK}/sdk/usr/include"
+    configure sysroot -DFAKE_APIARY="${WORK}/apiary-own" -DFAKE_CXX="${WORK}/bin/clang++" \
+        -DCMAKE_OSX_SYSROOT="${WORK}/sdk"
+    assert_line "${WORK}/sysroot.log" \
+        "RESULT flags=-resource-dir;${OWN};-isystem;${LIBCXX};-isystem;${OWN}/include;-isystem;${WORK}/sdk/usr/include"
 fi
 
 # ── Neither apiary nor a Clang has any: said so ──────────────────────────────
