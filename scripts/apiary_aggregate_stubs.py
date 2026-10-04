@@ -117,7 +117,34 @@ def _public_assign_targets(node: ast.Assign | ast.AnnAssign) -> bool:
     return True
 
 
-def render_py_helpers(py_path: Path) -> str:
+def _stub_assign(node: ast.Assign | ast.AnnAssign) -> list[ast.stmt]:
+    """A module-level assignment as a stub states it. The runtime value can
+    call what the stub never defines (``x: list[str] = _parse(argv)``), so
+    only a literal one is kept; otherwise an annotation keeps its type, and a
+    bare name is ``Any`` (which the shared header imports)."""
+    if node.value is not None and _is_literal(node.value):
+        return [node]
+    if isinstance(node, ast.AnnAssign):
+        return [ast.AnnAssign(target=node.target, annotation=node.annotation,
+                              value=ast.Constant(value=...), simple=1)]
+    return [ast.AnnAssign(target=ast.Name(id=target.id), annotation=ast.Name(id="Any"), simple=1)
+            for target in node.targets if isinstance(target, ast.Name)]
+
+
+def _is_literal(value: ast.expr) -> bool:
+    try:
+        ast.literal_eval(value)
+    except (ValueError, TypeError, SyntaxError, RecursionError):
+        return False
+    return True
+
+
+def _assigns_all(node: ast.Assign | ast.AnnAssign) -> bool:
+    targets = [node.target] if isinstance(node, ast.AnnAssign) else node.targets
+    return len(targets) == 1 and isinstance(targets[0], ast.Name) and targets[0].id == "__all__"
+
+
+def render_py_helpers(py_path: Path, *, package_init: bool = False) -> str:
     """Render the public surface of a hand-written ``.py`` helper as a stub.
 
     Keeps every top-level import (decorators and type-hint helpers depend
@@ -125,6 +152,11 @@ def render_py_helpers(py_path: Path) -> str:
     ``...``), and public top-level constant assignments. Private top-level
     names (leading underscore) are dropped — they're implementation detail
     of the runtime shim, not part of the module's documented surface.
+
+    ``package_init`` is for the package's own ``__init__.py``, whose stub is
+    what ``import <pkg>`` shows. A stub re-exports only what it marks, so a
+    public name the package imports from itself (``from .rc import
+    LogLevel``) is marked, ``LogLevel as LogLevel``, and ``__all__`` is kept.
     """
     source = py_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -136,6 +168,10 @@ def render_py_helpers(py_path: Path) -> str:
             # ugly duplicate; skip it.
             if isinstance(node, ast.ImportFrom) and node.module == "__future__":
                 continue
+            if package_init and isinstance(node, ast.ImportFrom) and node.level > 0:
+                for alias in node.names:
+                    if alias.name != "*" and alias.asname is None and not alias.name.startswith("_"):
+                        alias.asname = alias.name
             keep.append(node)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if node.name.startswith("_"):
@@ -146,8 +182,8 @@ def render_py_helpers(py_path: Path) -> str:
                 continue
             keep.append(_stub_class(node))
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            if _public_assign_targets(node):
-                keep.append(node)
+            if _public_assign_targets(node) or (package_init and _assigns_all(node)):
+                keep.extend(_stub_assign(node))
     if not keep:
         return ""
     new_tree = ast.Module(body=keep, type_ignores=[])
@@ -323,6 +359,13 @@ def aggregate(fragments: list[Path], pkg_dir: Path, py_helpers_dir: Path | None 
         init_body += "\n"
         for sub in all_sub_names:
             init_body += f"from . import {sub} as {sub}\n"
+    # The package's own __init__.py: pyright reads __init__.pyi instead of it
+    # whenever both exist, so whatever it defines or re-exports is invisible
+    # unless it is here too.
+    if py_helpers_dir is not None and (py_helpers_dir / "__init__.py").is_file():
+        package_stub = render_py_helpers(py_helpers_dir / "__init__.py", package_init=True)
+        if package_stub:
+            init_body += f"\n# from {pkg_dir.name}/__init__.py\n{package_stub.rstrip()}\n"
     # Overlay module-level functions (runtime-patched; not in _core).
     if overlay_funcs:
         init_body += "\n# Overlay module-level functions (runtime-patched)\n" + overlay_funcs.rstrip() + "\n"

@@ -63,6 +63,7 @@ apiary_add_python_docs(
 # --- 3. Assemble the extension + merge & render the unified docs -----------
 # DOCS_JSON (C++) and PY_DOCS_JSON (Python) fold into one merge; DOCS_CONTENT_DIR
 # adds the authored curation + articles.
+file(GLOB _mathx_py CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/python/mathx/*.py")
 apiary_aggregate_extension(
     NAME mathx_core_ext
     MAIN     "${CMAKE_CURRENT_SOURCE_DIR}/src/module.cpp"
@@ -72,6 +73,10 @@ apiary_aggregate_extension(
     MODULES_HEADER      "${_gen}/include/mathx/Modules.hpp"
     MODULES_INCLUDE_DIR "${_gen}/include"
     STUBS ${_stub}  STUBS_TARGET mathx_stubs  FRAG_DIR "${_gen}"  PKG_DIR "${_pkg}"
+    # The hand-written package: its __init__.py's public names join the
+    # generated __init__.pyi, which a type checker reads instead of it.
+    PY_HELPERS_DIR    "${CMAKE_CURRENT_SOURCE_DIR}/python/mathx"
+    PY_HELPER_DEPENDS ${_mathx_py}
     DOCS_JSON        ${_cpp_docs}
     PY_DOCS_JSON     ${_py_docs}
     DOCS_TARGET      mathx_docs

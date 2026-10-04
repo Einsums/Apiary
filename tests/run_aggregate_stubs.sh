@@ -53,6 +53,24 @@ echo "from ._core import *" > "${PKG}/__init__.py"
 echo "def hand() -> int: ..." > "${PKG}/handwritten.pyi"
 # A helper sub-package, which gets a stub of its own.
 printf 'def tool() -> int:\n    return 1\n' > "${HELPERS}/tools/__init__.py"
+# The package's own __init__.py, which __init__.pyi hides from a type checker
+# unless the stub carries what it defines and re-exports.
+cat > "${HELPERS}/__init__.py" <<'PY'
+import os as _os
+from ._core import A
+from .tools import tool
+from ._impl import _secret
+__all__ = ["A", "tool", "version"]
+LIMIT = 3
+CWD: str = _os.getcwd()
+HOME = _os.environ["HOME"]
+def version() -> str:
+    """The version."""
+    return "1"
+def _hidden() -> None: ...
+def __getattr__(name):
+    raise AttributeError(name)
+PY
 
 run() { "${PY}" "${AGG}" "$@" --pkg-dir "${PKG}" --manifest "${MANIFEST}" >"${WORK}/out.log" 2>&1 \
     || { cat "${WORK}/out.log" >&2; fail "aggregate_stubs exited non-zero: $*"; }; }
@@ -70,6 +88,20 @@ assert_contains "${PKG}/__init__.pyi" "^from \._core import \*"
 assert_absent   "${PKG}/__init__.pyi" "einsums"
 assert_contains "${PKG}/__init__.pyi" "^from \. import solo as solo$"
 assert_contains "${PKG}/__init__.pyi" "^from \. import tools as tools$"
+# The package's own __init__.py: its public names, its re-exports marked as
+# such, its __all__, and assignments as a stub states them.
+assert_contains "${PKG}/__init__.pyi" "^def version\(\) -> str:"
+assert_contains "${PKG}/__init__.pyi" "^from \._core import A as A$"
+assert_contains "${PKG}/__init__.pyi" "^from \.tools import tool as tool$"
+assert_contains "${PKG}/__init__.pyi" "^from \._impl import _secret$"
+assert_contains "${PKG}/__init__.pyi" "^import os as _os$"
+assert_contains "${PKG}/__init__.pyi" "^__all__ = \['A', 'tool', 'version'\]$"
+assert_contains "${PKG}/__init__.pyi" "^LIMIT = 3$"
+assert_contains "${PKG}/__init__.pyi" "^CWD: str = \.\.\.$"
+assert_contains "${PKG}/__init__.pyi" "^HOME: Any$"
+assert_absent   "${PKG}/__init__.pyi" "_hidden|__getattr__|getcwd"
+"${PY}" -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "${PKG}/__init__.pyi" \
+    || fail "__init__.pyi is not valid Python"
 
 # ── Only demo_a; demo_b and demo_c stay on disk, as after a module removal ───
 rm -rf "${HELPERS:?}/tools"

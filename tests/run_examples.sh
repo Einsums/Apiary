@@ -137,6 +137,15 @@ for case in "${CASES[@]}"; do
     grep -q "OK" "${WORK}/${name}.run.log" \
         || { cat "${WORK}/${name}.run.log" >&2; fail "${name}: test did not report OK"; }
 
+    # mathx's stub must carry what its hand-written __init__.py adds, or a
+    # type checker, which reads __init__.pyi instead, never sees it.
+    if [[ "${name}" == mathx ]]; then
+        init_pyi="${bin}/mathx/__init__.pyi"
+        for want in '^def version\(\) -> str:' '^from \.extras import lerp as lerp, normalize as normalize$'; do
+            grep -qE -- "${want}" "${init_pyi}" || { cat "${init_pyi}" >&2; fail "mathx: __init__.pyi lacks ${want}"; }
+        done
+    fi
+
     if [[ -n "${docs_target}" ]]; then
         "${CMAKE}" --build "$(native "${bin}")" --target "${docs_target}" \
             >"${WORK}/${name}.docs.log" 2>&1 \
