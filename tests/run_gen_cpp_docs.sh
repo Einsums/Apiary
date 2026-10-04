@@ -129,9 +129,10 @@ gen() {
 gen "${WORK}/one" --layout entity --jobs 1
 SITE="${WORK}/one/rst/Demo"
 
-# Alpha parsed whole; Beta could not be, and says so.
+# Alpha parsed whole; Beta could not be, and says so. Body.hpp does not parse
+# on its own either, so its page may be incomplete, and it is named.
 assert_no_grep "Demo/Alpha: generated pages (" "${WORK}/one.log"
-assert_grep "Demo/Beta: generated pages (headers do not parse together; parsed one at a time)" "${WORK}/one.log"
+assert_grep "Demo/Beta: generated pages (headers do not parse together; parsed one at a time; clang reported errors in Demo/Beta/Body.hpp)" "${WORK}/one.log"
 [[ -f "${WORK}/one/Demo_Alpha.module.json" ]] || fail "Alpha was not parsed as one module"
 [[ -f "${WORK}/one/umbrellas/Demo_Alpha.hpp" ]] || fail "no umbrella written for Alpha"
 

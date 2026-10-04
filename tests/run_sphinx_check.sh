@@ -15,8 +15,8 @@
 
 set -euo pipefail
 
-if [[ $# -ne 4 ]]; then
-    echo "usage: $0 <apiary-binary> <apiary-include-dir> <sphinx-build> <python>" >&2
+if [[ $# -lt 4 ]]; then
+    echo "usage: $0 <apiary-binary> <apiary-include-dir> <sphinx-build> <python> [<system-flag>...]" >&2
     exit 64
 fi
 
@@ -24,6 +24,9 @@ readonly TOOL="$1"
 readonly INCLUDE_DIR="$2"
 readonly SPHINX="$3"
 readonly PY="$4"
+# The rest are the system include flags apiary_detect_toolchain() assembles
+# (resource dir, C++ standard library), so the example's real headers parse.
+readonly SYSTEM_FLAGS=("${@:5}")
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly SCRIPTS_DIR="${REPO_DIR}/scripts"
@@ -35,7 +38,8 @@ mkdir -p "${WORK}/src"
 
 # Render the example's unified reference (C++ + Python + authored content).
 "${TOOL}" --emit-docs-json --module mathx "${EX}/include/mathx/Vec.hpp" \
-    -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" 2>/dev/null > "${WORK}/cpp.json"
+    -- -std=c++20 ${SYSTEM_FLAGS[@]+"${SYSTEM_FLAGS[@]}"} "-I${INCLUDE_DIR}" 2>"${WORK}/cpp.err" > "${WORK}/cpp.json" \
+    || { cat "${WORK}/cpp.err" >&2; echo "FAIL: apiary could not parse the mathx example" >&2; exit 1; }
 "${PY}" "${SCRIPTS_DIR}/apiary_py_extract.py" --package mathx \
     --package-dir "${EX}/python/mathx" --source-root "${EX}" -o "${WORK}/py.json"
 "${PY}" "${SCRIPTS_DIR}/apiary_merge_docs_json.py" -o "${WORK}/docs.json" \

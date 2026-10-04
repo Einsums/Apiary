@@ -379,6 +379,12 @@ driver would otherwise be left with a partial file that looks fresh. Same
 instinct as the empty-module refusal, which declines to write rather than leave
 an empty-but-valid TU for the next step to consume happily.
 
+### Parse errors
+
+A header clang cannot parse fails the run in every mode, and nothing is written.
+Clang recovers from errors, so the output would still look complete, but declarations after a fatal error are missing and a type it could not resolve reads as `int`.
+`--allow-parse-errors` writes that output anyway, for a caller that would rather have part of an API than none of it.
+
 ## How it builds
 
 1. **Configure** — `apiary_add_bindings()` emits an `add_custom_command` per

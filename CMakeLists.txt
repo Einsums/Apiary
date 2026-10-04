@@ -269,8 +269,20 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # The smoke/golden/pyi suites drive the executable, so they only register
     # when it was built. doc_lint below is pure Python and runs either way.
     if(APIARY_BUILD_TOOL)
+        # Suites that parse real headers (examples/mathx includes <cmath>) take
+        # the system flags a consumer gets, from the helper a consumer calls.
+        # Copied now: a project that vendors Apiary calls the helper again for
+        # itself.
+        apiary_detect_toolchain(CXX_STANDARD 20)
+        set(_apiary_test_system_flags ${APIARY_SYSTEM_FLAGS})
         add_test(NAME apiary_phase2_smoke
             COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_smoke.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        )
+        # A parse error fails every mode unless --allow-parse-errors.
+        add_test(NAME apiary_parse_errors
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_parse_errors.sh"
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
         )
@@ -304,6 +316,7 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
                     "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
+                    ${_apiary_test_system_flags}
         )
         # Compile check: the generated binding TU must actually compile. Every
         # other suite asks whether the output CHANGED or whether it parses as
@@ -411,6 +424,7 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                         "${CMAKE_CURRENT_SOURCE_DIR}/include"
                         "${APIARY_SPHINX_BUILD}"
                         "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
+                        ${_apiary_test_system_flags}
             )
         endif()
         # Per-entity C++ site renderer (apiary_render_cpp_site.py): page

@@ -72,6 +72,13 @@ llvm::cl::opt<bool> g_allow_empty("allow-empty",
                                                  "compiles, links, and imports, so it would otherwise pass unnoticed."),
                                   llvm::cl::cat(g_tool_category), llvm::cl::init(false));
 
+llvm::cl::opt<bool> g_allow_parse_errors(
+    "allow-parse-errors",
+    llvm::cl::desc("Write the output even when clang reports errors parsing the input. Without this a parse error "
+                   "writes nothing and fails the run: what follows an error can be missing, and clang reads a type "
+                   "it could not resolve as int, so the output would describe an API that does not exist."),
+    llvm::cl::cat(g_tool_category), llvm::cl::init(false));
+
 llvm::cl::opt<bool> g_emit_cpp_docs_json("emit-cpp-docs-json",
                                          llvm::cl::desc("Emit a documentation JSON of the full PUBLIC C++ API of the "
                                                         "module headers (Option 2 — replaces Doxygen/Breathe). Walks all "
@@ -396,7 +403,21 @@ int main(int argc, char const **argv) {
     }
     CommonOptionsParser &options = *expected;
     ClangTool            tool(options.getCompilations(), options.getSourcePathList());
-    int const            rc = tool.run(newFrontendActionFactory<IrAction>().get());
+
+    // ClangTool::run is non-zero when clang reported an error. Clang recovers
+    // and the visitors still run, so there is output, but it can be wrong in
+    // ways nothing downstream notices: declarations after a fatal error are
+    // missing, and a type that did not resolve reads as int. Refuse it unless
+    // asked, before any mode writes anything.
+    if (tool.run(newFrontendActionFactory<IrAction>().get()) != 0) {
+        if (!g_allow_parse_errors) {
+            llvm::errs() << "apiary: clang reported errors parsing the input; writing nothing. Pass "
+                            "--allow-parse-errors to write the output anyway.\n";
+            return 1;
+        }
+        llvm::errs() << "apiary: clang reported errors parsing the input; writing the output anyway "
+                        "(--allow-parse-errors), so it may be incomplete or wrong.\n";
+    }
 
     // Resolve the dispatcher-grouping decisions for every templated free
     // function. Both the C++ emitter and the (future) .pyi emitter
@@ -454,7 +475,7 @@ int main(int argc, char const **argv) {
                      << rep.unit_count << " emit unit(s); largest single unit = " << rep.max_unit_defs
                      << " (a shard can never be smaller than this).\n";
         apiary::diag::print_summary();
-        return (g_error_count + apiary::diag::errors()) > 0 ? 1 : (rc != 0 ? rc : 0);
+        return (g_error_count + apiary::diag::errors()) > 0 ? 1 : 0;
     }
 
     // Measured on the *emitted* binding statements, not the IR entity counts.
@@ -546,7 +567,7 @@ int main(int argc, char const **argv) {
                 llvm::outs() << p << "\n";
             }
             apiary::diag::print_summary();
-            return (g_error_count + apiary::diag::errors()) > 0 ? 1 : (rc != 0 ? rc : 0);
+            return (g_error_count + apiary::diag::errors()) > 0 ? 1 : 0;
         }
         for (apiary::ShardFile const &shard : apiary::emit_shards(g_module, opts, shard_spec, g_output_path)) {
             pending.push_back({shard.path, shard.content});
@@ -588,5 +609,5 @@ int main(int argc, char const **argv) {
             return write_rc;
         }
     }
-    return rc;
+    return 0;
 }

@@ -173,16 +173,21 @@ class ApiaryRun:
     stdout: str
     undoc: set[str] = field(default_factory=set)
     undoc_refs: set[str] = field(default_factory=set)
-    # Whether clang reported an error. apiary still exits 0 and emits what it
-    # could parse, so this is the only sign that declarations may be missing.
+    # Whether clang reported an error, so declarations may be missing or wrong.
     clang_error: bool = False
 
 
 def run_apiary(tool: str, flags: list[str], source: Path, relheaders: list[str],
-               report_undoc: bool, report_refs: bool) -> ApiaryRun:
+               report_undoc: bool, report_refs: bool, *, allow_parse_errors: bool = False) -> ApiaryRun:
     """Run ``apiary --emit-cpp-docs-json`` over one source file, documenting
-    the declarations of the headers in ``relheaders`` (include-relative)."""
+    the declarations of the headers in ``relheaders`` (include-relative).
+
+    apiary writes nothing when clang reports an error, unless
+    ``allow_parse_errors``: then it writes what it could parse, and
+    ``clang_error`` says the result may be incomplete."""
     cmd = [tool, "--emit-cpp-docs-json", "--module", "einsums"]
+    if allow_parse_errors:
+        cmd.append("--allow-parse-errors")
     if report_undoc:
         cmd.append("--report-undocumented")
     if report_refs:
@@ -191,7 +196,7 @@ def run_apiary(tool: str, flags: list[str], source: Path, relheaders: list[str],
         cmd += ["--source-include", rel]
     cmd += [str(source), *flags]
     res = subprocess.run(cmd, capture_output=True, text=True)
-    run = ApiaryRun(res.stdout)
+    run = ApiaryRun(res.stdout, clang_error=res.returncode != 0)
     # The tool prints "file:line:col: undocumented <kind> <name>" to stderr
     # (mixed with clang include-trace noise, which we drop), with a trailing
     # "referenced by <entity>" for the references report.
@@ -199,6 +204,7 @@ def run_apiary(tool: str, flags: list[str], source: Path, relheaders: list[str],
         if ": undocumented " in ln:
             (run.undoc_refs if " referenced by " in ln else run.undoc).add(ln.strip())
         elif _CLANG_ERROR.search(ln):
+            # Under --allow-parse-errors the exit status is 0 regardless.
             run.clang_error = True
     return run
 
@@ -306,15 +312,20 @@ def gen_module(tool: str, flags: list[str], lib: str, module: str, inc: Path, ou
     write_umbrella(umbrella, rels)
     whole = run_apiary(tool, flags, umbrella, rels, report_undoc, report_refs)
     # Headers that conflict when included together (a redefinition, a macro
-    # one of them expects undefined) still produce output, minus whatever
-    # clang could not parse. Only a clean parse is trusted to be complete.
+    # one of them expects undefined) make clang report an error, and apiary
+    # then writes nothing. Only a clean parse is trusted to be complete.
     doc = None if whole.clang_error else absorb(whole)
 
     if doc is None:
-        # One parse per header, the way every module used to be generated.
+        # One parse per header, the way every module used to be generated. A
+        # header that does not parse cleanly on its own still gets what clang
+        # could make of it, and is named, since its page may be incomplete.
         result.note = "headers do not parse together; parsed one at a time"
+        with_errors: list[str] = []
         for path, rel in headers.items():
-            run = run_apiary(tool, flags, path, [rel], report_undoc, report_refs)
+            run = run_apiary(tool, flags, path, [rel], report_undoc, report_refs, allow_parse_errors=True)
+            if run.clang_error:
+                with_errors.append(rel)
             if absorb(run) is None:
                 continue
             json_out = out_dir / (sanitized(rel) + ".json")
@@ -322,6 +333,8 @@ def gen_module(tool: str, flags: list[str], lib: str, module: str, inc: Path, ou
             result.jsons.append(json_out)
             if entity_layout or render_header_page(json_out, rel, out_dir / (sanitized(rel) + ".rst")):
                 result.pages += 1
+        if with_errors:
+            result.note += f"; clang reported errors in {', '.join(sorted(with_errors))}"
         return result
 
     # One parse lists entities in translation-unit order, which follows the
