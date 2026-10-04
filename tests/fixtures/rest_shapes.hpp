@@ -357,6 +357,11 @@ APIARY_EXPOSE void inline_html();
  */
 APIARY_EXPOSE void literal_wrapped_onto_a_star();
 
+/// Inline commands that end a sentence. Call @ref einsums::fixture::wrapped_bullets.
+/// Pass @a scale. Mark it @b done. A dotted name, @ref module.function, keeps its
+/// dot, and so does a call, @a compute().
+APIARY_EXPOSE void inline_command_before_a_period();
+
 /// An enum carries doc text too, and it is rendered as reST like any other.
 ///
 /// - A bullet in an enum's detail, wrapping onto a second source line to

@@ -139,12 +139,16 @@ std::string convert_inline(std::string s) {
     // Each pattern matches an `@cmd word` / `\cmd word` and wraps the word.
     // `@c`/`@p` take the whole word Doxygen does (convert_code_spans).
     s = convert_code_spans(s);
-    static std::regex const re_ref(R"([@\\]ref\s+([A-Za-z_][A-Za-z0-9_:.]*(?:\(\))?))");
+    // A name is identifiers joined by ``::`` or ``.``. A ``.`` with no
+    // identifier after it ends the sentence, not the name: ``@ref finalize.``
+    // must not become ``finalize.`` in a literal.
+    static std::string const name = R"([A-Za-z_][A-Za-z0-9_]*(?:(?:::|\.)[A-Za-z_][A-Za-z0-9_]*)*)";
+    static std::regex const  re_ref(R"([@\\]ref\s+()" + name + R"((?:\(\))?))");
     // Absorb a trailing ``()`` into the emphasised span (like @c/@p/@ref above)
     // so the closing ``*`` isn't immediately followed by ``(`` — which reST
     // rejects as an emphasis end-string (``*foo*()`` → unterminated emphasis).
-    static std::regex const re_emph(R"([@\\][ae]\s+([A-Za-z_][A-Za-z0-9_:.]*(?:\(\))?))");
-    static std::regex const re_bold(R"([@\\]b\s+([A-Za-z_][A-Za-z0-9_:.]*))");
+    static std::regex const re_emph(R"([@\\][ae]\s+()" + name + R"((?:\(\))?))");
+    static std::regex const re_bold(R"([@\\]b\s+()" + name + ")");
     s = std::regex_replace(s, re_ref, "``$1``");
     s = std::regex_replace(s, re_emph, "*$1*");
     s = std::regex_replace(s, re_bold, "**$1**");

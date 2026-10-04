@@ -156,6 +156,12 @@
     |- A bullet whose continuation line begins with an inline command, such as ``einsums::fixture::wrapped_bullets``, and then continues with prose that should stay joined to the same item.
     |- A second bullet, to close the list.
 
+### einsums::fixture::inline_command_before_a_period
+  brief:
+    |Inline commands that end a sentence. Call ``einsums::fixture::wrapped_bullets``.
+    |Pass *scale*. Mark it **done**. A dotted name, ``module.function``, keeps its
+    |dot, and so does a call, *compute()*.
+
 ### einsums::fixture::inline_commands_wrapped
   brief:
     |Every inline command, each opening a continuation line.
