@@ -10,6 +10,8 @@ below is merged).
 - `recipe.yaml` — the recipe in the v1 (CEP-13 / rattler-build) format
   conda-forge now expects: package metadata, dependencies, inline build script,
   and tests.
+- `probe.hpp` - a header the recipe's tests parse to check that Clang's builtin
+  headers are installed where apiary's libclang looks for them.
 
 ## Build locally (sanity check before submitting)
 
@@ -27,7 +29,7 @@ rattler-build build --recipe conda/recipe.yaml \
 ## Publish on conda-forge
 
 1. Fork [`conda-forge/staged-recipes`](https://github.com/conda-forge/staged-recipes).
-2. Copy this directory in as `recipes/apiary/` (just `recipe.yaml`).
+2. Copy this directory in as `recipes/apiary/` (`recipe.yaml` and `probe.hpp`).
 3. Open a PR. conda-forge CI builds linux-64 / osx-64 / osx-arm64.
 4. Iterate on any LLVM-linkage or test-phase failures (see notes below).
 5. A conda-forge member reviews and merges; the bot then creates

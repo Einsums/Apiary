@@ -11,10 +11,10 @@ package:
 
 source:
   url: https://github.com/Einsums/Apiary/archive/refs/tags/v${{ version }}.tar.gz
-  sha256: ed39acade07424a9ac80638702b7082617386dffdc33142cdea138f4351449cf
+  sha256: 23a0a6ff0cfbb760b1a2605bfc686c776ce8934d47b8b807cc0f72a6828181c9
 
 build:
-  number: 0
+  number: 1
   script:
     - if: unix
       then: |
@@ -76,6 +76,13 @@ requirements:
     # which lives in the major-suffixed package libllvm<major>. llvmdev's
     # transitive run_export does not cover it, so depend on it explicitly.
     - libllvm${{ llvm_major }}
+    # libclang needs Clang's builtin headers (stddef.h, stdarg.h, the
+    # intrinsics) at its own version, and looks for them next to the apiary
+    # binary, in lib/clang/<major> (Library\lib\clang\<major> on Windows).
+    # clang-<major> installs them there.
+    # Without it, parsing works only when something else in the environment
+    # brings matching headers; with GCC as the build compiler nothing does.
+    - clang-${{ llvm_major }}
     # The bundled doc/stub render scripts (share/apiary/scripts/*.py) are invoked
     # by the apiary_* CMake helpers at a consumer's build time.
     - python
@@ -100,6 +107,21 @@ tests:
             - Library/share/apiary/scripts/apiary_render_cpp_rst.py
   - script:
       - apiary --help
+  # Parse a header that needs <stddef.h> with -nostdlibinc, which drops the
+  # system include paths (an SDK, MSVC, glibc) but keeps the builtin headers,
+  # so it can only resolve through the headers above. Without them, Clang
+  # recovers by reading size_t as int and apiary still exits 0, so check the
+  # type, not the exit status or the function's presence.
+  - files:
+      recipe:
+        - probe.hpp
+    script:
+      - apiary --emit-cpp-docs-json --module probe probe.hpp -- -std=c++17 -nostdlibinc > probe.json
+      - if: win
+        then: if errorlevel 1 exit 1
+      - python -c "import json, sys; f = json.load(open('probe.json'))['functions'][0]; print(f['name'], '->', f['return_type']); sys.exit(f['return_type'] != 'size_t')"
+      - if: win
+        then: if errorlevel 1 exit 1
 
 about:
   homepage: https://github.com/Einsums/Apiary
