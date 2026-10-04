@@ -341,7 +341,9 @@ endfunction()
 #       HEADERS         <abs header...>      # parsed by apiary (positional)
 #       SOURCE_INCLUDES <relative name...>   # --source-include each
 #       REGISTER_FUNCTION <name>             # --register-function (binding TU)
-#       MODULE          <name>               # --module (docs json; default "module")
+#       MODULE          <name>               # --module: the Python module the stubs and
+#                                            # docs JSON name (missing: a warning;
+#                                            # required from 2.0)
 #       DEPENDS_TARGETS <target...>          # usage requirements -> -I / -D
 #       OUTPUT_DIR      <dir>                # where generated files land
 #       OUTPUT_NAME     <stem>               # base filename for outputs
@@ -401,6 +403,9 @@ function(apiary_add_bindings)
         set(_A_CXX_STANDARD 17)
     endif()
     if(NOT _A_MODULE)
+        message(WARNING "apiary_add_bindings(${_A_OUTPUT_NAME}): no MODULE, so its stub and docs JSON "
+            "name the module 'module'. Pass MODULE <the Python module the bindings belong to>; it will "
+            "be required in Apiary 2.0.")
         set(_A_MODULE "module")
     endif()
 
@@ -534,6 +539,7 @@ function(apiary_add_bindings)
         set(_apiary_argv
             ${_shard_flags}
             ${_allow_empty_flag}
+            --module ${_A_MODULE}
             --register-function ${_A_REGISTER_FUNCTION}
             --output ${_binding}
             --stub-output ${_stub}

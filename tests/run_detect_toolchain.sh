@@ -148,4 +148,10 @@ configure none -DFAKE_APIARY="${WORK}/apiary-none" -DFAKE_CXX="${WORK}/bin/g++"
 assert_line     "${WORK}/none.log" "RESULT resource-dir="
 assert_contains "${WORK}/none.log" "no Clang builtin headers \(stddef.h, the intrinsics\) were found"
 
+# ── A binding set without MODULE is warned about ────────────────────────────
+configure nomodule -DFAKE_APIARY="${WORK}/apiary-own" -DFAKE_CXX="${WORK}/bin/clang++" \
+    -DADD_BINDINGS_WITHOUT_MODULE=ON
+assert_contains "${WORK}/nomodule.log" "apiary_add_bindings\(probe\): no MODULE"
+assert_contains "${WORK}/nomodule.log" "required in Apiary 2.0"
+
 echo "ok: apiary_detect_toolchain picks apiary's own builtin headers, and warns when it cannot"

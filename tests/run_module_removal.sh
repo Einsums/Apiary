@@ -92,6 +92,8 @@ assert_contains "${PKG}/_core.pyi" "^class Gone:"
 assert_contains "${PKG}/solo.pyi" "^class Solo:"
 assert_contains "${PKG}/__init__.pyi" "^from \. import solo as solo$"
 assert_contains "${DOCS}/demo.rst" "py:class:: Gone"
+# MODULE reaches the binding run too, so the stub fragments name it.
+assert_contains "${BIN}/gen/demo_core.pyi" "^# module: demo$"
 [[ -f "${DOCS}/demo.solo.rst" ]] || fail "first build: no page for the solo submodule"
 
 # ── A reconfigure that changes nothing rebuilds nothing ──────────────────────

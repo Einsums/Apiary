@@ -52,6 +52,7 @@ apiary_detect_toolchain(CXX_STANDARD 20)
 # transitive -I/-D from your library's usage requirements.
 apiary_add_bindings(
     BINDING DOCS_JSON
+    MODULE            mylib     # the Python module the stubs and docs JSON name
     HEADERS           ${CMAKE_SOURCE_DIR}/mylib/include/mylib/Greeter.hpp
     SOURCE_INCLUDES   mylib/Greeter.hpp
     REGISTER_FUNCTION apiary_register_mylib
