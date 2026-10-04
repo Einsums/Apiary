@@ -102,6 +102,7 @@ add_executable(apiary
     src/main.cpp
     src/IR.cpp
     src/AnnotationParser.cpp
+    src/BuiltinHeaders.cpp
     src/ClangCompat.cpp
     src/DocComment.cpp
     src/Diagnostics.cpp
@@ -122,6 +123,17 @@ target_include_directories(apiary PRIVATE
     ${CLANG_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+
+# Clang's builtin headers (stddef.h, the intrinsics) for the LLVM apiary is
+# built against. libclang looks next to the apiary binary first; this is where
+# apiary looks when nothing is there, as in a build tree or an install beside
+# an LLVM that lives elsewhere. See src/BuiltinHeaders.hpp.
+# Cached, with the major, for apiary_detect_toolchain(): an add_subdirectory
+# consumer calls it from another scope, before the in-tree apiary is built.
+set(APIARY_LLVM_RESOURCE_DIR "${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}" CACHE INTERNAL
+    "Clang builtin headers of the LLVM apiary is built against")
+set(APIARY_LLVM_VERSION_MAJOR "${LLVM_VERSION_MAJOR}" CACHE INTERNAL "LLVM major apiary is built against")
+target_compile_definitions(apiary PRIVATE APIARY_LLVM_RESOURCE_DIR="${APIARY_LLVM_RESOURCE_DIR}")
 
 # Libtooling pulls in everything we need: ASTMatchers + Frontend +
 # Tooling + Driver + Sema. We don't link the full LLVM since libtooling's
@@ -271,8 +283,9 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if(APIARY_BUILD_TOOL)
         # Suites that parse real headers (examples/mathx includes <cmath>) take
         # the system flags a consumer gets, from the helper a consumer calls.
-        # Copied now: a project that vendors Apiary calls the helper again for
-        # itself.
+        # In-tree, its builtin headers are those of the LLVM apiary is built
+        # against. Copied now: a project that vendors Apiary calls the helper
+        # again for itself.
         apiary_detect_toolchain(CXX_STANDARD 20)
         set(_apiary_test_system_flags ${APIARY_SYSTEM_FLAGS})
         add_test(NAME apiary_phase2_smoke
@@ -280,7 +293,8 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
         )
-        # A parse error fails every mode unless --allow-parse-errors.
+        # A parse error fails every mode unless --allow-parse-errors, and the
+        # builtin headers are found by default, or named when they are missing.
         add_test(NAME apiary_parse_errors
             COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_parse_errors.sh"
                     "$<TARGET_FILE:apiary>"
@@ -502,6 +516,15 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_doc_lint.sh"
                 "$<IF:$<BOOL:${Python_EXECUTABLE}>,${Python_EXECUTABLE},python3>"
     )
+    # apiary_detect_toolchain(): which Clang builtin headers it hands apiary.
+    # Pure CMake against stand-in executables, which are shell scripts, and
+    # execute_process cannot run a shell script on Windows.
+    if(NOT WIN32)
+        add_test(NAME apiary_detect_toolchain
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_detect_toolchain.sh"
+                    "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_COMMAND}"
+        )
+    endif()
     # apiary_aggregate_stubs.py: merges only the fragments it is named and prunes
     # the stubs it no longer writes. Pure Python, like the doc_lint suite.
     add_test(NAME apiary_aggregate_stubs

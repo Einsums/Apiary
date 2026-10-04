@@ -379,11 +379,20 @@ driver would otherwise be left with a partial file that looks fresh. Same
 instinct as the empty-module refusal, which declines to write rather than leave
 an empty-but-valid TU for the next step to consume happily.
 
-### Parse errors
+### Parse errors and Clang's builtin headers
 
 A header clang cannot parse fails the run in every mode, and nothing is written.
 Clang recovers from errors, so the output would still look complete, but declarations after a fatal error are missing and a type it could not resolve reads as `int`.
 `--allow-parse-errors` writes that output anyway, for a caller that would rather have part of an API than none of it.
+
+The most common cause is Clang's builtin headers (`stddef.h`, `stdarg.h`, the intrinsics).
+apiary's libclang needs the ones for its own LLVM major: the intrinsics headers call compiler builtins by name, and another major's can name one it does not have.
+apiary looks next to its binary, in `lib/clang/<major>`, then in the LLVM it was built against; `apiary --print-resource-dir` says which it uses.
+The conda-forge package depends on `clang-<major>`, which installs them next to the binary.
+When they are missing, the error says so and names the package.
+
+`apiary_detect_toolchain()` passes apiary those same headers.
+Only when apiary has none does it borrow the build compiler's (or a conda `clang++`'s), warning when that Clang's major differs from apiary's.
 
 ## How it builds
 
@@ -411,11 +420,9 @@ Touching an annotated header re-fires only that unit's codegen edge (via the
 - **Cross-product with dependent parameters** can't be expressed
   (`Alloc = std::allocator<T>`). Fall back to one
   `APIARY_INSTANTIATE_AS` per concrete type.
-- **System header detection** assumes Clang's `-print-resource-dir` is
-  available and (on macOS) `xcrun --show-sdk-path`. A conda env with
-  `clangdev` + `llvmdev` satisfies both. Other setups may need to set
-  `APIARY_CLANG_RESOURCE_DIR` / `APIARY_SYSROOT`
-  manually before the first configure.
+- **System header detection** finds the C++ standard library by asking the
+  build compiler for its include search list, which MSVC's `cl.exe` does not
+  print; use `clang-cl` on Windows.
 - **`requires requires { … }` clauses block doxygen attachment** —
   clang's `getRawCommentForDecl` doesn't associate `///` comments with
   a function template that has a nested requires-expression. Flatten

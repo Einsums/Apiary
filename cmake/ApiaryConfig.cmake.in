@@ -22,6 +22,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/ApiaryTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ApiaryHelpers.cmake")
 
 set_and_check(APIARY_SCRIPTS_DIR "@PACKAGE_APIARY_SCRIPTS_DIR@")
+# The LLVM major apiary's libclang belongs to, for apiary_detect_toolchain()
+# to compare against a Clang whose builtin headers it borrows.
+set(APIARY_LLVM_VERSION_MAJOR "@LLVM_VERSION_MAJOR@")
 
 # APIARY_TOOL_FOUND lets consumers branch on whether the codegen executable
 # is available in this install (header-only installs ship annotations only).

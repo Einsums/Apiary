@@ -32,9 +32,10 @@ include_guard(GLOBAL)
 set(APIARY_HELPERS_DIR "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL
     "Directory containing ApiaryHelpers.cmake and ApiaryRun.cmake")
 
-# Probe ``CMAKE_CXX_COMPILER`` (or a conda clang++) for the include paths
-# libtooling needs and cache them as:
-#   APIARY_RESOURCE_DIR        - clang -resource-dir (builtin headers)
+# Find the include paths libtooling needs and cache them as:
+#   APIARY_RESOURCE_DIR        - clang -resource-dir (builtin headers): apiary's
+#                                own, else a borrowed Clang's (with a warning
+#                                when its major differs from apiary's libclang)
 #   APIARY_EXTRA_ISYSTEM       - active conda env's include dir (third-party)
 #   APIARY_CXX_INCLUDE_DIRS    - the compiler's C++ stdlib search dirs
 #
@@ -46,29 +47,75 @@ function(apiary_detect_toolchain)
         set(_A_CXX_STANDARD 17)
     endif()
 
-    # clang -resource-dir carries Clang's builtin headers (stddef.h, stdarg.h,
-    # the x86 intrinsics, ...). Prefer the project compiler if it is clang,
-    # else fall back to a conda clang++.
-    # Windows conda envs put executables under Library/bin, not bin/, and carry
-    # the .exe suffix; check both layouts before giving up.
-    set(_clang "")
-    if(CMAKE_CXX_COMPILER MATCHES "clang")
-        set(_clang "${CMAKE_CXX_COMPILER}")
-    elseif(DEFINED ENV{CONDA_PREFIX})
-        foreach(_cand "bin/clang++" "Library/bin/clang++.exe" "Library/bin/clang-cl.exe")
-            if(NOT _clang AND EXISTS "$ENV{CONDA_PREFIX}/${_cand}")
-                set(_clang "$ENV{CONDA_PREFIX}/${_cand}")
-            endif()
-        endforeach()
-    endif()
+    # The resource directory carries Clang's builtin headers (stddef.h,
+    # stdarg.h, the intrinsics), and they must be the ones for apiary's own
+    # libclang: the intrinsics headers call compiler builtins by name, and
+    # another major's can name one this libclang does not have.
+    #
+    # So ask apiary first. An installed apiary reports the directory it uses;
+    # an in-tree one is not built yet, so take the LLVM it is built against.
     set(_resource_dir "")
-    if(_clang)
+    set(_apiary_exe "")
+    if(TARGET apiary::apiary)
+        get_target_property(_apiary_alias apiary::apiary ALIASED_TARGET)
+        if(NOT _apiary_alias)
+            get_target_property(_apiary_exe apiary::apiary LOCATION)
+        endif()
+    endif()
+    if(_apiary_exe AND EXISTS "${_apiary_exe}")
         execute_process(
-            COMMAND "${_clang}" -print-resource-dir
-            OUTPUT_VARIABLE _resource_dir
+            COMMAND "${_apiary_exe}" --print-resource-dir
+            OUTPUT_VARIABLE _apiary_resource_dir
+            RESULT_VARIABLE _apiary_rc
             OUTPUT_STRIP_TRAILING_WHITESPACE
             ERROR_QUIET
         )
+        if(_apiary_rc EQUAL 0)
+            set(_resource_dir "${_apiary_resource_dir}")
+        endif()
+    elseif(APIARY_LLVM_RESOURCE_DIR AND EXISTS "${APIARY_LLVM_RESOURCE_DIR}/include/stddef.h")
+        set(_resource_dir "${APIARY_LLVM_RESOURCE_DIR}")
+    endif()
+
+    # Otherwise borrow a Clang's: the project compiler if it is Clang, else a
+    # conda clang++. Windows conda envs put executables under Library/bin, not
+    # bin/, and carry the .exe suffix; check both layouts before giving up.
+    if(NOT _resource_dir)
+        set(_clang "")
+        if(CMAKE_CXX_COMPILER MATCHES "clang")
+            set(_clang "${CMAKE_CXX_COMPILER}")
+        elseif(DEFINED ENV{CONDA_PREFIX})
+            foreach(_cand "bin/clang++" "Library/bin/clang++.exe" "Library/bin/clang-cl.exe")
+                if(NOT _clang AND EXISTS "$ENV{CONDA_PREFIX}/${_cand}")
+                    set(_clang "$ENV{CONDA_PREFIX}/${_cand}")
+                endif()
+            endforeach()
+        endif()
+        if(_clang)
+            execute_process(
+                COMMAND "${_clang}" -print-resource-dir
+                OUTPUT_VARIABLE _resource_dir
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+            )
+        endif()
+        # The directory is named for its Clang's major (lib/clang/21, or
+        # 17.0.0 on older releases).
+        get_filename_component(_borrowed_major "${_resource_dir}" NAME)
+        string(REGEX MATCH "^[0-9]+" _borrowed_major "${_borrowed_major}")
+        if(_resource_dir AND APIARY_LLVM_VERSION_MAJOR AND _borrowed_major
+           AND NOT _borrowed_major STREQUAL APIARY_LLVM_VERSION_MAJOR)
+            message(WARNING "apiary: no Clang ${APIARY_LLVM_VERSION_MAJOR} builtin headers were found for "
+                "apiary's libclang, so it borrows Clang ${_borrowed_major}'s from ${_clang}. Headers from "
+                "another major can fail to parse: the intrinsics call builtins only their own Clang has. "
+                "Install clang-${APIARY_LLVM_VERSION_MAJOR} beside apiary (conda-forge: "
+                "clang-${APIARY_LLVM_VERSION_MAJOR}) to use matching ones.")
+        elseif(NOT _resource_dir)
+            message(WARNING "apiary: no Clang builtin headers (stddef.h, the intrinsics) were found for "
+                "apiary's libclang, so any header that reaches one will fail to parse. Install "
+                "clang-${APIARY_LLVM_VERSION_MAJOR} beside apiary (conda-forge: "
+                "clang-${APIARY_LLVM_VERSION_MAJOR}).")
+        endif()
     endif()
 
     # Third-party headers (the consuming project's conda deps) live in the
@@ -134,6 +181,14 @@ function(apiary_detect_toolchain)
                     continue()
                 endif()
                 if(APPLE OR MSVC)
+                    # The compiler's own builtin headers (lib/clang/<major>/
+                    # include) sit in this list ahead of the SDK's, whose
+                    # headers #include_next past them, so the order has to
+                    # hold. But they can be another major's than apiary's
+                    # libclang: put apiary's in their place.
+                    if(_resource_dir AND _dir MATCHES "[/\\\\]lib[/\\\\]clang[/\\\\][0-9][^/\\\\]*[/\\\\]include$")
+                        set(_dir "${_resource_dir}/include")
+                    endif()
                     list(APPEND _cxx_dirs "${_dir}")
                 elseif(_dir MATCHES "/c\\+\\+")
                     list(APPEND _cxx_dirs "${_dir}")

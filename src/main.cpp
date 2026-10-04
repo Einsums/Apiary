@@ -23,6 +23,7 @@
 #include <string_view>
 #include <unordered_set>
 
+#include "BuiltinHeaders.hpp"
 #include "DocsJson.hpp"
 #include "Diagnostics.hpp"
 #include "Emitter.hpp"
@@ -35,6 +36,7 @@
 #include "clang/AST/ASTConsumer.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
+#include "clang/Tooling/ArgumentsAdjusters.h"
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
 #include "llvm/Support/CommandLine.h"
@@ -77,6 +79,12 @@ llvm::cl::opt<bool> g_allow_parse_errors(
     llvm::cl::desc("Write the output even when clang reports errors parsing the input. Without this a parse error "
                    "writes nothing and fails the run: what follows an error can be missing, and clang reads a type "
                    "it could not resolve as int, so the output would describe an API that does not exist."),
+    llvm::cl::cat(g_tool_category), llvm::cl::init(false));
+
+llvm::cl::opt<bool> g_print_resource_dir(
+    "print-resource-dir",
+    llvm::cl::desc("Print the Clang resource directory (builtin headers) apiary uses when the compiler arguments "
+                   "name none, then exit. Fails when it holds no headers."),
     llvm::cl::cat(g_tool_category), llvm::cl::init(false));
 
 llvm::cl::opt<bool> g_emit_cpp_docs_json("emit-cpp-docs-json",
@@ -375,9 +383,20 @@ int main(int argc, char const **argv) {
     // Answered before CommonOptionsParser, which requires at least one source
     // path: asking what the diagnostic checks ARE should not require naming a
     // header to run them against.
+    std::string const default_resource_dir = apiary::builtin_headers::default_resource_dir(argv[0]);
     for (int i = 1; i < argc; ++i) {
         if (std::string_view{argv[i]} == "--list-diagnostics") {
             apiary::diag::describe_checks();
+            return 0;
+        }
+        // Also answered without a source path: the CMake helpers ask it at
+        // configure time, to pass the same headers apiary's libclang uses.
+        if (std::string_view{argv[i]} == "--print-resource-dir") {
+            llvm::outs() << default_resource_dir << "\n";
+            if (!apiary::builtin_headers::has_builtin_headers(default_resource_dir)) {
+                llvm::errs() << "apiary: no Clang builtin headers in '" << default_resource_dir << "/include'.\n";
+                return 1;
+            }
             return 0;
         }
     }
@@ -404,12 +423,36 @@ int main(int argc, char const **argv) {
     CommonOptionsParser &options = *expected;
     ClangTool            tool(options.getCompilations(), options.getSourcePathList());
 
+    // Name the resource directory explicitly unless the command line does.
+    // libTooling would inject its own default, next to the binary, but that is
+    // empty in a build tree or an install beside an LLVM that lives elsewhere,
+    // and default_resource_dir also knows the LLVM apiary was built against.
+    // Recorded either way, so a parse failure can say where it looked.
+    std::string used_resource_dir;
+    tool.appendArgumentsAdjuster([&](CommandLineArguments const &args, StringRef) {
+        std::string const given = apiary::builtin_headers::resource_dir_arg(args);
+        if (!given.empty()) {
+            used_resource_dir = given;
+            return args;
+        }
+        used_resource_dir = default_resource_dir;
+        return getInsertArgumentAdjuster({"-resource-dir", default_resource_dir}, ArgumentInsertPosition::BEGIN)(args, "");
+    });
+
     // ClangTool::run is non-zero when clang reported an error. Clang recovers
     // and the visitors still run, so there is output, but it can be wrong in
     // ways nothing downstream notices: declarations after a fatal error are
     // missing, and a type that did not resolve reads as int. Refuse it unless
     // asked, before any mode writes anything.
     if (tool.run(newFrontendActionFactory<IrAction>().get()) != 0) {
+        if (!apiary::builtin_headers::has_builtin_headers(used_resource_dir)) {
+            unsigned const major = apiary::builtin_headers::llvm_major();
+            llvm::errs() << "apiary: Clang's builtin headers (stddef.h, stdarg.h, the intrinsics) are not in '"
+                         << used_resource_dir << "/include'. apiary's libclang " << major
+                         << " needs them at its own version: install clang-" << major
+                         << " beside apiary (conda-forge: clang-" << major
+                         << "), or pass -resource-dir <dir> after --.\n";
+        }
         if (!g_allow_parse_errors) {
             llvm::errs() << "apiary: clang reported errors parsing the input; writing nothing. Pass "
                             "--allow-parse-errors to write the output anyway.\n";
