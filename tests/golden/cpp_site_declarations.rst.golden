@@ -652,7 +652,19 @@ Types
 .. note::
    Generated from the C++ headers by ``apiary --emit-cpp-docs-json``.
 
-Defined in headers ``geom/Shapes.hpp``, ``geom/Specifiers.hpp``, ``geom/Templates.hpp``.
+Defined in headers ``geom/Shapes.hpp``, ``geom/Specifiers.hpp``, ``geom/Templates.hpp``, ``geom/capi.h``.
+
+.. cpp:namespace:: 0
+
+.. cpp:type:: geom_shapes
+
+   An opaque handle to a collection of shapes.
+
+
+.. cpp:type:: geom_visit_fn = void (*)(void *, geom_shapes *, int)
+
+   Called once for each shape a visit reaches.
+
 
 .. cpp:namespace:: geom
 

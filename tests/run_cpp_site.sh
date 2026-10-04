@@ -50,21 +50,23 @@ assert_grep() {
     grep -qF -- "${pattern}" "${file}" || fail "pattern not found in ${file}: ${pattern}"
 }
 
-# The tool may exit non-zero for missing system headers under -nostdinc++;
-# the emitted JSON is still complete for the fixture's self-contained types.
+# The fixtures are self-contained, so -nostdinc++ costs them nothing, and a
+# parse error is a failure: apiary writes nothing after one.
 gen() {
     local rel="$1" out="$2"
     "${TOOL}" --emit-cpp-docs-json --module geom --source-include "${rel}" \
         "${FIX}/include/${rel}" -- -std=c++20 -nostdinc++ \
-        "-I${FIX}/include" "-I${INCLUDE_DIR}" 2>/dev/null > "${out}" || true
-    [[ -s "${out}" ]] || fail "apiary emitted no JSON for ${rel}"
+        "-I${FIX}/include" "-I${INCLUDE_DIR}" 2>"${out}.err" > "${out}" \
+        || { cat "${out}.err" >&2; fail "apiary could not parse ${rel}"; }
 }
 
 gen geom/Shapes.hpp "${WORK}/Shapes.json"
 gen geom/Ops.hpp "${WORK}/Ops.json"
 gen geom/Templates.hpp "${WORK}/Templates.json"
 gen geom/Specifiers.hpp "${WORK}/Specifiers.json"
-readonly JSONS=("${WORK}/Shapes.json" "${WORK}/Ops.json" "${WORK}/Templates.json" "${WORK}/Specifiers.json")
+gen geom/capi.h "${WORK}/capi.json"
+readonly JSONS=("${WORK}/Shapes.json" "${WORK}/Ops.json" "${WORK}/Templates.json" "${WORK}/Specifiers.json"
+                "${WORK}/capi.json")
 
 SITE="${WORK}/src/geom"
 "${PY}" "${SCRIPTS_DIR}/apiary_render_cpp_site.py" --outdir "${SITE}" \
@@ -78,7 +80,7 @@ readonly DECL_PAGES=(
     geom.Box geom.exchange geom.length geom.magnitude geom.same_area geom.Shape geom.Hexagon
     geom.square geom.twice geom.widen types
 )
-for page in index geom.Circle geom.Scalar geom.scale enums macros operators "${DECL_PAGES[@]}"; do
+for page in index geom.Circle geom.Scalar geom.scale enums macros operators geom_visit "${DECL_PAGES[@]}"; do
     assert_file "${SITE}/${page}.rst"
 done
 
@@ -109,6 +111,17 @@ assert_grep ":ref:\`narrative documentation <geom_narrative>\`" "${SITE}/index.r
 if grep -qE "^\.\. cpp:(class|function|enum|type|concept)::" "${SITE}/index.rst"; then
     fail "index.rst declares an entity; it must only link"
 fi
+
+# ---- a C header ------------------------------------------------------------
+# Its typedefs sit in ``extern "C" {}`` and are documented all the same, so
+# geom_visit's signature resolves under -n below. An opaque handle declares the
+# type, not ``geom_shapes = struct geom_shapes``.
+assert_grep ".. cpp:type:: geom_shapes" "${SITE}/types.rst"
+if grep -qF "geom_shapes = struct" "${SITE}/types.rst"; then
+    fail "the opaque handle rendered as an alias of its own struct"
+fi
+assert_grep ".. cpp:type:: geom_visit_fn = void (*)(void *, geom_shapes *, int)" "${SITE}/types.rst"
+assert_grep "void geom_visit(geom_shapes *shapes, geom_visit_fn fn, void *user)" "${SITE}/geom_visit.rst"
 
 # ---- template parameters render as declared --------------------------------
 # Every kind of template parameter keeps its kind: a non-type parameter its

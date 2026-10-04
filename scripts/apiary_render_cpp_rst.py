@@ -356,7 +356,12 @@ def render_typedef(out: list[str], td: dict) -> None:
     # confuse the cpp parser — declare just the alias name and let the doc
     # describe it. Keep simple aliases (``int_t = long long int``) verbatim.
     complex_underlying = any(tok in underlying for tok in ("decltype", "detail::", "requires", "typename", "<"))
-    decl = f"{tmpl}{name}" if (complex_underlying or not underlying) else f"{tmpl}{name} = {underlying}"
+    # ``typedef struct handle handle;`` is how a C header names an opaque type.
+    # ``handle = struct handle`` says nothing the name does not; declare the
+    # name, as the type it is.
+    self_named = underlying in (f"struct {name}", f"union {name}", f"enum {name}")
+    plain = complex_underlying or self_named or not underlying
+    decl = f"{tmpl}{name}" if plain else f"{tmpl}{name} = {underlying}"
     out.append(f".. cpp:type:: {decl}")
     emit_doc(out, td, IND)
     emit_constraints(out, td, IND, ns)

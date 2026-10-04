@@ -1565,8 +1565,9 @@ bool Visitor::VisitTypedefNameDecl(clang::TypedefNameDecl *decl) {
     // Function-local aliases (``using U = BiggestTypeT<T, TOther>;`` inside a
     // template body) are implementation detail, carry no namespace, and
     // collide across headers when rendered; only file-context (namespace or
-    // translation-unit scope) aliases are part of the API surface.
-    if (!decl->getDeclContext()->isFileContext()) {
+    // translation-unit scope) aliases are part of the API surface. Looking
+    // through linkage blocks: a C header's typedefs sit in ``extern "C" {}``.
+    if (!decl->getDeclContext()->getRedeclContext()->isFileContext()) {
         return true;
     }
     std::string const doc = extract_doc(decl, _context);
@@ -1735,8 +1736,9 @@ bool Visitor::VisitVarDecl(clang::VarDecl *decl) {
         cls->fields.push_back(std::move(field));
         return true;
     }
-    // Parameters and locals are VarDecls too; only file-scope ones are API.
-    if (!decl->getDeclContext()->isFileContext() || clang::isa<clang::ParmVarDecl>(decl)) {
+    // Parameters and locals are VarDecls too; only file-scope ones are API,
+    // including those in an ``extern "C" {}`` block.
+    if (!decl->getDeclContext()->getRedeclContext()->isFileContext() || clang::isa<clang::ParmVarDecl>(decl)) {
         return true;
     }
     // An `extern` re-declaration carries neither the initializer nor, usually,
