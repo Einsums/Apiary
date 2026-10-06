@@ -224,6 +224,7 @@ void compute_python_overloads(BoundFunction &f) {
                     entry.py_name               = py_name;
                     entry.instantiation_indices = sub;
                     entry.kwarg_names           = f.template_kwargs;
+                    entry.kwarg_defaults        = f.template_kwarg_defaults;
                     f.python_overloads.push_back(std::move(entry));
                 } else {
                     // Singleton or partial sub-group: emit each as a

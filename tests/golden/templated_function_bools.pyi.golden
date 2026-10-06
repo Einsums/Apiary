@@ -16,3 +16,13 @@ def apply(x: float, b: Any, *, trans_a: bool = False, trans_b: bool = False) -> 
 def scale_inplace(b: Any, factor: float, *, conjugate: bool = False) -> None:
     """Single-bool void-returning variant."""
     ...
+def rescale(b: Any, *, normalize: bool = True) -> None:
+    """Single-bool variant whose flag defaults to true: the kwarg takes the
+    template parameter's declared default.
+    """
+    ...
+def bound(b: Any, *, wrap: bool = False, clamp: bool = True) -> None:
+    """Mixed defaults that clang has to evaluate: ``Wrap`` has none, so it is
+    False; ``Clamp`` names a constexpr variable that is true, so it is True.
+    """
+    ...

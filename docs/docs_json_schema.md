@@ -181,7 +181,8 @@ strips the lifted directive from the prose so it is not rendered twice.
   `enumerators[] {name,value,doc,doc_structured}`.
 - **property**: `{py_name, type, py_type, doc, doc_structured, writable}`.
 - **python_overloads[]**: `{kind, py_name, instantiation_indices[],
-  dtype_values[], default_dtype, kwarg_names[]}` — see `IR.hpp::PythonOverload`.
+  dtype_values[], default_dtype, kwarg_names[], kwarg_defaults[]}` — see `IR.hpp::PythonOverload`.
+  `kwarg_defaults` is parallel to `kwarg_names` and holds each kwarg's Python default (the bool template parameter's default, `false` when it has none).
   Python origin uses `kind:"overload_set"` for `@overload` groups.
 
 ### Template parameters
@@ -231,7 +232,7 @@ A conversion operator (`operator bool()`) has `is_conversion: true` and `is_oper
 
 ### Declaration fields and older JSON
 
-`template_param_decls`, `requires_clause`, `specifiers`, a function's `is_deleted`, a method's `is_conversion`, a class's `is_final` and a field's `is_constexpr` were added without a `schema_version` bump, because they are purely additive.
+`template_param_decls`, `requires_clause`, `specifiers`, a function's `is_deleted`, a method's `is_conversion`, a class's `is_final`, a field's `is_constexpr` and a Python overload's `kwarg_defaults` were added without a `schema_version` bump, because they are purely additive.
 The C++ renderer reads each as absent when it is missing, as it is in JSON from an older apiary: it falls back to `typename <name>` for each entry of `template_params`, and renders no constraints or specifiers.
 The Python frontend writes `template_params: []` and omits the rest.
 

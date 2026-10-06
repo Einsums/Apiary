@@ -343,6 +343,9 @@ struct PythonOverload {
 
     /// For TemplateKwargsDispatcher: parallel to f.template_kwargs.
     std::vector<std::string> kwarg_names;
+    /// For TemplateKwargsDispatcher: each kwarg's Python default, parallel
+    /// to ``kwarg_names``.
+    std::vector<bool>        kwarg_defaults;
 };
 
 /// @brief A property aggregated from @getter / @setter directives on class methods.
@@ -449,6 +452,11 @@ struct BoundFunction : BoundEntityCommon {
     /// without that directive. The emitter generates a runtime
     /// dispatcher with these as keyword-only arguments when non-empty.
     std::vector<std::string> template_kwargs;
+    /// The Python default of each kwarg, parallel to ``template_kwargs``:
+    /// the value of the matching template parameter's default argument
+    /// (``template <bool ComputeEigenvectors = true, ...>``), or false when
+    /// it has none.
+    std::vector<bool> template_kwarg_defaults;
     /// One per ``APIARY_INSTANTIATE_AS`` directive on a templated
     /// free function. Empty for non-templated functions and for templated
     /// functions without explicit instantiation directives (those skip

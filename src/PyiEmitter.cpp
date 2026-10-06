@@ -929,7 +929,7 @@ void emit_function(std::ostringstream &os, BoundFunction const &f, NameMap const
     };
 
     auto render_template_kwargs_signature = [](std::vector<PyParam> const &params, std::vector<std::string> const &kwargs,
-                                               std::string const &ret) {
+                                               std::vector<bool> const &defaults, std::string const &ret) {
         std::ostringstream s;
         s << "(";
         for (std::size_t i = 0; i < params.size(); ++i) {
@@ -945,8 +945,9 @@ void emit_function(std::ostringstream &os, BoundFunction const &f, NameMap const
             s << ", ";
         }
         s << "*";
-        for (auto const &kw : kwargs) {
-            s << ", " << kw << ": bool = False";
+        for (std::size_t k = 0; k < kwargs.size(); ++k) {
+            bool const on = k < defaults.size() && defaults[k];
+            s << ", " << kwargs[k] << ": bool = " << (on ? "True" : "False");
         }
         s << ") -> " << ret;
         return s.str();
@@ -1047,7 +1048,7 @@ void emit_function(std::ostringstream &os, BoundFunction const &f, NameMap const
             auto const &inst   = f.instantiations[ov.instantiation_indices.front()];
             auto [params, ret] = resolve_instantiation_signature(f, inst, names);
             rendered.py_name   = ov.py_name;
-            rendered.signature = render_template_kwargs_signature(params, ov.kwarg_names, ret);
+            rendered.signature = render_template_kwargs_signature(params, ov.kwarg_names, ov.kwarg_defaults, ret);
             break;
         }
         }

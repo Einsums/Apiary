@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cctype>
 #include <utility>
+#include <variant>
 
 #include "clang/AST/ASTConcept.h"
 #include "clang/AST/Attr.h"
@@ -626,6 +627,41 @@ std::vector<BoundTemplateParam> template_param_decls(clang::TemplateParameterLis
             }
         }
         out.push_back(std::move(tp));
+    }
+    return out;
+}
+
+// The Python default of each APIARY_TEMPLATE_KWARGS kwarg: the value of the
+// matching leading template parameter's default argument, evaluated by clang
+// so that ``!false``, ``1`` and ``on_v<int>`` all give true. A parameter with
+// no default gives false. Returns an error message instead when a default
+// cannot be evaluated, for example ``bool B = A`` with ``A`` another
+// template parameter.
+std::variant<std::vector<bool>, std::string> template_kwarg_defaults(clang::TemplateParameterList const *params,
+                                                                     std::vector<std::string> const &kwargs, clang::ASTContext const &ctx) {
+    std::size_t const n = kwargs.size();
+    std::vector<bool> out;
+    out.reserve(n);
+    for (std::size_t k = 0; k < n; ++k) {
+        auto const *nttp = (params != nullptr && k < params->size()) ? llvm::dyn_cast<clang::NonTypeTemplateParmDecl>(params->getParam(k))
+                                                                     : nullptr;
+        if (nttp == nullptr || !nttp->hasDefaultArgument()) {
+            out.push_back(false);
+            continue;
+        }
+        clang::TemplateArgument const &arg = nttp->getDefaultArgument().getArgument();
+        if (arg.getKind() == clang::TemplateArgument::Integral) {
+            out.push_back(arg.getAsIntegral().getBoolValue());
+            continue;
+        }
+        clang::Expr const *expr = arg.getKind() == clang::TemplateArgument::Expression ? arg.getAsExpr() : nullptr;
+        bool               value = false;
+        if (expr == nullptr || expr->isValueDependent() || !expr->EvaluateAsBooleanCondition(value, ctx)) {
+            return "the default of template parameter '" + nttp->getNameAsString() +
+                   "' is not a constant bool, so kwarg '" + kwargs[k] +
+                   "' has no single Python default. Give the parameter a constant default, or none for False.";
+        }
+        out.push_back(value);
     }
     return out;
 }
@@ -1403,6 +1439,22 @@ bool Visitor::VisitFunctionDecl(clang::FunctionDecl *decl) {
             if (d.name == "template_kwargs" && !d.args.empty()) {
                 fn.template_kwargs = parse_quoted_string_list(d.args.front());
                 break;
+            }
+        }
+        if (!fn.template_kwargs.empty()) {
+            auto const *ftpl     = decl->getDescribedFunctionTemplate();
+            auto        defaults = template_kwarg_defaults(ftpl != nullptr ? ftpl->getTemplateParameters() : nullptr,
+                                                           fn.template_kwargs, _context);
+            if (auto *values = std::get_if<std::vector<bool>>(&defaults)) {
+                fn.template_kwarg_defaults = std::move(*values);
+            } else {
+                clang::SourceManager const &sm  = _context.getSourceManager();
+                clang::SourceLocation const loc = decl->getLocation();
+                llvm::errs() << sm.getFilename(loc) << ":" << sm.getSpellingLineNumber(loc) << ":" << sm.getSpellingColumnNumber(loc)
+                             << ": error: apiary: @template_kwargs on " << fn.qualified_name << ": " << std::get<std::string>(defaults)
+                             << "\n";
+                ++_error_count;
+                fn.template_kwarg_defaults.assign(fn.template_kwargs.size(), false);
             }
         }
         for (auto const &d : fn.directives) {

@@ -346,6 +346,10 @@ Value json_python_overloads(std::vector<PythonOverload> const &overloads) {
         for (auto const &k : o.kwarg_names) {
             kwargs.push_back(k);
         }
+        Array kwarg_defaults;
+        for (bool d : o.kwarg_defaults) {
+            kwarg_defaults.push_back(d);
+        }
         out.push_back(Object{
             {"kind", overload_kind_name(o.kind)},
             {"py_name", o.py_name},
@@ -353,6 +357,7 @@ Value json_python_overloads(std::vector<PythonOverload> const &overloads) {
             {"dtype_values", std::move(dtypes)},
             {"default_dtype", o.default_dtype},
             {"kwarg_names", std::move(kwargs)},
+            {"kwarg_defaults", std::move(kwarg_defaults)},
         });
     }
     return out;

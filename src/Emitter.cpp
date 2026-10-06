@@ -1452,7 +1452,7 @@ void emit_template_kwargs_dispatcher(llvm::raw_string_ostream &os, BoundFunction
     // kw_only() applies to every arg that follows, so emit once.
     os << ", " << b.ns << "::kw_only()";
     for (std::size_t k = 0; k < n; ++k) {
-        os << ", " << b.ns << "::arg(\"" << f.template_kwargs[k] << "\") = false";
+        os << ", " << b.ns << "::arg(\"" << f.template_kwargs[k] << "\") = " << (f.template_kwarg_defaults[k] ? "true" : "false");
     }
     emit_function_arg_modifiers(os, f, b);
     emit_doc_arg(os, f);

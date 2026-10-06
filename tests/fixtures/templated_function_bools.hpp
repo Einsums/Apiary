@@ -31,4 +31,18 @@ template <bool Conjugate, typename T>
 APIARY_EXPOSE APIARY_TEMPLATE_KWARGS("conjugate") APIARY_INSTANTIATE_BOOLS("scale_inplace", float)
     APIARY_INSTANTIATE_BOOLS("scale_inplace", double) void scale_inplace(Box<T> &b, T const factor);
 
+/// Single-bool variant whose flag defaults to true: the kwarg takes the
+/// template parameter's declared default.
+template <bool Normalize = true, typename T>
+APIARY_EXPOSE APIARY_TEMPLATE_KWARGS("normalize") APIARY_INSTANTIATE_BOOLS("rescale", float)
+    APIARY_INSTANTIATE_BOOLS("rescale", double) void rescale(Box<T> &b);
+
+template <typename T>
+inline constexpr bool clamps_by_default = true;
+
+/// Mixed defaults that clang has to evaluate: ``Wrap`` has none, so it is
+/// False; ``Clamp`` names a constexpr variable that is true, so it is True.
+template <bool Wrap, bool Clamp = clamps_by_default<float>, typename T>
+APIARY_EXPOSE APIARY_TEMPLATE_KWARGS("wrap", "clamp") APIARY_INSTANTIATE_BOOLS("bound", float) void bound(Box<T> &b);
+
 } // namespace einsums::fixture

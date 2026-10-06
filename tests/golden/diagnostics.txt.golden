@@ -14,6 +14,10 @@ unbindable.hpp:7:25: error: apiary: method 'einsums::fixture::Money::operator-' 
 apiary: 2 diagnostic error(s), 0 warning(s)
 apiary: 2 error(s); refusing to write the generated file.
 
+### template kwarg whose default is not a constant bool (refused)
+kwarg_default.hpp:5:102: error: apiary: @template_kwargs on einsums::fixture::pick: the default of template parameter 'Second' is not a constant bool, so kwarg 'second' has no single Python default. Give the parameter a constant default, or none for False.
+apiary: 1 error(s); refusing to write the generated file.
+
 ### a check silenced
 
 ### undocumented public entities (docs mode)

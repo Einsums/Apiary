@@ -58,6 +58,19 @@ APIARY_EXPOSE APIARY_RENAME("divided") Money operator/(Money const &lhs, double 
 } // namespace einsums::fixture
 HPP
 
+# A template kwarg takes its Python default from the template parameter's
+# default. ``Second = First`` has no value until the first flag is chosen, so
+# there is no single Python default to give it; apiary must refuse rather than
+# quietly pick False.
+cat > "${WORK}/kwarg_default.hpp" <<'HPP'
+#pragma once
+#include <apiary/Annotations.hpp>
+namespace einsums::fixture {
+template <bool First, bool Second = First, typename T>
+APIARY_EXPOSE APIARY_TEMPLATE_KWARGS("first", "second") APIARY_INSTANTIATE_BOOLS("pick", float) void pick(T x);
+} // namespace einsums::fixture
+HPP
+
 # Docs-mode reports. A documented signature that names an undocumented type has
 # nothing to resolve that name to in the C++ reference; the reference report
 # must name it (and the documented entity that refers to it), and must stay
@@ -160,6 +173,9 @@ collect() {
     echo
     echo "### names Python cannot spell (refused, not emitted)"
     collect_path "${WORK}/unbindable.hpp"
+    echo
+    echo "### template kwarg whose default is not a constant bool (refused)"
+    collect_path "${WORK}/kwarg_default.hpp"
     echo
     echo "### a check silenced"
     collect qualifiers.hpp --diagnostic=moved-from-self=ignored
