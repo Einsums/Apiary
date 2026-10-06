@@ -11,7 +11,7 @@ package:
 
 source:
   url: https://github.com/Einsums/Apiary/archive/refs/tags/v${{ version }}.tar.gz
-  sha256: 336e6299cba2da8c42074a3ea3519f3f296f9e66c480714aa6ff3f9f64094c8a
+  sha256: 965be965aea3cc98ce0ceb706ae0a6d6780e3e5a4c0867d6008bdd360bb5c3db
 
 build:
   number: 0
