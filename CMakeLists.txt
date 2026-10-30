@@ -204,9 +204,11 @@ set(_apiary_cmakedir "${CMAKE_INSTALL_LIBDIR}/cmake/Apiary")
 # A plain ``cmake --install`` installs both. ApiaryConfig.cmake picks up
 # whatever of the tool component is present, so it has no configuration of its
 # own to disagree about between two packages built from one source.
+# No INCLUDES DESTINATION: the target's INSTALL_INTERFACE already names the
+# include directory, and INCLUDES DESTINATION takes every argument after it as
+# another directory, COMPONENT and its name included.
 install(TARGETS apiary_annotations
     EXPORT ApiaryTargets
-    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     COMPONENT ApiaryAnnotations
 )
 install(DIRECTORY include/apiary DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT ApiaryAnnotations)
