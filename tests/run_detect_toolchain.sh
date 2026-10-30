@@ -88,8 +88,10 @@ fake_cxx "${WORK}/bin/g++"
 
 configure() {
     local name="$1"; shift
-    # No conda env: the helper would otherwise look for its clang++.
-    env -u CONDA_PREFIX "${CMAKE}" -S "${FIXTURE}" -B "${WORK}/build-${name}" \
+    # No conda env: the helper would otherwise look for its clang++. No SDKROOT
+    # either, which conda's clang activation exports: CMake seeds
+    # CMAKE_OSX_SYSROOT from it, and the probe then adds that SDK's headers.
+    env -u CONDA_PREFIX -u SDKROOT "${CMAKE}" -S "${FIXTURE}" -B "${WORK}/build-${name}" \
         -DAPIARY_HELPERS="${SRC}/cmake/ApiaryHelpers.cmake" "$@" >"${WORK}/${name}.log" 2>&1 \
         || { cat "${WORK}/${name}.log" >&2; fail "${name}: configure failed"; }
 }
@@ -130,7 +132,7 @@ fi
 # Not from $CONDA_PREFIX, the environment active in the shell, which need not
 # be the project's: a conda compiler puts its own in CMAKE_CXX_FLAGS.
 mkdir -p "${WORK}/shell-env/include" "${WORK}/flags-a" "${WORK}/flags-b"
-CONDA_PREFIX="${WORK}/shell-env" "${CMAKE}" -S "${FIXTURE}" -B "${WORK}/build-cxxflags" \
+CONDA_PREFIX="${WORK}/shell-env" env -u SDKROOT "${CMAKE}" -S "${FIXTURE}" -B "${WORK}/build-cxxflags" \
     -DAPIARY_HELPERS="${SRC}/cmake/ApiaryHelpers.cmake" \
     -DFAKE_APIARY="${WORK}/apiary-own" -DFAKE_CXX="${WORK}/bin/clang++" \
     "-DCMAKE_CXX_FLAGS=-O2 -isystem ${WORK}/flags-a -I${WORK}/flags-b" >"${WORK}/cxxflags.log" 2>&1 \
