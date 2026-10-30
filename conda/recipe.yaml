@@ -11,7 +11,7 @@ recipe:
 
 source:
   url: https://github.com/Einsums/Apiary/archive/refs/tags/v${{ version }}.tar.gz
-  sha256: 33b6f49aa24059feb9cdf3eb7808cc2b47cae1293462ca959c9c00f8d8399df5
+  sha256: 3edcd792091825280127e886774b808dfa84d2d2ec08d56b51dbff1976fe9918
 
 build:
   number: 0

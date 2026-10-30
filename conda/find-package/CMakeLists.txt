@@ -4,18 +4,20 @@
 cmake_minimum_required(VERSION 3.20)
 project(find_apiary LANGUAGES NONE)
 
-find_package(Apiary 1.3 REQUIRED CONFIG COMPONENTS annotations)
+find_package(Apiary 1.3.1 REQUIRED CONFIG COMPONENTS annotations)
 if(NOT TARGET apiary::annotations)
     message(FATAL_ERROR "find_package(Apiary) gave no apiary::annotations")
 endif()
-get_target_property(_inc apiary::annotations INTERFACE_INCLUDE_DIRECTORIES)
-list(GET _inc 0 _inc)
-if(NOT EXISTS "${_inc}/apiary/Annotations.hpp")
-    message(FATAL_ERROR "apiary::annotations names ${_inc}, which has no apiary/Annotations.hpp")
+# Every include directory must exist, not just the first: a project consuming a
+# target that links apiary::annotations fails to generate on any that does not.
+get_target_property(_incs apiary::annotations INTERFACE_INCLUDE_DIRECTORIES)
+list(LENGTH _incs _n)
+if(NOT _n EQUAL 1 OR NOT EXISTS "${_incs}/apiary/Annotations.hpp")
+    message(FATAL_ERROR "apiary::annotations should name the one directory holding apiary/Annotations.hpp, not: ${_incs}")
 endif()
 
 if(EXPECT_TOOL)
-    find_package(Apiary 1.3 REQUIRED CONFIG COMPONENTS tool)
+    find_package(Apiary 1.3.1 REQUIRED CONFIG COMPONENTS tool)
     if(NOT TARGET apiary::apiary OR NOT COMMAND apiary_add_bindings)
         message(FATAL_ERROR "the tool component lacks apiary::apiary or the helpers")
     endif()
