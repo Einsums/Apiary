@@ -44,3 +44,10 @@ if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/ApiaryHelpers.cmake")
 endif()
 
 check_required_components(Apiary)
+# check_required_components() gives no reason, and CMake then reports only
+# that Apiary_FOUND was set to FALSE.
+if(NOT Apiary_FOUND AND Apiary_FIND_REQUIRED_tool AND NOT APIARY_TOOL_FOUND)
+    string(CONCAT Apiary_NOT_FOUND_MESSAGE
+        "the install at ${PACKAGE_PREFIX_DIR} has the annotations but not the codegen executable "
+        "(the ApiaryTool component; on conda-forge, the apiary package).")
+endif()
