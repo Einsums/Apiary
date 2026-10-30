@@ -193,30 +193,52 @@ add_library(apiary::annotations ALIAS apiary_annotations)
 # --- Install / export (find_package(Apiary)) ------------------------------
 set(_apiary_cmakedir "${CMAKE_INSTALL_LIBDIR}/cmake/Apiary")
 
-# apiary_annotations (and the header it carries) install unconditionally so a
-# find_package(Apiary) / install tree always provides the macros, even in a
-# header-only (APIARY_BUILD_TOOL=OFF) configuration. The executable is added
-# to the same export set only when it was built; ApiaryTargets.cmake then
-# defines apiary::apiary just for tool-enabled installs.
-set(_apiary_install_targets apiary_annotations)
-if(APIARY_BUILD_TOOL)
-    list(PREPEND _apiary_install_targets apiary)
-endif()
-install(TARGETS ${_apiary_install_targets}
+# Two install components, so a package can ship the annotations without the
+# tool:
+#   ApiaryAnnotations - the header, apiary::annotations and the package config.
+#                       It needs no Clang/LLVM, and its files are the same
+#                       whether or not this build made the tool.
+#   ApiaryTool        - the executable with its own export set and the LLVM
+#                       major it was built against (ApiaryTool.cmake), plus the
+#                       helper functions and the scripts they run.
+# A plain ``cmake --install`` installs both. ApiaryConfig.cmake picks up
+# whatever of the tool component is present, so it has no configuration of its
+# own to disagree about between two packages built from one source.
+install(TARGETS apiary_annotations
     EXPORT ApiaryTargets
-    RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT ApiaryAnnotations
 )
-install(DIRECTORY include/apiary DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY include/apiary DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT ApiaryAnnotations)
 install(EXPORT ApiaryTargets
     NAMESPACE apiary::
     DESTINATION ${_apiary_cmakedir}
     FILE ApiaryTargets.cmake
+    COMPONENT ApiaryAnnotations
 )
+
+if(APIARY_BUILD_TOOL)
+    install(TARGETS apiary
+        EXPORT ApiaryToolTargets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT ApiaryTool
+    )
+    install(EXPORT ApiaryToolTargets
+        NAMESPACE apiary::
+        DESTINATION ${_apiary_cmakedir}
+        FILE ApiaryToolTargets.cmake
+        COMPONENT ApiaryTool
+    )
+    configure_file(cmake/ApiaryTool.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/ApiaryTool.cmake" @ONLY)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ApiaryTool.cmake"
+        DESTINATION ${_apiary_cmakedir}
+        COMPONENT ApiaryTool
+    )
+endif()
 
 # Bundled Python scripts (stub aggregation + doc rendering) the helper
 # functions invoke; consumers locate them via APIARY_SCRIPTS_DIR.
-install(DIRECTORY scripts/ DESTINATION ${CMAKE_INSTALL_DATADIR}/apiary/scripts)
+install(DIRECTORY scripts/ DESTINATION ${CMAKE_INSTALL_DATADIR}/apiary/scripts COMPONENT ApiaryTool)
 # ApiaryRun.cmake ships alongside the helpers, not as an afterthought: the
 # codegen custom commands invoke it by path (see APIARY_HELPERS_DIR), so an
 # install missing it leaves every find_package(Apiary) consumer failing at
@@ -225,6 +247,7 @@ install(FILES
     cmake/ApiaryHelpers.cmake
     cmake/ApiaryRun.cmake
     DESTINATION ${_apiary_cmakedir}
+    COMPONENT ApiaryTool
 )
 
 set(APIARY_SCRIPTS_DIR "${CMAKE_INSTALL_DATADIR}/apiary/scripts")
@@ -243,6 +266,7 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/ApiaryConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/ApiaryConfigVersion.cmake"
     DESTINATION ${_apiary_cmakedir}
+    COMPONENT ApiaryAnnotations
 )
 
 # --- Smoke tests ----------------------------------------------------------
@@ -526,6 +550,17 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                     "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_COMMAND}"
         )
     endif()
+    # The ApiaryAnnotations and ApiaryTool install components: disjoint, adding
+    # up to a full install, and each what find_package(Apiary) expects. Pure
+    # CMake, so it runs on every platform and with or without the tool.
+    add_test(NAME apiary_install_components
+        COMMAND "${CMAKE_COMMAND}"
+                "-DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+                "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-components"
+                "-DTOOL=${APIARY_BUILD_TOOL}"
+                "-DGENERATOR=${CMAKE_GENERATOR}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_install_components.cmake"
+    )
     # apiary_aggregate_stubs.py: merges only the fragments it is named and prunes
     # the stubs it no longer writes. Pure Python, like the doc_lint suite.
     add_test(NAME apiary_aggregate_stubs

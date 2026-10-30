@@ -19,7 +19,7 @@ project(apiary_greeter_example LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Apiary REQUIRED)            # apiary::apiary, apiary::annotations, apiary_* helpers
+find_package(Apiary REQUIRED COMPONENTS tool) # apiary::apiary, apiary::annotations, apiary_* helpers
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 

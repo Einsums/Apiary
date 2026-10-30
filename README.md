@@ -40,7 +40,7 @@ Wire it up with Apiary's CMake helpers — the same ones whether Apiary is
 installed (`find_package`) or vendored (`add_subdirectory`):
 
 ```cmake
-find_package(Apiary REQUIRED)          # or: add_subdirectory(external/apiary)
+find_package(Apiary REQUIRED COMPONENTS tool)   # or: add_subdirectory(external/apiary)
 
 target_link_libraries(mylib PUBLIC apiary::annotations)   # the APIARY_* header
 

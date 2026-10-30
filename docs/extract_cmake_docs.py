@@ -31,6 +31,18 @@ Consume apiary from CMake via ``find_package(Apiary)`` (installed) or
   macro header; link it instead of hardcoding the include path.
 
 …plus the helper functions below (lifted from their in-source documentation).
+
+An install has two components, which a package manager can ship apart.
+``ApiaryAnnotations`` holds the header, ``apiary::annotations`` and the package
+config, and needs no Clang/LLVM; it is all a library that only annotates its
+declarations, or a project that links one, needs.
+``ApiaryTool`` holds the executable and the helpers.
+``find_package(Apiary)`` succeeds with the annotations alone, so a project that
+generates bindings asks for the tool::
+
+   find_package(Apiary REQUIRED COMPONENTS tool)
+
+``APIARY_TOOL_FOUND`` says whether ``apiary::apiary`` is present.
 """
 
 

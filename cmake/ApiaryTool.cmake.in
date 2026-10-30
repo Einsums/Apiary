@@ -1,0 +1,13 @@
+#----------------------------------------------------------------------------------------------
+# Copyright (c) The Einsums Developers. All rights reserved.
+# Licensed under the MIT License. See LICENSE.txt in the project root for license information.
+#----------------------------------------------------------------------------------------------
+
+# ApiaryTool.cmake - the codegen executable, installed with it in the ApiaryTool
+# component. ApiaryConfig.cmake includes this file when it is present.
+
+# The LLVM major apiary's libclang belongs to, for apiary_detect_toolchain()
+# to compare against a Clang whose builtin headers it borrows.
+set(APIARY_LLVM_VERSION_MAJOR "@LLVM_VERSION_MAJOR@")
+
+include("${CMAKE_CURRENT_LIST_DIR}/ApiaryToolTargets.cmake")
