@@ -12,6 +12,14 @@ below is merged).
   and tests.
 - `probe.hpp` - a header the recipe's tests parse to check that Clang's builtin
   headers are installed where apiary's libclang looks for them.
+- `find-package/` - a CMake project the tests configure against each installed
+  output: `apiary-annotations` alone gives the annotations and none of the tool,
+  and `apiary` gives `find_package(Apiary COMPONENTS tool)` its executable and
+  helpers.
+
+The recipe has two outputs, one per CMake install component:
+`apiary-annotations` (`ApiaryAnnotations`, with no Clang/LLVM dependency) and
+`apiary` (`ApiaryTool`, which depends on that exact `apiary-annotations` build).
 
 ## Build locally (sanity check before submitting)
 

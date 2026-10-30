@@ -1,12 +1,12 @@
 context:
   version: "1.3.0"
   # LLVM/Clang major apiary's libTooling code is built against. apiary is a leaf
-  # *tool* — consumers run it, they do not link its LLVM — so it may pin its own
+  # *tool* - consumers run it, they do not link its LLVM - so it may pin its own
   # toolchain independent of the rest of an environment.
   llvm_major: "23"
 
-package:
-  name: apiary
+recipe:
+  name: apiary-split
   version: ${{ version }}
 
 source:
@@ -15,132 +15,241 @@ source:
 
 build:
   number: 0
-  script:
-    - if: unix
-      then: |
-        cmake -S . -B build -G Ninja ${CMAKE_ARGS} \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
-          -DCMAKE_PREFIX_PATH="${PREFIX}"
-        cmake --build build
-        cmake --install build
-    # clang-cl, not cl and not clang++: conda-forge's win-64 clangdev ships
-    # static libs built against the MSVC ABI, so clang-cl links them while
-    # keeping the clang frontend apiary's libTooling code needs. A GNU-driver
-    # clang++ targets the MinGW ABI and would fail to link the same libs.
-    #
-    # compiler('cxx') is still vs2022 here, and that is deliberate: it puts the
-    # MSVC STL, import libs, and Windows SDK on INCLUDE/LIB, which clang-cl
-    # consumes. The clang drivers themselves ship separately on win-64 (the
-    # clang/clangxx packages in build:).
-    #
-    # Windows conda packages land under %PREFIX%\Library, so that - not the env
-    # root - is both the install prefix and where find_package(Clang/LLVM
-    # CONFIG) has to look.
-    - if: win
-      then: |
-        cmake -S . -B build -G Ninja ^
-          -DCMAKE_BUILD_TYPE=Release ^
-          -DCMAKE_C_COMPILER=clang-cl ^
-          -DCMAKE_CXX_COMPILER=clang-cl ^
-          -DCMAKE_INSTALL_PREFIX="%LIBRARY_PREFIX%" ^
-          -DCMAKE_PREFIX_PATH="%LIBRARY_PREFIX%"
-        if errorlevel 1 exit 1
-        cmake --build build
-        if errorlevel 1 exit 1
-        cmake --install build
-        if errorlevel 1 exit 1
 
-requirements:
-  build:
-    - ${{ compiler('cxx') }}
-    - ${{ stdlib('c') }}
-    - cmake >=3.20
-    - ninja
-    # The clang drivers (clang-cl) ship apart from the clangdev libraries on
-    # win-64; on unix the cxx compiler above already is clang.
-    - if: win
-      then:
-        - clang ${{ llvm_major }}.*
-        - clangxx ${{ llvm_major }}.*
-  host:
-    # find_package(Clang/LLVM CONFIG) + the libTooling static libs.
-    - llvmdev ${{ llvm_major }}.*
-    - clangdev ${{ llvm_major }}.*
-    # apiary's binary directly links libz/libzstd (compression support pulled in
-    # by the static LLVM libs); their run_exports carry them into run.
-    - zlib
-    - zstd
-  run:
-    # apiary dynamically links the shared libLLVM (@rpath/libLLVM.<major>.dylib),
-    # which lives in the major-suffixed package libllvm<major>. llvmdev's
-    # transitive run_export does not cover it, so depend on it explicitly.
-    - libllvm${{ llvm_major }}
-    # libclang needs Clang's builtin headers (stddef.h, stdarg.h, the
-    # intrinsics) at its own version, and looks for them next to the apiary
-    # binary, in lib/clang/<major> (Library\lib\clang\<major> on Windows).
-    # clang-<major> installs them there.
-    # Without it, parsing works only when something else in the environment
-    # brings matching headers; with GCC as the build compiler nothing does.
-    - clang-${{ llvm_major }}
-    # The bundled doc/stub render scripts (share/apiary/scripts/*.py) are invoked
-    # by the apiary_* CMake helpers at a consumer's build time.
-    - python
-
-tests:
-  - package_contents:
-      bin:
-        - apiary
-      include:
-        - apiary/Annotations.hpp
-      # bin/include are mapped to Library/ on Windows for us; plain file globs
-      # are not, so they are spelled out per platform.
-      files:
+# Apiary installs as two CMake components, and each output installs one:
+#   apiary-annotations - ApiaryAnnotations: the APIARY_* header, the
+#                        apiary::annotations target and the package config.
+#                        No Clang/LLVM, so a library that only annotates its
+#                        declarations (and everything that links it) can
+#                        depend on this alone.
+#   apiary             - ApiaryTool: the codegen executable, the apiary_*
+#                        CMake helpers and their scripts, on top of
+#                        apiary-annotations.
+# The components share no file, so neither output clobbers the other.
+#
+# apiary-annotations is not noarch: a noarch: generic package installs its
+# files at the paths they were built at, and on Windows they belong under
+# Library\ rather than the env root.
+outputs:
+  - package:
+      name: apiary-annotations
+    build:
+      script:
+        # The annotations need no LLVM, so this configures without the tool.
+        # CMake still wants a C++ compiler for project(), which is all the
+        # compiler below is for.
         - if: unix
+          then: |
+            cmake -S . -B build-annotations -G Ninja ${CMAKE_ARGS} \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DAPIARY_BUILD_TOOL=OFF \
+              -DCMAKE_INSTALL_PREFIX="${PREFIX}"
+            cmake --install build-annotations --component ApiaryAnnotations
+        - if: win
+          then: |
+            cmake -S . -B build-annotations -G Ninja ^
+              -DCMAKE_BUILD_TYPE=Release ^
+              -DAPIARY_BUILD_TOOL=OFF ^
+              -DCMAKE_INSTALL_PREFIX="%LIBRARY_PREFIX%"
+            if errorlevel 1 exit 1
+            cmake --install build-annotations --component ApiaryAnnotations
+            if errorlevel 1 exit 1
+    requirements:
+      build:
+        - ${{ compiler('cxx') }}
+        - ${{ stdlib('c') }}
+        - cmake >=3.20
+        - ninja
+      # Nothing here is compiled, so nothing the compiler or the C stdlib
+      # would add at run time belongs in the package.
+      ignore_run_exports:
+        from_package:
+          - ${{ compiler('cxx') }}
+          - ${{ stdlib('c') }}
+    tests:
+      - package_contents:
+          include:
+            - apiary/Annotations.hpp
+          files:
+            - if: unix
+              then:
+                - lib/cmake/Apiary/ApiaryConfig.cmake
+                - lib/cmake/Apiary/ApiaryConfigVersion.cmake
+                - lib/cmake/Apiary/ApiaryTargets.cmake
+              else:
+                - Library/lib/cmake/Apiary/ApiaryConfig.cmake
+                - Library/lib/cmake/Apiary/ApiaryConfigVersion.cmake
+                - Library/lib/cmake/Apiary/ApiaryTargets.cmake
+      # find_package(Apiary) finds the annotations and, with the tool not
+      # installed, nothing of it.
+      - files:
+          recipe:
+            - find-package/
+        requirements:
+          run:
+            - cmake >=3.20
+            - ninja
+        script:
+          - if: unix
+            then: cmake -S find-package -B find-package-build -G Ninja -DEXPECT_TOOL=OFF -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
+            else: cmake -S find-package -B find-package-build -G Ninja -DEXPECT_TOOL=OFF -DCMAKE_PREFIX_PATH="%CONDA_PREFIX%\Library"
+    about:
+      summary: The APIARY_* binding annotations, as a CMake package with no Clang/LLVM dependency
+      description: |
+        The header-only half of Apiary: <apiary/Annotations.hpp>, whose
+        APIARY_* macros mark C++ declarations for Apiary's codegen, and the
+        CMake package that provides it as the apiary::annotations target.
+        A library annotated for Apiary needs only this, at build and run time;
+        generating bindings needs the apiary package, which depends on it.
+
+  - package:
+      name: apiary
+    build:
+      script:
+        - if: unix
+          then: |
+            cmake -S . -B build -G Ninja ${CMAKE_ARGS} \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
+              -DCMAKE_PREFIX_PATH="${PREFIX}"
+            cmake --build build
+            cmake --install build --component ApiaryTool
+        # clang-cl, not cl and not clang++: conda-forge's win-64 clangdev ships
+        # static libs built against the MSVC ABI, so clang-cl links them while
+        # keeping the clang frontend apiary's libTooling code needs. A GNU-driver
+        # clang++ targets the MinGW ABI and would fail to link the same libs.
+        #
+        # compiler('cxx') is still vs2022 here, and that is deliberate: it puts the
+        # MSVC STL, import libs, and Windows SDK on INCLUDE/LIB, which clang-cl
+        # consumes. The clang drivers themselves ship separately on win-64 (the
+        # clang/clangxx packages in build:).
+        #
+        # Windows conda packages land under %PREFIX%\Library, so that - not the env
+        # root - is both the install prefix and where find_package(Clang/LLVM
+        # CONFIG) has to look.
+        - if: win
+          then: |
+            cmake -S . -B build -G Ninja ^
+              -DCMAKE_BUILD_TYPE=Release ^
+              -DCMAKE_C_COMPILER=clang-cl ^
+              -DCMAKE_CXX_COMPILER=clang-cl ^
+              -DCMAKE_INSTALL_PREFIX="%LIBRARY_PREFIX%" ^
+              -DCMAKE_PREFIX_PATH="%LIBRARY_PREFIX%"
+            if errorlevel 1 exit 1
+            cmake --build build
+            if errorlevel 1 exit 1
+            cmake --install build --component ApiaryTool
+            if errorlevel 1 exit 1
+    requirements:
+      build:
+        - ${{ compiler('cxx') }}
+        - ${{ stdlib('c') }}
+        - cmake >=3.20
+        - ninja
+        # The clang drivers (clang-cl) ship apart from the clangdev libraries on
+        # win-64; on unix the cxx compiler above already is clang.
+        - if: win
           then:
-            - lib/cmake/Apiary/ApiaryConfig.cmake
-            - lib/cmake/Apiary/ApiaryHelpers.cmake
-            - share/apiary/scripts/apiary_render_cpp_rst.py
-          else:
-            - Library/lib/cmake/Apiary/ApiaryConfig.cmake
-            - Library/lib/cmake/Apiary/ApiaryHelpers.cmake
-            - Library/share/apiary/scripts/apiary_render_cpp_rst.py
-  - script:
-      - apiary --help
-  # Parse a header that needs <stddef.h> with -nostdlibinc, which drops the
-  # system include paths (an SDK, MSVC, glibc) but keeps the builtin headers,
-  # so it can only resolve through the headers above. Without them, Clang
-  # recovers by reading size_t as int and apiary still exits 0, so check the
-  # type, not the exit status or the function's presence.
-  - files:
-      recipe:
-        - probe.hpp
-    script:
-      - apiary --emit-cpp-docs-json --module probe probe.hpp -- -std=c++17 -nostdlibinc > probe.json
-      - if: win
-        then: if errorlevel 1 exit 1
-      - python -c "import json, sys; f = json.load(open('probe.json'))['functions'][0]; print(f['name'], '->', f['return_type']); sys.exit(f['return_type'] != 'size_t')"
-      - if: win
-        then: if errorlevel 1 exit 1
+            - clang ${{ llvm_major }}.*
+            - clangxx ${{ llvm_major }}.*
+      host:
+        # find_package(Clang/LLVM CONFIG) + the libTooling static libs.
+        - llvmdev ${{ llvm_major }}.*
+        - clangdev ${{ llvm_major }}.*
+        # apiary's binary directly links libz/libzstd (compression support pulled in
+        # by the static LLVM libs); their run_exports carry them into run.
+        - zlib
+        - zstd
+      run:
+        # ApiaryConfig.cmake, ApiaryTargets.cmake and the header. ApiaryConfig
+        # loads this output's ApiaryTool.cmake, so the two must be the same build.
+        - ${{ pin_subpackage('apiary-annotations', exact=True) }}
+        # apiary dynamically links the shared libLLVM (@rpath/libLLVM.<major>.dylib),
+        # which lives in the major-suffixed package libllvm<major>. llvmdev's
+        # transitive run_export does not cover it, so depend on it explicitly.
+        - libllvm${{ llvm_major }}
+        # libclang needs Clang's builtin headers (stddef.h, stdarg.h, the
+        # intrinsics) at its own version, and looks for them next to the apiary
+        # binary, in lib/clang/<major> (Library\lib\clang\<major> on Windows).
+        # clang-<major> installs them there.
+        # Without it, parsing works only when something else in the environment
+        # brings matching headers; with GCC as the build compiler nothing does.
+        - clang-${{ llvm_major }}
+        # The bundled doc/stub render scripts (share/apiary/scripts/*.py) are invoked
+        # by the apiary_* CMake helpers at a consumer's build time.
+        - python
+    tests:
+      - package_contents:
+          bin:
+            - apiary
+          # bin/include are mapped to Library/ on Windows for us; plain file globs
+          # are not, so they are spelled out per platform.
+          files:
+            - if: unix
+              then:
+                - lib/cmake/Apiary/ApiaryTool.cmake
+                - lib/cmake/Apiary/ApiaryToolTargets.cmake
+                - lib/cmake/Apiary/ApiaryHelpers.cmake
+                - lib/cmake/Apiary/ApiaryRun.cmake
+                - share/apiary/scripts/apiary_render_cpp_rst.py
+              else:
+                - Library/lib/cmake/Apiary/ApiaryTool.cmake
+                - Library/lib/cmake/Apiary/ApiaryToolTargets.cmake
+                - Library/lib/cmake/Apiary/ApiaryHelpers.cmake
+                - Library/lib/cmake/Apiary/ApiaryRun.cmake
+                - Library/share/apiary/scripts/apiary_render_cpp_rst.py
+      - script:
+          - apiary --help
+      # Parse a header that needs <stddef.h> with -nostdlibinc, which drops the
+      # system include paths (an SDK, MSVC, glibc) but keeps the builtin headers,
+      # so it can only resolve through the headers above. Without them, Clang
+      # recovers by reading size_t as int and apiary still exits 0, so check the
+      # type, not the exit status or the function's presence.
+      - files:
+          recipe:
+            - probe.hpp
+        script:
+          - apiary --emit-cpp-docs-json --module probe probe.hpp -- -std=c++17 -nostdlibinc > probe.json
+          - if: win
+            then: if errorlevel 1 exit 1
+          - python -c "import json, sys; f = json.load(open('probe.json'))['functions'][0]; print(f['name'], '->', f['return_type']); sys.exit(f['return_type'] != 'size_t')"
+          - if: win
+            then: if errorlevel 1 exit 1
+      # find_package(Apiary COMPONENTS tool) finds the executable and the
+      # helpers, with the annotations from apiary-annotations.
+      - files:
+          recipe:
+            - find-package/
+        requirements:
+          run:
+            - cmake >=3.20
+            - ninja
+        script:
+          - if: unix
+            then: cmake -S find-package -B find-package-build -G Ninja -DEXPECT_TOOL=ON -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}"
+            else: cmake -S find-package -B find-package-build -G Ninja -DEXPECT_TOOL=ON -DCMAKE_PREFIX_PATH="%CONDA_PREFIX%\Library"
+    about:
+      summary: libclang/libtooling C++ introspection - pybind11 bindings, .pyi stubs, Sphinx docs, JSON IR
+      description: |
+        Apiary is a standalone libclang/libtooling tool that, from a single AST
+        walk over annotated C++ headers, emits pybind11 (or nanobind) bindings,
+        .pyi type stubs, Sphinx C++ API documentation (including macros, no
+        Doxygen), and a structured public-API JSON IR.
+
+        It ships an installable CMake package: find_package(Apiary COMPONENTS tool)
+        provides the apiary::apiary executable, the apiary::annotations INTERFACE
+        header target (the APIARY_* annotation macros, from apiary-annotations),
+        and the apiary_* helper functions that wire codegen into a downstream build.
 
 about:
   homepage: https://github.com/Einsums/Apiary
-  summary: libclang/libtooling C++ introspection — pybind11 bindings, .pyi stubs, Sphinx docs, JSON IR
-  description: |
-    Apiary is a standalone libclang/libtooling tool that, from a single AST
-    walk over annotated C++ headers, emits pybind11 (or nanobind) bindings,
-    .pyi type stubs, Sphinx C++ API documentation (including macros, no
-    Doxygen), and a structured public-API JSON IR.
-
-    It ships an installable CMake package: find_package(Apiary) provides the
-    apiary::apiary executable, the apiary::annotations INTERFACE header target
-    (the APIARY_* annotation macros), and the apiary_* helper functions that
-    wire codegen into a downstream build.
+  summary: libclang/libtooling C++ introspection - pybind11 bindings, .pyi stubs, Sphinx docs, JSON IR
   license: MIT
   license_file: LICENSE.txt
   documentation: https://einsums.github.io/Apiary/
   repository: https://github.com/Einsums/Apiary
 
 extra:
+  feedstock-name: apiary
   recipe-maintainers:
     - jturney
