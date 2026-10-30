@@ -24,30 +24,41 @@
 
 @PACKAGE_INIT@
 
-include("${CMAKE_CURRENT_LIST_DIR}/ApiaryTargets.cmake")
+# Which components this install has, settled before any target is created: a
+# find_package() that fails must leave nothing behind, or a fallback that then
+# builds Apiary from source (FetchContent's, for one) collides with
+# apiary::annotations.
 set(Apiary_annotations_FOUND TRUE)
-
 # The ApiaryTool component, which an annotations-only install leaves out.
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/ApiaryTool.cmake")
-    include("${CMAKE_CURRENT_LIST_DIR}/ApiaryTool.cmake")
     set(APIARY_TOOL_FOUND TRUE)
 else()
     set(APIARY_TOOL_FOUND FALSE)
 endif()
 set(Apiary_tool_FOUND ${APIARY_TOOL_FOUND})
 
+check_required_components(Apiary)
+# find_package sets Apiary_FOUND only after this file, so here it is either
+# unset or the FALSE check_required_components() just set.
+if(DEFINED Apiary_FOUND AND NOT Apiary_FOUND)
+    # check_required_components() gives no reason, and CMake then reports only
+    # that Apiary_FOUND was set to FALSE.
+    if(Apiary_FIND_REQUIRED_tool AND NOT APIARY_TOOL_FOUND)
+        string(CONCAT Apiary_NOT_FOUND_MESSAGE
+            "the install at ${PACKAGE_PREFIX_DIR} has the annotations but not the codegen executable "
+            "(the ApiaryTool component; on conda-forge, the apiary package).")
+    endif()
+    return()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/ApiaryTargets.cmake")
+if(APIARY_TOOL_FOUND)
+    include("${CMAKE_CURRENT_LIST_DIR}/ApiaryTool.cmake")
+endif()
+
 # The helpers and their scripts come with the ApiaryTool component, but not
 # only with the executable: a build without the tool still installs them.
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/ApiaryHelpers.cmake")
     include("${CMAKE_CURRENT_LIST_DIR}/ApiaryHelpers.cmake")
     set_and_check(APIARY_SCRIPTS_DIR "@PACKAGE_APIARY_SCRIPTS_DIR@")
-endif()
-
-check_required_components(Apiary)
-# check_required_components() gives no reason, and CMake then reports only
-# that Apiary_FOUND was set to FALSE.
-if(NOT Apiary_FOUND AND Apiary_FIND_REQUIRED_tool AND NOT APIARY_TOOL_FOUND)
-    string(CONCAT Apiary_NOT_FOUND_MESSAGE
-        "the install at ${PACKAGE_PREFIX_DIR} has the annotations but not the codegen executable "
-        "(the ApiaryTool component; on conda-forge, the apiary package).")
 endif()

@@ -107,6 +107,11 @@ if(expect STREQUAL NOT_FOUND)
     if(NOT Apiary_NOT_FOUND_MESSAGE MATCHES \"ApiaryTool\")
         message(FATAL_ERROR \"no reason given for the missing tool: '\${Apiary_NOT_FOUND_MESSAGE}'\")
     endif()
+    # A failed find_package must define nothing, so that a fallback building
+    # Apiary from source does not collide with the targets of the one refused.
+    if(TARGET apiary::annotations OR TARGET apiary::apiary OR COMMAND apiary_add_bindings)
+        message(FATAL_ERROR \"the refused install left its targets or helpers behind\")
+    endif()
     return()
 endif()
 if(NOT Apiary_FOUND)
