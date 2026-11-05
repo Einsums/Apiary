@@ -15,17 +15,31 @@
 # Or run with REGEN=1 to overwrite goldens in place.
 #
 # Invocation:
-#     run_golden.sh <apiary-binary> <annotations-include-dir>
+#     run_golden.sh <apiary-binary> <annotations-include-dir> [pybind11|nanobind]
+#
+# The optional third argument is the --target. Each fixture has one golden per
+# target: ``<name>.cpp.golden`` for pybind11, ``<name>.nanobind.cpp.golden``
+# for nanobind. Neither needs the binding library installed; the goldens pin
+# text, and run_compile_check.sh is what compiles it.
 
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-    echo "usage: $0 <apiary-binary> <annotations-include-dir>" >&2
+if [[ $# -ne 2 && $# -ne 3 ]]; then
+    echo "usage: $0 <apiary-binary> <annotations-include-dir> [pybind11|nanobind]" >&2
     exit 64
 fi
 
 readonly TOOL="$1"
 readonly INCLUDE_DIR="$2"
+readonly TARGET="${3:-pybind11}"
+case "${TARGET}" in
+    pybind11) readonly GOLDEN_SUFFIX=".cpp.golden" ;;
+    nanobind) readonly GOLDEN_SUFFIX=".nanobind.cpp.golden" ;;
+    *)
+        echo "unknown target '${TARGET}' (expected pybind11 or nanobind)" >&2
+        exit 64
+        ;;
+esac
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly FIXTURE_DIR="${SCRIPT_DIR}/fixtures"
 readonly GOLDEN_DIR="${SCRIPT_DIR}/golden"
@@ -51,6 +65,7 @@ readonly CASES=(
     "fixture_docstrings|docstrings.hpp|docstrings.cpp.golden"
     "fixture_exceptions|exceptions.hpp|exceptions.cpp.golden"
     "fixture_variadic_pack|variadic_pack.hpp|variadic_pack.cpp.golden"
+    "fixture_protocols|protocols.hpp|protocols.cpp.golden"
 )
 
 # Run apiary over one fixture, writing the generated TU to $1.
@@ -68,7 +83,7 @@ run_tool() {
     err="$(mktemp)"
 
     set +e
-    "${TOOL}" --module "${module}" "${FIXTURE_DIR}/${fixture}" \
+    "${TOOL}" --target "${TARGET}" --module "${module}" "${FIXTURE_DIR}/${fixture}" \
         -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" > "${out}" 2> "${err}"
     status=$?
     set -e
@@ -120,6 +135,7 @@ for case in "${CASES[@]}"; do
         failures=$((failures + 1))
         continue
     fi
+    golden="${golden%.cpp.golden}${GOLDEN_SUFFIX}"
     golden_path="${GOLDEN_DIR}/${golden}"
 
     if [[ "${REGEN}" == "1" ]]; then
@@ -145,5 +161,5 @@ if [[ "${REGEN}" == "1" ]]; then
     # for a green run.
     echo "REGEN complete: ${#CASES[@]} golden(s) rewritten. Review 'git diff' before committing."
 else
-    echo "OK: all Phase-3 golden tests pass"
+    echo "OK: all Phase-3 golden tests pass (${TARGET})"
 fi

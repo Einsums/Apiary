@@ -141,6 +141,33 @@ HPP
 # (a silenced check, a clean header). Under `set -e -o pipefail` either would
 # abort the run and read as a harness failure, so capture first and filter
 # after.
+# What pybind11 can bind and nanobind cannot: a second bound base, a custom
+# holder, and a buffer helper written against pybind11::buffer_info. Each is
+# refused under --target nanobind and silent under pybind11.
+cat > "${WORK}/nanobind_limits.hpp" <<'HPP'
+#include <apiary/Annotations.hpp>
+namespace einsums::fixture {
+template <typename T>
+struct Counted {};
+struct Info {};
+struct APIARY_EXPOSE Left {
+    APIARY_EXPOSE Left();
+};
+struct APIARY_EXPOSE Right {
+    APIARY_EXPOSE Right();
+};
+struct APIARY_EXPOSE Both : Left, Right {
+    APIARY_EXPOSE Both();
+};
+struct APIARY_EXPOSE APIARY_HOLDER(einsums::fixture::Counted) Shared {
+    APIARY_EXPOSE Shared();
+};
+struct APIARY_EXPOSE APIARY_BUFFER_PROTOCOL APIARY_BUFFER_FROM(einsums::fixture::make_info) Legacy {
+    APIARY_EXPOSE Legacy();
+};
+} // namespace einsums::fixture
+HPP
+
 collect_path() {
     local header="$1"
     shift
@@ -179,6 +206,15 @@ collect() {
     echo
     echo "### a check silenced"
     collect qualifiers.hpp --diagnostic=moved-from-self=ignored
+    echo
+    echo "### what nanobind cannot express (refused under --target nanobind)"
+    collect_path "${WORK}/nanobind_limits.hpp" --target nanobind
+    echo
+    echo "### the same header under pybind11 (silent)"
+    collect_path "${WORK}/nanobind_limits.hpp" --target pybind11
+    echo
+    echo "### ref-qualified methods under nanobind (lambdas, so only && warns)"
+    collect qualifiers.hpp --target nanobind
     echo
     echo "### undocumented public entities (docs mode)"
     collect_path "${WORK}/undocumented_refs.hpp" --emit-cpp-docs-json --report-undocumented

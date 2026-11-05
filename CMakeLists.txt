@@ -331,6 +331,15 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
             COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_golden.sh"
                     "$<TARGET_FILE:apiary>"
                     "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                    pybind11
+        )
+        # The same fixtures under --target nanobind, against their own goldens.
+        # Text only, so it needs no nanobind install and always registers.
+        add_test(NAME apiary_nanobind_golden
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_golden.sh"
+                    "$<TARGET_FILE:apiary>"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                    nanobind
         )
         # .pyi golden suite — diffs the generated stub for each fixture
         # against a committed golden. Catches drift in per-instantiation
@@ -398,14 +407,41 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                             "$<TARGET_FILE:apiary>"
                             "${CMAKE_CURRENT_SOURCE_DIR}/include"
                             "${CMAKE_CXX_COMPILER}"
-                            "${_apiary_pybind_include}"
                             "${_apiary_python_include}"
+                            pybind11
+                            "${_apiary_pybind_include}"
                 )
                 # One clang invocation per fixture, each pulling in the whole of
                 # pybind11 - slower than the text-diffing suites by a lot.
                 set_tests_properties(apiary_compile_check PROPERTIES TIMEOUT 600)
             else()
                 message(STATUS "apiary: pybind11 not importable - skipping apiary_compile_check test")
+            endif()
+
+            # The same check under --target nanobind, against nanobind's headers.
+            execute_process(
+                COMMAND "${Python_EXECUTABLE}" -c
+                        "import nanobind, sysconfig; print(nanobind.include_dir()); print(sysconfig.get_paths()['include'])"
+                OUTPUT_VARIABLE _apiary_nb_includes
+                RESULT_VARIABLE _apiary_nb_rc
+                OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+            )
+            if(_apiary_nb_rc EQUAL 0)
+                string(REPLACE "\n" ";" _apiary_nb_list "${_apiary_nb_includes}")
+                list(GET _apiary_nb_list 0 _apiary_nanobind_include)
+                list(GET _apiary_nb_list 1 _apiary_nb_python_include)
+                add_test(NAME apiary_nanobind_compile_check
+                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_compile_check.sh"
+                            "$<TARGET_FILE:apiary>"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                            "${CMAKE_CXX_COMPILER}"
+                            "${_apiary_nb_python_include}"
+                            nanobind
+                            "${_apiary_nanobind_include}"
+                )
+                set_tests_properties(apiary_nanobind_compile_check PROPERTIES TIMEOUT 600)
+            else()
+                message(STATUS "apiary: nanobind not importable - skipping apiary_nanobind_compile_check test")
             endif()
         endif()
         # Property suite: invariants across the WHOLE fixture corpus rather

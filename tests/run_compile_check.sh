@@ -22,21 +22,33 @@
 # defining them, so linking is not possible and not the point. Compiling is
 # what proves the emitted casts, lambdas and type names are well-formed.
 #
+# Each target is its own run: the TU is emitted with --target and compiled
+# against that library's headers, so a construct one library accepts and the
+# other rejects (nanobind takes no ref-qualified member pointer, for one) fails
+# here rather than in a consumer's build.
+#
 # Invocation:
-#     run_compile_check.sh <apiary-binary> <annotations-include-dir> <c++-compiler> <pybind11-include> <python-include>
+#     run_compile_check.sh <apiary-binary> <annotations-include-dir> <c++-compiler> <python-include> \
+#                          <pybind11|nanobind> <binding-library-include-dir>...
 
 set -euo pipefail
 
-if [[ $# -ne 5 ]]; then
-    echo "usage: $0 <apiary-binary> <include-dir> <cxx> <pybind11-include> <python-include>" >&2
+if [[ $# -lt 6 ]]; then
+    echo "usage: $0 <apiary-binary> <include-dir> <cxx> <python-include> <pybind11|nanobind> <library-include>..." >&2
     exit 64
 fi
 
 readonly TOOL="$1"
 readonly INCLUDE_DIR="$2"
 readonly CXX="$3"
-readonly PYBIND_INCLUDE="$4"
-readonly PYTHON_INCLUDE="$5"
+readonly PYTHON_INCLUDE="$4"
+readonly TARGET="$5"
+shift 5
+LIBRARY_INCLUDES=()
+for dir in "$@"; do
+    LIBRARY_INCLUDES+=("-I${dir}")
+done
+readonly LIBRARY_INCLUDES
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly FIXTURE_DIR="${SCRIPT_DIR}/fixtures"
 
@@ -60,7 +72,7 @@ readonly KNOWN_BAD=()
 # Fixtures that CANNOT be compile-checked by construction - a different thing
 # from a defect, and kept in a separate list so the two are never confused.
 readonly NOT_COMPILABLE=(
-    "std_types.hpp|declares its own std:: stand-ins for hermetic goldens; they collide with the real libc++ that pybind11 pulls in"
+    "std_types.hpp|declares its own std:: stand-ins for hermetic goldens; they collide with the real libc++ that the binding library pulls in"
 )
 
 # Echo the reason this fixture is in the given list, or nothing.
@@ -93,7 +105,7 @@ for fixture in "${FIXTURE_DIR}"/*.hpp; do
 
     # --source-include makes the generated TU include the header that declares
     # what it binds, which is what a real consumer's build does.
-    if ! "${TOOL}" --module compile_check --source-include "${name}" "${fixture}" \
+    if ! "${TOOL}" --target "${TARGET}" --module compile_check --source-include "${name}" "${fixture}" \
             -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}" > "${gen}" 2>/dev/null; then
         echo "FAIL ${name}: apiary could not emit a TU" >&2
         fail=1
@@ -102,7 +114,7 @@ for fixture in "${FIXTURE_DIR}"/*.hpp; do
 
     err="${WORK}/${name}.err"
     if "${CXX}" "${APIARY_CXX_SYNTAX_FLAGS[@]}" \
-            -I"${PYBIND_INCLUDE}" -I"${PYTHON_INCLUDE}" -I"${FIXTURE_DIR}" -I"${INCLUDE_DIR}" \
+            "${LIBRARY_INCLUDES[@]}" -I"${PYTHON_INCLUDE}" -I"${FIXTURE_DIR}" -I"${INCLUDE_DIR}" \
             "${gen}" 2> "${err}"; then
         compiled=1
     else
@@ -134,6 +146,6 @@ if (( checked == 0 )); then
 fi
 
 if [[ "${fail}" -eq 0 ]]; then
-    echo "compile_check: OK (${checked} compiled, ${#KNOWN_BAD[@]} known-bad, ${skipped} not compilable)"
+    echo "compile_check (${TARGET}): OK (${checked} compiled, ${#KNOWN_BAD[@]} known-bad, ${skipped} not compilable)"
 fi
 exit "${fail}"

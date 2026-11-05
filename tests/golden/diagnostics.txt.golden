@@ -20,6 +20,20 @@ apiary: 1 error(s); refusing to write the generated file.
 
 ### a check silenced
 
+### what nanobind cannot express (refused under --target nanobind)
+nanobind_limits.hpp:12:22: error: apiary: class 'einsums::fixture::Both' has 2 bound base classes, but nanobind supports single inheritance only, so only 'einsums::fixture::Left' can be its Python base and 'einsums::fixture::Right' is left out of the class hierarchy. Mark the class APIARY_NO_BASES to bind it with none. [unsupported-on-target]
+nanobind_limits.hpp:15:63: error: apiary: class 'einsums::fixture::Shared' asks for holder 'einsums::fixture::Counted', but nanobind has no custom holders: it supports std::shared_ptr and std::unique_ptr only, so the class can only be bound without it. [unsupported-on-target]
+nanobind_limits.hpp:18:93: error: apiary: class 'einsums::fixture::Legacy' exports its buffer through APIARY_BUFFER_FROM(einsums::fixture::make_info), whose helper returns pybind11::buffer_info, so it cannot be used under nanobind. Describe the buffer with APIARY_BUFFER_PROTOCOL_STD instead, which works under both targets. [unsupported-on-target]
+apiary: 3 diagnostic error(s), 0 warning(s)
+apiary: 3 error(s); refusing to write the generated file.
+
+### the same header under pybind11 (silent)
+
+### ref-qualified methods under nanobind (lambdas, so only && warns)
+qualifiers.hpp:54:48: warning: apiary: method 'value' is && qualified, so it is bound through a lambda that moves from the object. After calling it the Python object is in a moved-from state, which nothing in Python will indicate. [moved-from-self]
+qualifiers.hpp:58:54: warning: apiary: method 'value' is const && qualified, so it is bound through a lambda that moves from the object. After calling it the Python object is in a moved-from state, which nothing in Python will indicate. [moved-from-self]
+apiary: 0 diagnostic error(s), 2 warning(s)
+
 ### undocumented public entities (docs mode)
 undocumented_refs.hpp:3:7: undocumented CXXRecord 'vendor::Sink'
 undocumented_refs.hpp:7:12: undocumented Enum 'refs::Hint'

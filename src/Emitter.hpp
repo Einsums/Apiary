@@ -17,11 +17,13 @@ namespace apiary {
 ///
 /// @note Pybind11 is the default, battle-tested target.
 /// @note Nanobind is newer, ~3-5× faster compile/binary/runtime. Mostly
-///   API-compatible with pybind11 but with renamed enums
-///   (``nb::rv_policy`` vs ``py::return_value_policy``), a different
-///   module macro (``NB_MODULE``), and a split STL header layout.
-/// @warning Nanobind has no direct ``def_buffer`` analog — buffer protocol
-///   directives are dropped under the nanobind target.
+///   API-compatible with pybind11 but with renamed members (``def_rw``,
+///   ``def_prop_rw``, ``nb::rv_policy``), a different module macro
+///   (``NB_MODULE``), and a split STL header layout. Where it differs in shape
+///   (buffer, index and iterator protocols, exceptions, ref-qualified methods)
+///   the emitter writes the nanobind form; what it cannot express (multiple
+///   bases, custom holders, APIARY_BUFFER_FROM) is reported as
+///   ``unsupported-on-target``.
 enum class Target : std::uint8_t { Pybind11, Nanobind };
 
 /// @brief Configuration for a single emit pass.

@@ -47,6 +47,11 @@ std::vector<Check> &registry() {
         // lacks a function the source asked for is worse than one that stops.
         {"invalid-python-name", Severity::Error, "a binding name that is not a Python identifier; nothing is bound"},
         {"skipped-entity", Severity::Ignored, "an annotated entity the emitter chose not to bind"},
+        // An error for the same reason: what the directive asked for is not in
+        // the binding, and the alternative is an extension that imports fine and
+        // then lacks a protocol or a base class the source declared.
+        {"unsupported-on-target", Severity::Error,
+         "a directive the selected binding library (--target) cannot express; it is left out of the binding"},
     };
     return checks;
 }

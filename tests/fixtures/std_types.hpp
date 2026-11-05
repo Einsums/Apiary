@@ -29,6 +29,8 @@ template <typename T>
 class vector;
 template <typename T, typename U>
 struct pair;
+template <typename... Ts>
+class tuple;
 template <typename T>
 class shared_ptr;
 } // namespace std
@@ -53,5 +55,22 @@ APIARY_EXPOSE std::pair<double, int> split(double value);
 
 /// A smart pointer, which Python spells as the pointee.
 APIARY_EXPOSE std::shared_ptr<std::vector<double>> share(std::vector<double> values);
+
+/// An object that hands out its own parts, several at a time.
+///
+/// A tuple of references takes the return value policy per element. pybind11
+/// does that by itself; nanobind turns a reference policy on a value return
+/// into `move`, so it is bound through a lambda that casts each element.
+class APIARY_EXPOSE Assembly {
+  public:
+    /// Both halves, as references into this object.
+    APIARY_EXPOSE APIARY_RVP(reference_internal) std::tuple<Assembly &, Assembly &> halves();
+
+    /// Both halves through const pointers, as a pair.
+    APIARY_EXPOSE APIARY_RVP(reference_internal) std::pair<Assembly const *, Assembly const *> halves_view() const;
+};
+
+/// Two process-wide assemblies, by reference; nothing owns them on the Python side.
+APIARY_EXPOSE APIARY_RVP(reference) std::tuple<Assembly &, Assembly &> shared_pair();
 
 } // namespace einsums::fixture

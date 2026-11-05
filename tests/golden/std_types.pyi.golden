@@ -10,6 +10,20 @@ import numpy
 import numpy.typing
 
 # %%submodule: 
+class Assembly:
+    """An object that hands out its own parts, several at a time.
+
+    A tuple of references takes the return value policy per element. pybind11
+    does that by itself; nanobind turns a reference policy on a value return
+    into `move`, so it is bound through a lambda that casts each element.
+    """
+    def halves(self) -> tuple[Assembly, Assembly]:
+        """Both halves, as references into this object."""
+        ...
+    def halves_view(self) -> tuple[Assembly, Assembly]:
+        """Both halves through const pointers, as a pair."""
+        ...
+
 def maybe_scale(value: float | None) -> float | None:
     """`std::optional<T>` parameter and return, which Python spells `T | None`."""
     ...
@@ -29,4 +43,7 @@ def split(value: float) -> tuple[float, int]:
     ...
 def share(values: list[float]) -> list[float]:
     """A smart pointer, which Python spells as the pointee."""
+    ...
+def shared_pair() -> tuple[Assembly, Assembly]:
+    """Two process-wide assemblies, by reference; nothing owns them on the Python side."""
     ...

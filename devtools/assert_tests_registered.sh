@@ -34,11 +34,13 @@ readonly BUILD="$1"
 readonly EXPECTED=(
     apiary_phase2_smoke
     apiary_phase3_golden
+    apiary_nanobind_golden
     apiary_pyi_golden
     apiary_shard
     apiary_example_mathx
     apiary_properties
     apiary_compile_check
+    apiary_nanobind_compile_check
     apiary_fuzz
     apiary_diagnostics
     apiary_doc_markup

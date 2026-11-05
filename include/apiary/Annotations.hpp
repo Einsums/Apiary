@@ -75,13 +75,17 @@
 // ---------------------------------------------------------------------------
 
 /// @brief Override the pybind11 holder type. Default is std::unique_ptr.
+/// @note Under nanobind, ``std::shared_ptr`` and ``std::unique_ptr`` need no holder
+/// (its smart-pointer casters work for any bound class), and any other holder is
+/// refused with the ``unsupported-on-target`` diagnostic.
 /// @param ... the holder type, e.g. ``APIARY_HOLDER(std::shared_ptr)``
 #define APIARY_HOLDER(...) APIARY_DETAIL_ANNOTATE("holder:" #__VA_ARGS__)
 
 /// @brief Enable the pybind11 buffer protocol for this class (required for NumPy
 /// zero-copy interop on tensor types).
-/// @note Pair with APIARY_BUFFER_FROM to actually emit the ``.def_buffer()`` call —
-/// buffer_protocol alone only flips the class option.
+/// @note Implied by APIARY_BUFFER_FROM and APIARY_BUFFER_PROTOCOL_STD, which are what
+/// actually export a buffer; on its own it only flips the pybind11 class option, and
+/// under nanobind it does nothing.
 #define APIARY_BUFFER_PROTOCOL APIARY_DETAIL_ANNOTATE("buffer_protocol")
 
 /// @brief Designate a free function (or static member) that takes the bound type
@@ -103,6 +107,9 @@
 ///     struct GeneralTensor { ... };
 /// @endcode
 ///
+/// @note pybind11 only, since the helper is written against pybind11's API; under
+/// nanobind it is refused with the ``unsupported-on-target`` diagnostic. Prefer
+/// APIARY_BUFFER_PROTOCOL_STD, which works under both.
 /// @param ... the helper function name
 #define APIARY_BUFFER_FROM(...) APIARY_DETAIL_ANNOTATE("buffer_from:" #__VA_ARGS__)
 
@@ -115,9 +122,11 @@
 // ---------------------------------------------------------------------------
 
 /// @brief Standard-layout buffer protocol. The codegen emits a per-backend
-/// .def_buffer (pybind11) / __dlpack__ (nanobind) lambda that builds the
-/// backend-native buffer description from the named member functions on
-/// the bound class.
+/// buffer exporter (a .def_buffer lambda under pybind11, a bf_getbuffer type
+/// slot under nanobind) that describes the object's memory from the named
+/// member functions on the bound class. Either way memoryview(), numpy.asarray()
+/// and numpy.array() see the memory zero copy, and it implies
+/// APIARY_BUFFER_PROTOCOL.
 ///
 /// All four method names are required. ``element_type`` names the class
 /// template parameter that gives the element type; the codegen substitutes
@@ -163,14 +172,14 @@
 /// @endcode
 ///
 /// @note The Python iterator borrows a reference to the underlying object
-/// (py::keep_alive<0, 1>) so iteration is safe across the parent's lifetime.
+/// (keep_alive<0, 1>) so iteration is safe across the parent's lifetime.
 /// @param ... ``key = value`` assignments naming the begin and end member functions
 #define APIARY_ITERATOR_STD(...) APIARY_DETAIL_ANNOTATE("iterator_std:" #__VA_ARGS__)
 
 /// @brief Standard index protocol — scalar reads/writes via __getitem__/__setitem__.
 ///
 /// The codegen emits per-backend lambdas dispatching on Python type
-/// (``py::int_``, ``py::tuple``), normalizing negative indices, bounds-checking,
+/// (int, tuple, slice, Ellipsis), normalizing negative indices, bounds-checking,
 /// and calling the user's pure-C++ helpers.
 ///
 ///   element_type — the class template parameter naming the scalar type
@@ -178,6 +187,15 @@
 ///   dim          — member function (size_t i) → size_t (axis size)
 ///   at_element   — T   (std::vector<int64_t> const &idx) const
 ///   set_element  — void(std::vector<int64_t> const &idx, T value)
+///
+/// Optional, for slicing to views:
+///
+///   at_view      — ViewType(std::vector<SliceSpec> const &specs) const
+///   view_type    — the bound type at_view returns
+///   slice_spec   — the SliceSpec type at_view takes; default einsums::SliceSpec.
+///                  Any struct with its members works: an enum ``Kind`` of
+///                  ``Index``, ``Range`` and ``Full``, ``kind``, and int64
+///                  ``index``, ``start``, ``stop`` and ``step``.
 ///
 /// @code
 ///   template <typename T, typename Alloc>
@@ -197,14 +215,18 @@
 ///   t[5] = 1.0      → write scalar
 ///   t[0, 1] = 2.0   → write scalar
 ///
+/// With at_view and view_type, also:
+///   t[1]            → view collapsing axis 0 (rank > 1)
+///   t[1:3], t[::-1] → view sliced along axis 0
+///   t[:, 0], t[...] → view from a mixed tuple / the whole tensor
+///
 /// @note Negative indices ("t[-1]") are normalized to positive against the dim
-/// before being passed to user helpers. Out-of-range raises py::index_error.
-/// @warning Slice/partial-index reads (returning a view) and buffer bulk-assign are
-/// not yet emitted — they need APIARY_INDEX_PROTOCOL_STD's
-/// extended form (with view_type and at_view) to land alongside the
-/// RuntimeTensorView binding. Until then, slice access throws a clear
-/// "view return not yet bound" error.
-/// @param ... ``key = value`` assignments naming element_type, rank, dim, at_element, set_element
+/// before being passed to user helpers. Out-of-range raises IndexError.
+/// @warning Assignment through a slice (``t[1:3] = ...``) is not emitted; only
+/// full integer indices can be written. Without at_view, a slice or partial index
+/// raises TypeError.
+/// @param ... ``key = value`` assignments naming element_type, rank, dim, at_element, set_element,
+///            and optionally at_view, view_type and slice_spec
 #define APIARY_INDEX_PROTOCOL_STD(...) APIARY_DETAIL_ANNOTATE("index_protocol_std:" #__VA_ARGS__)
 
 /// @brief Register a one-way implicit conversion from ``Source`` to the annotated class.
@@ -236,10 +258,9 @@
 
 /// @brief Mark a class as a Python exception type rather than a regular bound class.
 ///
-/// The codegen emits ``py::register_exception<T>(m, "name")``
-/// instead of ``py::class_<T>(...)``. The C++ class must derive from
-/// ``std::exception`` (or whatever pybind11's register_exception template
-/// requires) for the registration to compile.
+/// The codegen emits ``py::register_exception<T>(m, "name")`` (pybind11) or
+/// ``nb::exception<T>(m, "name")`` (nanobind) instead of a class_<T>. Both
+/// need only a ``what()`` returning the message.
 ///
 /// @code
 ///     class APIARY_EXPOSE
@@ -249,8 +270,6 @@
 ///
 /// Subsequent ``raise einsums.TensorError(...)`` from Python (or
 /// ``throw einsums::TensorError("...")`` from C++) crosses the boundary cleanly.
-/// @note Nanobind has a different exception API; this directive is
-/// pybind11-specific and is silently dropped under the nanobind target.
 #define APIARY_EXCEPTION APIARY_DETAIL_ANNOTATE("exception")
 
 /// @brief Force-skip emission of base-class arguments to ``py::class_<>``.

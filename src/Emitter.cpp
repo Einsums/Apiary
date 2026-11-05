@@ -26,37 +26,77 @@ namespace {
 
 // API strings for the active target binding library. Built once per
 // emit() call; threaded through helpers that touch the API surface.
+//
+// Where the two libraries differ only in a NAME, the name lives here. Where
+// they differ in SHAPE (the buffer, index and iterator protocols, exception
+// registration, ref-qualified methods) the emitter branches on ``target``.
 struct Backend {
-    std::string              name;            // "pybind11" / "nanobind" — for diagnostics
-    std::string              ns;              // "py" / "nb"
-    std::string              ns_full;         // "pybind11" / "nanobind"
-    std::string              module_macro;    // "PYBIND11_MODULE" / "NB_MODULE"
-    std::vector<std::string> headers;         // includes for the binding TU
-    std::string              rvp_prefix;      // "py::return_value_policy::" / "nb::rv_policy::"
-    bool                     supports_buffer; // pybind11: true, nanobind: false (uses ndarray)
+    Target                   target;
+    std::string              name;                  // "pybind11" / "nanobind" - for diagnostics
+    std::string              ns;                    // "py" / "nb"
+    std::string              ns_full;               // "pybind11" / "nanobind"
+    std::string              module_macro;          // "PYBIND11_MODULE" / "NB_MODULE"
+    std::vector<std::string> headers;               // includes for the binding TU
+    std::string              rvp_prefix;            // "py::return_value_policy::" / "nb::rv_policy::"
+    std::string              def_field_rw;          // "def_readwrite" / "def_rw"
+    std::string              def_field_ro;          // "def_readonly" / "def_ro"
+    std::string              def_property_rw;       // "def_property" / "def_prop_rw"
+    std::string              def_property_ro;       // "def_property_readonly" / "def_prop_ro"
+
+    [[nodiscard]] bool is_nanobind() const { return target == Target::Nanobind; }
 };
 
 Backend make_backend(Target t) {
     Backend b;
+    b.target = t;
     if (t == Target::Nanobind) {
         b.name         = "nanobind";
         b.ns           = "nb";
         b.ns_full      = "nanobind";
         b.module_macro = "NB_MODULE";
-        // Nanobind splits STL bindings across per-type headers; pull in
-        // the ones most modules need. Adding more is cheap; missing
-        // ones produce clear errors at compile time.
+        // nanobind ships one type-caster header per standard type, where
+        // pybind11 has a single stl.h. Include the same set pybind11's headers
+        // cover (plus the smart pointers, which pybind11 handles through the
+        // holder instead), so a signature that binds under one target binds
+        // under the other. A missing caster is not a compile error: it is a
+        // TypeError at call time, which is why this list errs on the side of
+        // completeness.
+        //
+        // No <nanobind/operators.h>: operators bind by dunder name, never through
+        // nb::self expressions.
         b.headers = {
-            "<nanobind/nanobind.h>",   "<nanobind/operators.h>",   "<nanobind/stl/string.h>",
-            "<nanobind/stl/vector.h>", "<nanobind/stl/complex.h>", "<nanobind/ndarray.h>",
+            "<nanobind/nanobind.h>",
+            "<nanobind/make_iterator.h>",
+            "<nanobind/ndarray.h>",
+            "<nanobind/stl/array.h>",
+            "<nanobind/stl/complex.h>",
+            "<nanobind/stl/filesystem.h>",
+            "<nanobind/stl/function.h>",
+            "<nanobind/stl/list.h>",
+            "<nanobind/stl/map.h>",
+            "<nanobind/stl/optional.h>",
+            "<nanobind/stl/pair.h>",
+            "<nanobind/stl/set.h>",
+            "<nanobind/stl/shared_ptr.h>",
+            "<nanobind/stl/string.h>",
+            "<nanobind/stl/string_view.h>",
+            "<nanobind/stl/tuple.h>",
+            "<nanobind/stl/unique_ptr.h>",
+            "<nanobind/stl/unordered_map.h>",
+            "<nanobind/stl/unordered_set.h>",
+            "<nanobind/stl/variant.h>",
+            "<nanobind/stl/vector.h>",
         };
         b.rvp_prefix      = "nb::rv_policy::";
-        b.supports_buffer = false;
+        b.def_field_rw    = "def_rw";
+        b.def_field_ro    = "def_ro";
+        b.def_property_rw = "def_prop_rw";
+        b.def_property_ro = "def_prop_ro";
     } else {
-        b.name            = "pybind11";
-        b.ns              = "py";
-        b.ns_full         = "pybind11";
-        b.module_macro    = "PYBIND11_MODULE";
+        b.name         = "pybind11";
+        b.ns           = "py";
+        b.ns_full      = "pybind11";
+        b.module_macro = "PYBIND11_MODULE";
         // pybind11/stl.h does NOT pull in the std::filesystem::path caster: it
         // lives in the separate stl/filesystem.h header. Without it a bound
         // function returning a path compiles fine and then fails at call time
@@ -65,9 +105,222 @@ Backend make_backend(Target t) {
                              "<pybind11/numpy.h>",    "<pybind11/operators.h>", "<pybind11/stl.h>",
                              "<pybind11/stl/filesystem.h>"};
         b.rvp_prefix      = "py::return_value_policy::";
-        b.supports_buffer = true;
+        b.def_field_rw    = "def_readwrite";
+        b.def_field_ro    = "def_readonly";
+        b.def_property_rw = "def_property";
+        b.def_property_ro = "def_property_readonly";
     }
     return b;
+}
+
+// Written into every nanobind TU, after the includes: the bool pybind11
+// accepts, and the adapters that bind through it.
+//
+// nanobind's bool caster takes True and False and nothing else. pybind11's
+// also takes a numpy.bool_ in either overload pass and, in the converting
+// pass, None and anything whose type implements __bool__. That is not a corner
+// case: `np.linalg.norm(r) > tol` is a numpy.bool_, so a Python predicate
+// handed to a `std::function<bool(...)>` parameter works under pybind11 and
+// fails under nanobind with a bare std::bad_cast when the callback returns.
+//
+// `Bool` carries a caster that is pybind11's, rule for rule, including which
+// pass accepts what, so overload resolution is unchanged too. `adapt()` turns
+// any callable into one whose `bool` and `std::function<bool(...)>` parameters
+// are `Bool` and `std::function<Bool(...)>`, converting on the way in;
+// `init<T, Args...>()` is the same for a constructor. The emitter wraps only
+// bindings that have such a parameter (see needs_truthiness).
+//
+// Everything sits in an anonymous namespace, so each TU has its own `Bool` and
+// its own caster specialization: there is nothing to collide across the TUs
+// of one extension, or across extensions built by different apiary versions.
+constexpr char const *kNanobindTruthiness = R"apiary(#include <cstring>
+#include <new>
+#include <type_traits>
+
+namespace {
+namespace apiary_nb {
+
+// A bool argument, accepted as pybind11 accepts one.
+struct Bool {
+    bool value = false;
+};
+
+} // namespace apiary_nb
+} // namespace
+
+namespace nanobind::detail {
+
+template <> struct type_caster<apiary_nb::Bool> {
+    NB_TYPE_CASTER(apiary_nb::Bool, const_name("bool"))
+
+    bool from_python(handle src, uint32_t flags, cleanup_list *) noexcept {
+        if (src.ptr() == Py_True || src.ptr() == Py_False) {
+            value.value = src.ptr() == Py_True;
+            return true;
+        }
+        if ((flags & static_cast<uint32_t>(cast_flags::convert)) == 0 && !is_numpy_bool(src)) {
+            return false;
+        }
+        int truth = -1;
+        if (src.is_none()) {
+            truth = 0;
+        } else {
+#if defined(Py_LIMITED_API)
+            auto const nb_bool = reinterpret_cast<inquiry>(PyType_GetSlot(Py_TYPE(src.ptr()), Py_nb_bool));
+#else
+            PyNumberMethods const *number = Py_TYPE(src.ptr())->tp_as_number;
+            inquiry const nb_bool = number != nullptr ? number->nb_bool : nullptr;
+#endif
+            if (nb_bool != nullptr) {
+                truth = nb_bool(src.ptr());
+            }
+        }
+        if (truth == 0 || truth == 1) {
+            value.value = truth == 1;
+            return true;
+        }
+        PyErr_Clear();
+        return false;
+    }
+
+    static handle from_cpp(apiary_nb::Bool src, rv_policy, cleanup_list *) noexcept {
+        return handle(src.value ? Py_True : Py_False).inc_ref();
+    }
+
+    // numpy.bool (NumPy 2) or numpy.bool_ (NumPy 1), told by its type's name so
+    // numpy is never imported.
+    static bool is_numpy_bool(handle src) noexcept {
+#if defined(Py_LIMITED_API)
+        // PyTypeObject is opaque under the limited API, so the name has to be
+        // asked for. Both calls are in the stable ABI since 3.11, and nanobind's
+        // STABLE_ABI builds need 3.12.
+        PyObject *const module = PyObject_GetAttrString(reinterpret_cast<PyObject *>(Py_TYPE(src.ptr())), "__module__");
+        PyObject *const name   = PyType_GetName(Py_TYPE(src.ptr()));
+        bool            result = false;
+        if (module != nullptr && name != nullptr && PyUnicode_Check(module) && PyUnicode_Check(name)) {
+            result = PyUnicode_CompareWithASCIIString(module, "numpy") == 0 &&
+                     (PyUnicode_CompareWithASCIIString(name, "bool") == 0 || PyUnicode_CompareWithASCIIString(name, "bool_") == 0);
+        }
+        Py_XDECREF(module);
+        Py_XDECREF(name);
+        if (PyErr_Occurred() != nullptr) {
+            PyErr_Clear();
+        }
+        return result;
+#else
+        char const *const type_name = Py_TYPE(src.ptr())->tp_name;
+        return std::strcmp(type_name, "numpy.bool") == 0 || std::strcmp(type_name, "numpy.bool_") == 0;
+#endif
+    }
+};
+
+} // namespace nanobind::detail
+
+namespace {
+namespace apiary_nb {
+
+// How a parameter of type T crosses: unchanged, or through Bool.
+template <typename T, typename U = std::remove_cv_t<std::remove_reference_t<T>>,
+          bool Out = std::is_lvalue_reference_v<T> && !std::is_const_v<std::remove_reference_t<T>>>
+struct param {
+    using type = T;
+    static T &&unwrap(std::remove_reference_t<T> &v) { return static_cast<T &&>(v); }
+};
+
+template <typename T> struct param<T, bool, false> {
+    using type = Bool;
+    static bool unwrap(Bool &v) { return v.value; }
+};
+
+template <typename T, typename R, typename... A> struct param<T, std::function<R(A...)>, false> {
+    using type = std::conditional_t<std::is_same_v<R, bool>, std::function<Bool(A...)>, T>;
+    static decltype(auto) unwrap(std::remove_reference_t<type> &f) {
+        if constexpr (std::is_same_v<R, bool>) {
+            if (!f) {
+                return std::function<bool(A...)>{};
+            }
+            return std::function<bool(A...)>([g = std::move(f)](A... a) -> bool { return g(static_cast<A &&>(a)...).value; });
+        } else {
+            return static_cast<T &&>(f);
+        }
+    }
+};
+
+template <typename R, typename... A, bool NE> auto adapt(R (*f)(A...) noexcept(NE)) {
+    return [f](typename param<A>::type... a) -> R { return f(param<A>::unwrap(a)...); };
+}
+
+template <typename R, typename C, typename... A, bool NE> auto adapt(R (C::*f)(A...) noexcept(NE)) {
+    return [f](C &self, typename param<A>::type... a) -> R { return (self.*f)(param<A>::unwrap(a)...); };
+}
+
+template <typename R, typename C, typename... A, bool NE> auto adapt(R (C::*f)(A...) const noexcept(NE)) {
+    return [f](C const &self, typename param<A>::type... a) -> R { return (self.*f)(param<A>::unwrap(a)...); };
+}
+
+template <typename F, typename R, typename... A> auto adapt_closure(F f, R (F::*)(A...) const) {
+    return [f](typename param<A>::type... a) -> R { return f(param<A>::unwrap(a)...); };
+}
+
+// A lambda the emitter already wrote (a dispatcher, a ref-qualified method).
+template <typename F> auto adapt(F f) -> decltype(adapt_closure(f, &F::operator())) {
+    return adapt_closure(f, &F::operator());
+}
+
+template <typename T, typename... A> auto init() {
+    return [](T *self, typename param<A>::type... a) { new (self) T(param<A>::unwrap(a)...); };
+}
+
+} // namespace apiary_nb
+} // namespace
+
+)apiary";
+
+// Whether a parameter of this type is bound through apiary_nb::Bool under
+// nanobind: a `bool` taken by value, const reference or rvalue reference, or a
+// `std::function` returning bool. A non-const `bool &` is an out-parameter and
+// crosses unchanged, as it does under pybind11.
+bool needs_truthiness(llvm::StringRef type) {
+    type = type.trim();
+    if (type.consume_back("&&")) {
+        type = type.rtrim();
+    } else if (type.consume_back("&")) {
+        type = type.rtrim();
+        llvm::StringRef base = type;
+        if (!base.consume_back("const") && !base.consume_front("const ")) {
+            return false;
+        }
+    }
+    if (type.consume_back("const")) {
+        type = type.rtrim();
+    }
+    type.consume_front("const ");
+    type = type.trim();
+    return type == "bool" || type.starts_with("std::function<bool(") || type.starts_with("std::function<bool (");
+}
+
+bool any_needs_truthiness(std::vector<BoundParam> const &params) {
+    return std::any_of(params.begin(), params.end(),
+                       [](BoundParam const &p) { return needs_truthiness(p.type) || needs_truthiness(p.type_canonical); });
+}
+
+bool any_needs_truthiness(std::vector<std::string> const &types) {
+    return std::any_of(types.begin(), types.end(), [](std::string const &t) { return needs_truthiness(t); });
+}
+
+// `expr`, wrapped in apiary_nb::adapt when `needed` under nanobind.
+std::string adapted(std::string const &expr, bool needed, Backend const &b) {
+    return b.is_nanobind() && needed ? "apiary_nb::adapt(" + expr + ")" : expr;
+}
+
+// ``throw <ns>::value_error(<prefix> + <std::string expr>);`` as generated
+// source. pybind11's value_error takes a std::string; nanobind's takes a
+// ``const char *`` (and copies it), so the concatenation needs a c_str() there.
+std::string throw_value_error_concat(Backend const &b, std::string const &prefix_literal, std::string const &string_expr) {
+    if (b.is_nanobind()) {
+        return "throw " + b.ns + "::value_error((std::string(\"" + prefix_literal + "\") + " + string_expr + ").c_str());";
+    }
+    return "throw " + b.ns + "::value_error(\"" + prefix_literal + "\" + " + string_expr + ");";
 }
 
 // ---- Directive lookup -----------------------------------------------------
@@ -160,9 +413,108 @@ bool is_hidden(BoundEntityCommon const &e) {
     return has_directive(e, "hide");
 }
 
-void emit_function_arg_modifiers(llvm::raw_string_ostream &os, BoundEntityCommon const &e, Backend const &b) {
+// The return value policy an APIARY_RVP directive names, or empty.
+std::string rvp_directive(BoundEntityCommon const &e) {
     DirectiveView const v(e.directives);
     if (auto const *d = v.first("rvp"); d != nullptr && !d->args.empty()) {
+        return d->args.front();
+    }
+    return {};
+}
+
+// Whether `type` is a std::tuple or std::pair with a reference or pointer
+// among its elements. Spelled loosely on purpose: a false positive only costs
+// a binding built through the per-element lambda below, which is correct for
+// any element type.
+bool is_tuple_of_references(llvm::StringRef type) {
+    type = type.trim();
+    type.consume_front("const ");
+    type = type.ltrim();
+    if (!type.consume_front("std::tuple<") && !type.consume_front("std::pair<")) {
+        return false;
+    }
+    return type.contains('&') || type.contains('*');
+}
+
+// nanobind derives a function's return value policy from its DECLARED return
+// type, and a std::tuple or std::pair is a value: `reference` and
+// `reference_internal` on one become `move` (nanobind's infer_policy), and the
+// tuple caster then hands `move` to every element. A method returning a tuple
+// of references to its object's own members therefore gives Python fresh
+// objects move-constructed OUT of those members, and leaves the C++ object
+// holding moved-from husks. pybind11 passes the policy, and the parent, through
+// to each element, which is what the annotation asks for.
+//
+// So under nanobind such a function is bound through a lambda that builds the
+// Python tuple itself, casting each element with the annotated policy and, for
+// `reference_internal`, with self as the parent: the same per-element
+// keep-alive pybind11 applies. `reference_internal` needs a self, so a free or
+// static function keeps the plain form, which nanobind rejects at call time
+// just as pybind11 does.
+bool needs_per_element_policy(BoundEntityCommon const &e, std::string const &return_type, std::string const &canonical, bool has_self,
+                              Backend const &b) {
+    if (!b.is_nanobind()) {
+        return false;
+    }
+    std::string const policy = rvp_directive(e);
+    if (policy != "reference" && !(policy == "reference_internal" && has_self)) {
+        return false;
+    }
+    return is_tuple_of_references(return_type) || is_tuple_of_references(canonical);
+}
+
+// `callee(a0, a1, ...)`, each argument cast back to its declared type so its
+// value category survives the lambda (it matters for an rvalue-reference
+// parameter).
+std::string forwarding_call(std::string const &callee, std::vector<std::string> const &params) {
+    std::string call = callee + "(";
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        call += (i != 0 ? ", " : "");
+        call += "static_cast<" + params[i] + ">(a" + std::to_string(i) + ")";
+    }
+    return call + ")";
+}
+
+// The lambda described above. `params` are the bound function's parameter
+// types, `call` the expression producing the C++ tuple from the lambda's own
+// parameters (`self`, `a0`, `a1`, ...), and `self_type` the class type of a
+// method or empty for a free function.
+std::string per_element_policy_lambda(std::string const &self_type, std::vector<std::string> const &params, std::string const &call,
+                                      std::string const &policy, Backend const &b) {
+    std::string out = "[](";
+    if (!self_type.empty()) {
+        out += self_type + " &self";
+    }
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        if (i != 0 || !self_type.empty()) {
+            out += ", ";
+        }
+        out += params[i] + " a" + std::to_string(i);
+    }
+    out += ") -> " + b.ns + "::tuple { auto &&result = " + call + "; ";
+    std::string parent;
+    if (policy == "reference_internal") {
+        // The Python object the call was made on, which every element keeps alive.
+        out += b.ns + "::object const parent = " + b.ns + "::find(self); ";
+        parent = ", parent";
+    }
+    // Each element is forwarded with the tuple's own value category, as
+    // pybind11 does: a reference element stays an lvalue and takes the policy,
+    // while a by-value element arrives as an rvalue and is moved, rather than
+    // referenced inside a temporary that dies with this lambda.
+    out += "return std::apply([&](auto &&...element) { return " + b.ns + "::make_tuple(" + b.ns +
+           "::cast(static_cast<decltype(element) &&>(element), " + b.rvp_prefix + policy + parent +
+           ")...); }, static_cast<decltype(result) &&>(result)); }";
+    return out;
+}
+
+// `per_element_policy` says the policy was already applied inside the bound
+// lambda (see needs_per_element_policy), where it belongs, so it is not
+// repeated on the def: there it would only describe the tuple.
+void emit_function_arg_modifiers(llvm::raw_string_ostream &os, BoundEntityCommon const &e, Backend const &b,
+                                 bool per_element_policy = false) {
+    DirectiveView const v(e.directives);
+    if (auto const *d = v.first("rvp"); d != nullptr && !d->args.empty() && !per_element_policy) {
         os << ", " << b.rvp_prefix << d->args.front();
     }
     for (Directive const *d : v.all("keep_alive")) {
@@ -188,11 +540,46 @@ void emit_doc_arg(llvm::raw_string_ostream &os, BoundEntityCommon const &e) {
     }
 }
 
+// Whether pybind11 lets Python pass None for a parameter of this type: a
+// pointer (None is nullptr), std::optional (nullopt), std::shared_ptr (an
+// empty holder) or std::function (an empty function). A reference to one is
+// the same parameter as far as Python is concerned.
+bool admits_none(llvm::StringRef type) {
+    type = type.trim();
+    while (type.consume_back("&")) {
+        type = type.rtrim();
+    }
+    if (type.consume_back("const")) {
+        type = type.rtrim();
+    }
+    if (type.ends_with("*")) {
+        return true;
+    }
+    type.consume_front("const ");
+    type = type.ltrim();
+    return type.starts_with("std::optional<") || type.starts_with("std::shared_ptr<") || type.starts_with("std::function<");
+}
+
+// Each parameter's `py::arg` / `nb::arg`, with its default.
+//
+// nanobind refuses None for an annotated argument unless the annotation says
+// `.none()` (or the default is None): a pointer or a holder rejects it. A
+// std::optional is let through on its own; marking it as well costs nothing.
+// pybind11 accepts None for every one of those, and for a bool, and the Python
+// API should not depend on the binding library, so under nanobind they are
+// marked `.none()`.
 void emit_param_args(llvm::raw_string_ostream &os, std::vector<BoundParam> const &params, Backend const &b) {
     for (auto const &p : params) {
         os << ", " << b.ns << "::arg(\"";
         os << (p.name.empty() ? "arg" : p.name);
         os << "\")";
+        // A bool is in the same position: pybind11 hands None to its caster,
+        // which reads it as False, while nanobind refuses it before any
+        // caster runs. apiary_nb::Bool reads it as pybind11 does.
+        if (b.is_nanobind() && (admits_none(p.type) || admits_none(p.type_canonical) || needs_truthiness(p.type) ||
+                                needs_truthiness(p.type_canonical))) {
+            os << ".none()";
+        }
         if (p.default_value) {
             os << " = " << *p.default_value;
         }
@@ -217,12 +604,40 @@ void emit_param_args(llvm::raw_string_ostream &os, std::vector<BoundParam> const
 // that casts self to an rvalue - which is exactly what `&&` MEANS, and also why
 // it is worth saying out loud: the Python object survives the call in a
 // moved-from state, and Python has no way to show that.
-std::string method_pointer(std::string const &class_qual, BoundMethod const &m) {
-    if (m.ref_qualifier == "&&") {
-        diag::report("moved-from-self", m.location,
-                     "method '" + m.name + "' is " + (m.is_const ? "const && " : "&& ") +
-                         "qualified, so it is bound through a lambda that moves from the object. After calling it the "
-                         "Python object is in a moved-from state, which nothing in Python will indicate.");
+//
+// nanobind goes one step further and accepts no ref-qualified member pointer
+// at all, `&` included: its function traits only match unqualified and
+// `const` ones. Under that target an `&`/`const &` method takes the same
+// lambda route, minus the move - calling on the lvalue `self` already selects
+// the lvalue overload, which is all the qualifier asks for.
+std::string method_callable(std::string const &class_qual, BoundMethod const &m, Backend const &b);
+
+// The callable a method is bound through: method_callable(), adapted for its
+// bool parameters under nanobind (see kNanobindTruthiness).
+std::string method_pointer(std::string const &class_qual, BoundMethod const &m, Backend const &b) {
+    return adapted(method_callable(class_qual, m, b), any_needs_truthiness(m.params), b);
+}
+
+std::string method_callable(std::string const &class_qual, BoundMethod const &m, Backend const &b) {
+    bool const rvalue_self = m.ref_qualifier == "&&";
+    if (!rvalue_self && needs_per_element_policy(m, m.return_type, m.return_type_canonical, !m.is_static, b)) {
+        std::vector<std::string> params;
+        params.reserve(m.params.size());
+        for (auto const &p : m.params) {
+            params.push_back(p.type);
+        }
+        std::string const call = forwarding_call(m.is_static ? class_qual + "::" + m.name : "self." + m.name, params);
+        std::string const self_type = m.is_static ? std::string{} : class_qual + (m.is_const ? " const" : "");
+        return per_element_policy_lambda(self_type, params, call, rvp_directive(m), b);
+    }
+    bool const lambda_form = rvalue_self || (b.is_nanobind() && !m.ref_qualifier.empty() && !m.is_static);
+    if (lambda_form) {
+        if (rvalue_self) {
+            diag::report("moved-from-self", m.location,
+                         "method '" + m.name + "' is " + (m.is_const ? "const && " : "&& ") +
+                             "qualified, so it is bound through a lambda that moves from the object. After calling it the "
+                             "Python object is in a moved-from state, which nothing in Python will indicate.");
+        }
 
         // `static_cast<Class &&>` rather than std::move so the generated TU
         // needs no <utility>; they are the same expression. The parameter's
@@ -240,9 +655,13 @@ std::string method_pointer(std::string const &class_qual, BoundMethod const &m) 
         }
         // decltype(auto), not auto: a method returning T& must not be turned
         // into a lambda returning T by value.
-        out += ") -> decltype(auto) { return static_cast<";
-        out += self_type;
-        out += " &&>(self)." + m.name + "(";
+        out += ") -> decltype(auto) { return ";
+        if (rvalue_self) {
+            out += "static_cast<" + self_type + " &&>(self)";
+        } else {
+            out += "self";
+        }
+        out += "." + m.name + "(";
         for (std::size_t i = 0; i < m.params.size(); ++i) {
             if (i != 0) {
                 out += ", ";
@@ -313,13 +732,13 @@ std::string param_name_or_slot(BoundParam const &p, std::size_t slot) {
     return p.name.empty() ? "arg" + std::to_string(slot) : p.name;
 }
 
-void emit_field(llvm::raw_string_ostream &os, std::string const &class_qual, BoundField const &f) {
+void emit_field(llvm::raw_string_ostream &os, std::string const &class_qual, BoundField const &f, Backend const &b) {
     if (is_hidden(f)) {
         return;
     }
     DirectiveView const v(f.directives);
     std::string const   py   = py_name_for(f);
-    char const         *kind = v.has("readonly") ? "def_readonly" : "def_readwrite";
+    std::string const  &kind = v.has("readonly") ? b.def_field_ro : b.def_field_rw;
     os << "        ." << kind << "(\"" << py << "\", &" << class_qual << "::" << f.name << "";
     emit_doc_arg(os, f);
     os << ")\n";
@@ -360,10 +779,10 @@ void emit_method(llvm::raw_string_ostream &os, std::string const &class_qual, Bo
             }
         }
         if (setter == nullptr) {
-            os << "        .def_property_readonly(\"" << prop << "\", " << method_pointer(class_qual, m);
+            os << "        ." << b.def_property_ro << "(\"" << prop << "\", " << method_pointer(class_qual, m, b);
         } else {
-            os << "        .def_property(\"" << prop << "\", " << method_pointer(class_qual, m) << ", "
-               << method_pointer(class_qual, *setter);
+            os << "        ." << b.def_property_rw << "(\"" << prop << "\", " << method_pointer(class_qual, m, b) << ", "
+               << method_pointer(class_qual, *setter, b);
         }
         emit_doc_arg(os, m);
         os << ")\n";
@@ -376,9 +795,9 @@ void emit_method(llvm::raw_string_ostream &os, std::string const &class_qual, Bo
     // Operator emission: pybind11 / nanobind both map Python dunder
     // names back to C++ operators via the explicit string form.
     if (auto const *op = v.first("operator"); op != nullptr && !op->args.empty()) {
-        os << "        .def(\"" << op->args.front() << "\", " << method_pointer(class_qual, m);
+        os << "        .def(\"" << op->args.front() << "\", " << method_pointer(class_qual, m, b);
         emit_param_args(os, m.params, b);
-        emit_function_arg_modifiers(os, m, b);
+        emit_function_arg_modifiers(os, m, b, needs_per_element_policy(m, m.return_type, m.return_type_canonical, !m.is_static, b));
         emit_doc_arg(os, m);
         os << ")\n";
         return;
@@ -468,9 +887,16 @@ void emit_method(llvm::raw_string_ostream &os, std::string const &class_qual, Bo
                 std::string const default_dtype = pick_default_dtype(dtype_values);
                 std::string const method_kind   = m.is_static ? "def_static" : "def";
 
+                std::vector<std::string> param_types;
+                param_types.reserve(m.params.size());
+                for (auto const &p : m.params) {
+                    param_types.push_back(substitute_template_params(p.type, first));
+                }
+                bool const adapt = b.is_nanobind() && any_needs_truthiness(param_types);
+
                 os << "        ." << method_kind << "(\n";
                 os << "            \"" << py_inst << "\",\n";
-                os << "            [](";
+                os << "            " << (adapt ? "apiary_nb::adapt(" : "") << "[](";
                 if (!m.is_static) {
                     os << class_qual << " &self";
                 }
@@ -555,13 +981,13 @@ void emit_method(llvm::raw_string_ostream &os, std::string const &class_qual, Bo
                     // tensor's lifetime to the parent class instance.
                     bool const returns_ref = resolved.return_type.find('&') != std::string::npos;
                     if (returns_ref) {
-                        os << ", " << b.ns << "::return_value_policy::reference";
+                        os << ", " << b.rvp_prefix << "reference";
                     }
                     os << ");\n";
                     os << "                }\n";
                 }
-                os << "                throw " << b.ns << "::value_error(\"unsupported dtype: \" + dtype);\n";
-                os << "            }";
+                os << "                " << throw_value_error_concat(b, "unsupported dtype: ", "dtype") << "\n";
+                os << "            }" << (adapt ? ")" : "");
                 emit_param_args(os, m.params, b);
                 os << ", " << b.ns << "::arg(\"dtype\") = \"" << default_dtype << "\"";
                 // For reference-returning methods, tie the returned tensor's
@@ -587,9 +1013,10 @@ void emit_method(llvm::raw_string_ostream &os, std::string const &class_qual, Bo
                     // Same builder as the non-template path. This used to
                     // open-code the cast, which meant the ref-qualifier bug
                     // lived here twice and was fixed in one place.
-                    os << "        ." << method_kind << "(\"" << py_inst << "\", " << method_pointer(class_qual, resolved);
+                    os << "        ." << method_kind << "(\"" << py_inst << "\", " << method_pointer(class_qual, resolved, b);
                     emit_param_args(os, resolved.params, b);
-                    emit_function_arg_modifiers(os, m, b);
+                    emit_function_arg_modifiers(os, m, b,
+                        needs_per_element_policy(m, resolved.return_type, m.return_type_canonical, !m.is_static, b));
                     emit_doc_arg(os, m);
                     os << ")\n";
                 }
@@ -604,9 +1031,9 @@ void emit_method(llvm::raw_string_ostream &os, std::string const &class_qual, Bo
     } else {
         os << "        .def(\"" << py << "\", ";
     }
-    os << method_pointer(class_qual, m);
+    os << method_pointer(class_qual, m, b);
     emit_param_args(os, m.params, b);
-    emit_function_arg_modifiers(os, m, b);
+    emit_function_arg_modifiers(os, m, b, needs_per_element_policy(m, m.return_type, m.return_type_canonical, !m.is_static, b));
     emit_doc_arg(os, m);
     os << ")\n";
 }
@@ -765,6 +1192,291 @@ std::string substitute_template_params(std::string const &type, TemplateArgBindi
     return out;
 }
 
+// The buffer protocol under nanobind, as a ``, nb::type_slots(...)`` argument
+// to the class_<> declaration (or nothing when the class exports no buffer).
+//
+// nanobind has no .def_buffer, but nb::type_slots puts raw CPython slots on a
+// bound type, so the class gets a bf_getbuffer / bf_releasebuffer pair of its
+// own. That makes it a real buffer exporter: memoryview(), numpy.asarray() and
+// numpy.array() behave as they do under pybind11's .def_buffer, zero copy, with
+// view->obj holding the object (and so its memory) alive. An __array__ method
+// would be an approximation that memoryview() rejects.
+//
+// It is written out rather than borrowed from nb::ndarray: an ndarray with no
+// framework reaches Python as a DLPack capsule (nanobind 2.x and 3.x alike),
+// and the nanobind type that does export a buffer is internal. The body
+// follows nanobind's own nb_ndarray_getbuffer - format from the element's
+// DLPack dtype, byte strides, and a contiguity check for consumers that cannot
+// take strides - using only nb::dtype<T>() and nb::inst_ptr<T>(), both public
+// since nanobind 2.0. The accessors run before anything is allocated, so one
+// that throws (an exported_data() refusing an unallocated tensor) leaks
+// nothing and reaches Python as a BufferError.
+//
+// The slot table is a function-local static in an immediately invoked lambda:
+// type_slots() keeps the pointer, and that keeps the emitted code one
+// expression with no names to collide across classes or instantiations.
+//
+// buffer_from names a helper returning py::buffer_info, which is pybind11 API
+// in the user's own code; nothing on the nanobind side can call it.
+void emit_nanobind_buffer_slot(llvm::raw_string_ostream &os, BoundClass const &cls, std::string const &concrete_type,
+                               TemplateArgBindings const &arg_bindings, Backend const &b) {
+    DirectiveView const v(cls.directives);
+    if (auto const *bf = v.first("buffer_from"); bf != nullptr && !bf->args.empty()) {
+        diag::report("unsupported-on-target", cls.location,
+                     "class '" + cls.qualified_name + "' exports its buffer through APIARY_BUFFER_FROM(" + bf->args.front() +
+                         "), whose helper returns pybind11::buffer_info, so it cannot be used under nanobind. Describe the "
+                         "buffer with APIARY_BUFFER_PROTOCOL_STD instead, which works under both targets.");
+    }
+    auto const *bps = v.first("buffer_protocol_std");
+    if (bps == nullptr || bps->args.empty()) {
+        return;
+    }
+    auto const fields       = parse_kv_payload(bps->args.front());
+    auto const data_fn      = fields.find("data");
+    auto const rank_fn      = fields.find("rank");
+    auto const dim_fn       = fields.find("dim");
+    auto const stride_fn    = fields.find("stride");
+    auto const element_type = fields.find("element_type");
+    auto const end          = fields.end();
+    if (data_fn == end || rank_fn == end || dim_fn == end || stride_fn == end || element_type == end) {
+        // Same outcome as the pybind11 branch, which writes a comment into the
+        // chain; here we are inside the declaration's argument list.
+        return;
+    }
+    std::string const elem = substitute_template_params(element_type->second, arg_bindings);
+    std::string const ns   = b.ns;
+    os << ", " << ns << "::type_slots([] {\n"
+       << "        static PyType_Slot _slots[] = {\n"
+       << "            {Py_bf_getbuffer, reinterpret_cast<void *>(+[](PyObject *_obj, Py_buffer *_view, int _flags) -> int {\n"
+       << "                // The protocol requires obj to be NULL whenever -1 is returned.\n"
+       << "                _view->obj = nullptr;\n"
+       << "                try {\n"
+       << "                    auto &self = *" << ns << "::inst_ptr<" << concrete_type << ">(_obj);\n"
+       << "                    auto const _dt = " << ns << "::dtype<" << elem << ">();\n"
+       << "                    char const *_fmt = nullptr;\n"
+       << "                    switch (static_cast<" << ns << "::dlpack::dtype_code>(_dt.code)) {\n"
+       << "                    case " << ns << "::dlpack::dtype_code::Int:\n"
+       << "                        _fmt = _dt.bits == 8 ? \"b\" : _dt.bits == 16 ? \"h\" : _dt.bits == 32 ? \"i\" : \"q\";\n"
+       << "                        break;\n"
+       << "                    case " << ns << "::dlpack::dtype_code::UInt:\n"
+       << "                        _fmt = _dt.bits == 8 ? \"B\" : _dt.bits == 16 ? \"H\" : _dt.bits == 32 ? \"I\" : \"Q\";\n"
+       << "                        break;\n"
+       << "                    case " << ns << "::dlpack::dtype_code::Float:\n"
+       << "                        _fmt = _dt.bits == 16 ? \"e\" : _dt.bits == 32 ? \"f\" : \"d\";\n"
+       << "                        break;\n"
+       << "                    case " << ns << "::dlpack::dtype_code::Complex:\n"
+       << "                        _fmt = _dt.bits == 32 ? \"Ze\" : _dt.bits == 64 ? \"Zf\" : \"Zd\";\n"
+       << "                        break;\n"
+       << "                    case " << ns << "::dlpack::dtype_code::Bool:\n"
+       << "                        _fmt = \"?\";\n"
+       << "                        break;\n"
+       << "                    default:\n"
+       << "                        break;\n"
+       << "                    }\n"
+       << "                    if (_fmt == nullptr || _dt.lanes != 1) {\n"
+       << "                        PyErr_SetString(PyExc_BufferError, \"element type has no buffer-protocol format\");\n"
+       << "                        return -1;\n"
+       << "                    }\n"
+       << "                    Py_ssize_t const _item = static_cast<Py_ssize_t>(sizeof(" << elem << "));\n"
+       << "                    std::size_t const _r = self." << rank_fn->second << "();\n"
+       << "                    std::vector<Py_ssize_t> _dims(2 * _r);\n"
+       << "                    Py_ssize_t _size = 1;\n"
+       << "                    for (std::size_t _i = 0; _i < _r; ++_i) {\n"
+       << "                        _dims[_i] = static_cast<Py_ssize_t>(self." << dim_fn->second << "(_i));\n"
+       << "                        _dims[_r + _i] = static_cast<Py_ssize_t>(self." << stride_fn->second << "(_i)) * _item;\n"
+       << "                        _size *= _dims[_i];\n"
+       << "                    }\n"
+       << "                    void *const _data = static_cast<void *>(self." << data_fn->second << "());\n"
+       << "                    // A consumer that cannot take strides reads buf..buf+len as one packed\n"
+       << "                    // C-ordered block, so anything else must be refused, not misread.\n"
+       << "                    if ((_flags & PyBUF_STRIDES) != PyBUF_STRIDES && _size > 1) {\n"
+       << "                        Py_ssize_t _acc = _item;\n"
+       << "                        for (std::size_t _i = _r; _i-- > 0;) {\n"
+       << "                            if (_dims[_i] != 1 && _dims[_r + _i] != _acc) {\n"
+       << "                                PyErr_SetString(PyExc_BufferError, \"cannot export a non-C-contiguous array as a contiguous "
+          "buffer\");\n"
+       << "                                return -1;\n"
+       << "                            }\n"
+       << "                            _acc *= _dims[_i];\n"
+       << "                        }\n"
+       << "                    }\n"
+       << "                    // Shape and strides live until bf_releasebuffer frees them. One extra\n"
+       << "                    // slot keeps a rank-0 request from asking for zero bytes.\n"
+       << "                    auto *_held = static_cast<Py_ssize_t *>(PyMem_Malloc(sizeof(Py_ssize_t) * (2 * _r + 1)));\n"
+       << "                    if (_held == nullptr) {\n"
+       << "                        PyErr_NoMemory();\n"
+       << "                        return -1;\n"
+       << "                    }\n"
+       << "                    std::copy(_dims.begin(), _dims.end(), _held);\n"
+       << "                    Py_INCREF(_obj);\n"
+       << "                    _view->obj = _obj;\n"
+       << "                    _view->buf = _data;\n"
+       << "                    _view->len = _size * _item;\n"
+       << "                    _view->itemsize = _item;\n"
+       << "                    _view->readonly = 0;\n"
+       << "                    _view->ndim = static_cast<int>(_r);\n"
+       << "                    _view->format = (_flags & PyBUF_FORMAT) == PyBUF_FORMAT ? const_cast<char *>(_fmt) : nullptr;\n"
+       << "                    _view->shape = (_flags & PyBUF_ND) == PyBUF_ND ? _held : nullptr;\n"
+       << "                    _view->strides = (_flags & PyBUF_STRIDES) == PyBUF_STRIDES ? _held + _r : nullptr;\n"
+       << "                    _view->suboffsets = nullptr;\n"
+       << "                    _view->internal = _held;\n"
+       << "                    return 0;\n"
+       << "                } catch (...) {\n"
+       << "                    // As pybind11 reports it: the exception, translated to Python by the\n"
+       << "                    // registered translators, as the __cause__ of a BufferError. Rethrowing\n"
+       << "                    // it inside a bound function is what runs those translators.\n"
+       << "                    try {\n"
+       << "                        " << ns << "::cpp_function([_p = std::current_exception()] { std::rethrow_exception(_p); })();\n"
+       << "                    } catch (" << ns << "::python_error &_e) {\n"
+       << "                        _e.restore();\n"
+       << "                    }\n"
+       << "                    " << ns << "::chain_error(PyExc_BufferError, \"Error getting buffer\");\n"
+       << "                    return -1;\n"
+       << "                }\n"
+       << "            })},\n"
+       << "            {Py_bf_releasebuffer, reinterpret_cast<void *>(+[](PyObject *, Py_buffer *_view) { PyMem_Free(_view->internal); })},\n"
+       << "            {0, nullptr}};\n"
+       << "        return _slots;\n"
+       << "    }())";
+}
+
+// The index protocol (APIARY_INDEX_PROTOCOL_STD) under nanobind. Same Python
+// behavior as the pybind11 branch in emit_class_body, overload for overload;
+// what differs is the API it is spelled in:
+//
+//   - nb::slice::compute() returns (start, stop, step, length) and raises on a
+//     bad slice itself, where py::slice::compute() reports through a bool;
+//   - nb::index_error / nb::type_error are factories taking a const char *;
+//   - a tuple element is narrowed with nb::borrow<>, not py::cast<>.
+//
+// The parameters are the already-resolved directive fields.
+void emit_index_protocol_nanobind(llvm::raw_string_ostream &os, std::string const &concrete_type, std::string const &elem,
+                                  std::string const &rfn, std::string const &dfn, std::string const &at_fn, std::string const &set_fn,
+                                  std::string const &av_fn, std::string const &vty, std::string const &ss) {
+    bool const has_view = !av_fn.empty();
+
+    // __getitem__(int): a scalar on a rank-1 tensor, else a view collapsing axis 0.
+    os << "        .def(\"__getitem__\", [](" << concrete_type << " &self, Py_ssize_t idx) -> nb::object {\n"
+       << "            std::size_t const _r = self." << rfn << "();\n"
+       << "            if (_r == 0) throw nb::index_error(\"cannot index rank-0 tensor\");\n"
+       << "            std::int64_t _d = static_cast<std::int64_t>(self." << dfn << "(0));\n"
+       << "            std::int64_t _i = idx < 0 ? idx + _d : idx;\n"
+       << "            if (_i < 0 || _i >= _d) throw nb::index_error();\n"
+       << "            if (_r == 1) return nb::cast(self." << at_fn << "(std::vector<std::int64_t>{_i}));\n";
+    if (has_view) {
+        os << "            std::vector<" << ss << "> _spec(_r);\n"
+           << "            _spec[0].kind = " << ss << "::Kind::Index; _spec[0].index = _i;\n"
+           << "            for (std::size_t _k = 1; _k < _r; ++_k) _spec[_k].kind = " << ss << "::Kind::Full;\n"
+           << "            return nb::cast(self." << av_fn << "(_spec));\n";
+    } else {
+        os << "            throw nb::type_error(\"partial indexing requires at_view; not bound\");\n";
+    }
+    os << "        })\n";
+
+    if (has_view) {
+        // __getitem__(...): a view of the whole tensor.
+        os << "        .def(\"__getitem__\", [](" << concrete_type << " &self, nb::ellipsis) -> " << vty << " {\n"
+           << "            std::size_t const _r = self." << rfn << "();\n"
+           << "            std::vector<" << ss << "> _spec(_r);\n"
+           << "            for (std::size_t _k = 0; _k < _r; ++_k) _spec[_k].kind = " << ss << "::Kind::Full;\n"
+           << "            return self." << av_fn << "(_spec);\n"
+           << "        })\n";
+
+        // __getitem__(slice): a view along axis 0, full on the others.
+        os << "        .def(\"__getitem__\", [](" << concrete_type << " &self, nb::slice key) -> " << vty << " {\n"
+           << "            std::size_t const _r = self." << rfn << "();\n"
+           << "            if (_r == 0) throw nb::index_error(\"cannot index rank-0 tensor\");\n"
+           << "            auto [_start, _stop, _step, _len] = key.compute(static_cast<std::size_t>(self." << dfn << "(0)));\n"
+           << "            (void)_len;\n"
+           << "            std::vector<" << ss << "> _spec(_r);\n"
+           << "            _spec[0].kind = " << ss << "::Kind::Range;\n"
+           << "            _spec[0].start = _start; _spec[0].stop = _stop; _spec[0].step = _step;\n"
+           << "            for (std::size_t _k = 1; _k < _r; ++_k) _spec[_k].kind = " << ss << "::Kind::Full;\n"
+           << "            return self." << av_fn << "(_spec);\n"
+           << "        })\n";
+    }
+
+    // __getitem__(tuple): all ints at full rank give a scalar; anything else a view.
+    os << "        .def(\"__getitem__\", [](" << concrete_type << " &self, nb::tuple key) -> nb::object {\n"
+       << "            std::size_t const _r = self." << rfn << "();\n"
+       << "            bool _all_int = true;\n"
+       << "            for (nb::handle _it : key) {\n"
+       << "                if (!nb::isinstance<nb::int_>(_it)) { _all_int = false; break; }\n"
+       << "            }\n"
+       << "            if (_all_int && key.size() == _r) {\n"
+       << "                std::vector<std::int64_t> _idx; _idx.reserve(_r);\n"
+       << "                for (std::size_t _k = 0; _k < _r; ++_k) {\n"
+       << "                    std::int64_t _v = nb::cast<std::int64_t>(key[_k]);\n"
+       << "                    std::int64_t _d = static_cast<std::int64_t>(self." << dfn << "(_k));\n"
+       << "                    if (_v < 0) _v += _d;\n"
+       << "                    if (_v < 0 || _v >= _d) throw nb::index_error();\n"
+       << "                    _idx.push_back(_v);\n"
+       << "                }\n"
+       << "                return nb::cast(self." << at_fn << "(_idx));\n"
+       << "            }\n";
+    if (has_view) {
+        os << "            std::vector<" << ss << "> _spec; _spec.reserve(_r);\n"
+           << "            for (std::size_t _k = 0; _k < key.size(); ++_k) {\n"
+           << "                nb::handle _it = key[_k];\n"
+           << "                if (nb::isinstance<nb::ellipsis>(_it)) {\n"
+           << "                    std::size_t _remaining_keys = key.size() - _k - 1;\n"
+           << "                    while (_spec.size() + _remaining_keys < _r) {\n"
+           << "                        " << ss << " _f; _f.kind = " << ss << "::Kind::Full; _spec.push_back(_f);\n"
+           << "                    }\n"
+           << "                } else if (nb::isinstance<nb::int_>(_it)) {\n"
+           << "                    std::int64_t _v = nb::cast<std::int64_t>(_it);\n"
+           << "                    std::int64_t _d = static_cast<std::int64_t>(self." << dfn << "(_spec.size()));\n"
+           << "                    if (_v < 0) _v += _d;\n"
+           << "                    if (_v < 0 || _v >= _d) throw nb::index_error();\n"
+           << "                    " << ss << " _s; _s.kind = " << ss << "::Kind::Index; _s.index = _v; "
+              "_spec.push_back(_s);\n"
+           << "                } else if (nb::isinstance<nb::slice>(_it)) {\n"
+           << "                    auto [_start, _stop, _step, _len] =\n"
+           << "                        nb::borrow<nb::slice>(_it).compute(static_cast<std::size_t>(self." << dfn << "(_spec.size())));\n"
+           << "                    (void)_len;\n"
+           << "                    " << ss << " _s; _s.kind = " << ss << "::Kind::Range;\n"
+           << "                    _s.start = _start; _s.stop = _stop; _s.step = _step; _spec.push_back(_s);\n"
+           << "                } else {\n"
+           << "                    throw nb::type_error(\"unsupported index element\");\n"
+           << "                }\n"
+           << "            }\n"
+           << "            while (_spec.size() < _r) { " << ss << " _f; _f.kind = " << ss << "::Kind::Full; "
+              "_spec.push_back(_f); }\n"
+           << "            return nb::cast(self." << av_fn << "(_spec));\n";
+    } else {
+        os << "            throw nb::type_error(\"partial/slice indexing requires at_view; not bound\");\n";
+    }
+    os << "        })\n";
+
+    // __setitem__(int, T): a scalar write on a rank-1 tensor.
+    os << "        .def(\"__setitem__\", [](" << concrete_type << " &self, Py_ssize_t idx, " << elem << " value) {\n"
+       << "            std::size_t const _r = self." << rfn << "();\n"
+       << "            if (_r != 1) throw nb::type_error(\"int-only assignment supported on rank-1 tensors here; "
+       << "broadcast-set across a sub-view is not yet bound\");\n"
+       << "            std::int64_t _d = static_cast<std::int64_t>(self." << dfn << "(0));\n"
+       << "            std::int64_t _i = idx < 0 ? idx + _d : idx;\n"
+       << "            if (_i < 0 || _i >= _d) throw nb::index_error();\n"
+       << "            self." << set_fn << "(std::vector<std::int64_t>{_i}, value);\n"
+       << "        })\n";
+
+    // __setitem__(tuple, T): a scalar write at a full integer index.
+    os << "        .def(\"__setitem__\", [](" << concrete_type << " &self, nb::tuple key, " << elem << " value) {\n"
+       << "            std::size_t const _r = self." << rfn << "();\n"
+       << "            if (key.size() != _r) throw nb::type_error(\"partial assignment not yet bound\");\n"
+       << "            std::vector<std::int64_t> _idx; _idx.reserve(_r);\n"
+       << "            for (std::size_t _i = 0; _i < _r; ++_i) {\n"
+       << "                if (!nb::isinstance<nb::int_>(key[_i]))\n"
+       << "                    throw nb::type_error(\"slice/ellipsis assignment not yet bound\");\n"
+       << "                std::int64_t _v = nb::cast<std::int64_t>(key[_i]);\n"
+       << "                std::int64_t _d = static_cast<std::int64_t>(self." << dfn << "(_i));\n"
+       << "                if (_v < 0) _v += _d;\n"
+       << "                if (_v < 0 || _v >= _d) throw nb::index_error();\n"
+       << "                _idx.push_back(_v);\n"
+       << "            }\n"
+       << "            self." << set_fn << "(_idx, value);\n"
+       << "        })\n";
+}
+
 // Emit one py::class_<> block, given the concrete C++ type to bind and the
 // Python identifier to expose it as. The non-template path passes the
 // class's own qualified name; the template path calls this once per
@@ -780,15 +1492,25 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
                      std::string const &mod_var) {
     DirectiveView const v(cls.directives);
 
+    // A holder is a class_<> template argument under pybind11. nanobind has no
+    // such parameter: it supports std::shared_ptr and std::unique_ptr through
+    // their type casters (included by the backend's headers) for any bound
+    // class, and nothing else, so those two need no spelling and any other
+    // holder cannot be had at all.
     std::string holder;
     if (auto const *d = v.first("holder"); d != nullptr && !d->args.empty()) {
-        holder = d->args.front() + "<" + concrete_type + ">";
+        std::string const &tmpl = d->args.front();
+        if (!b.is_nanobind()) {
+            holder = tmpl + "<" + concrete_type + ">";
+        } else if (tmpl != "std::shared_ptr" && tmpl != "std::unique_ptr") {
+            diag::report("unsupported-on-target", cls.location,
+                         "class '" + cls.qualified_name + "' asks for holder '" + tmpl +
+                             "', but nanobind has no custom holders: it supports std::shared_ptr and std::unique_ptr only, "
+                             "so the class can only be bound without it.");
+        }
     }
 
-    os << "    " << b.ns << "::class_<" << concrete_type;
-    if (!holder.empty()) {
-        os << ", " << holder;
-    }
+    std::vector<std::string> bases;
     if (!v.has("no_bases")) {
         for (std::string const &base : cls.bases) {
             // Strip any template arguments so ``Foo<T>`` matches ``Foo``
@@ -799,16 +1521,49 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
                 base_key = base_key.substr(0, angle);
             }
             if (bound_class_names.count(base_key) != 0U) {
-                os << ", " << base;
+                bases.push_back(base);
             }
         }
+    }
+    // nanobind's class_<T, Base> takes at most one base. Binding the first and
+    // naming the rest keeps the Python hierarchy as close as the library
+    // allows, where a second base argument would not compile at all.
+    if (b.is_nanobind() && bases.size() > 1) {
+        std::string dropped;
+        for (std::size_t i = 1; i < bases.size(); ++i) {
+            dropped += (i == 1 ? "'" : ", '") + bases[i] + "'";
+        }
+        diag::report("unsupported-on-target", cls.location,
+                     "class '" + cls.qualified_name + "' has " + std::to_string(bases.size()) +
+                         " bound base classes, but nanobind supports single inheritance only, so only '" + bases.front() +
+                         "' can be its Python base and " + dropped + " " + (bases.size() == 2 ? "is" : "are") +
+                         " left out of the class hierarchy. Mark the class APIARY_NO_BASES to bind it with none.");
+        bases.resize(1);
+    }
+
+    os << "    " << b.ns << "::class_<" << concrete_type;
+    if (!holder.empty()) {
+        os << ", " << holder;
+    }
+    for (std::string const &base : bases) {
+        os << ", " << base;
     }
     os << ">(" << mod_var << ", \"" << py_name << "\"";
     if (v.has("dynamic_attr")) {
         os << ", " << b.ns << "::dynamic_attr()";
     }
-    if (v.has("buffer_protocol") && b.supports_buffer) {
+    // pybind11 refuses .def_buffer at import time ("must include the
+    // pybind11::buffer_protocol() annotation") unless the class was declared
+    // with the flag, so a buffer source implies it. Requiring
+    // APIARY_BUFFER_PROTOCOL as well only turned a missing annotation into an
+    // ImportError. nanobind has no such flag; its buffer comes from a type slot
+    // (emit_nanobind_buffer_slot).
+    bool const has_buffer_source = v.has("buffer_from") || v.has("buffer_protocol_std");
+    if (!b.is_nanobind() && (v.has("buffer_protocol") || has_buffer_source)) {
         os << ", " << b.ns << "::buffer_protocol()";
+    }
+    if (b.is_nanobind()) {
+        emit_nanobind_buffer_slot(os, cls, concrete_type, arg_bindings, b);
     }
     emit_doc_arg(os, cls);
     os << ")\n";
@@ -878,9 +1633,17 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
             }
         }
 
-        os << "        .def(" << b.ns << "::init<";
+        // A constructor taking a bool goes through apiary_nb::init under
+        // nanobind, for the reason kNanobindTruthiness gives; it is the same
+        // placement-new __init__ nb::init<> expands to.
+        bool const adapt_ctor = b.is_nanobind() && any_needs_truthiness(expanded_params);
+        if (adapt_ctor) {
+            os << "        .def(\"__init__\", apiary_nb::init<" << concrete_type;
+        } else {
+            os << "        .def(" << b.ns << "::init<";
+        }
         for (std::size_t i = 0; i < expanded_params.size(); ++i) {
-            if (i != 0) {
+            if (i != 0 || adapt_ctor) {
                 os << ", ";
             }
             os << expanded_params[i].type;
@@ -920,7 +1683,7 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
     for (auto const &f : cls.fields) {
         BoundField fr = f;
         fr.type       = substitute_template_params(fr.type, arg_bindings);
-        emit_field(os, concrete_type, fr);
+        emit_field(os, concrete_type, fr, b);
     }
 
     // Buffer protocol implementations.
@@ -934,9 +1697,9 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
     //                                   pure-C++ accessors. User code is
     //                                   pybind11-free.
     //
-    // Both are pybind11-only today; nanobind's tensor protocol uses
-    // nb::ndarray<> and would be added as a parallel branch on b.name.
-    if (b.supports_buffer) {
+    // Under nanobind the buffer is a type slot on the class_<> declaration
+    // instead (emit_nanobind_buffer_slot); there is no .def_buffer.
+    if (!b.is_nanobind()) {
         if (auto const *bf = v.first("buffer_from"); bf != nullptr && !bf->args.empty()) {
             os << "        .def_buffer([](" << concrete_type << " &self) { return " << bf->args.front() << "(self); })\n";
         }
@@ -989,11 +1752,15 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
         auto const set_element  = fields.find("set_element");
         auto const at_view      = fields.find("at_view");   // optional
         auto const view_type    = fields.find("view_type"); // optional, required if at_view present
+        // The index-expression type at_view takes: Einsums' by default, which
+        // is where the protocol came from. Any type of the same shape works.
+        auto const        slice_spec = fields.find("slice_spec"); // optional
+        std::string const ss         = slice_spec != fields.end() ? slice_spec->second : std::string{"einsums::SliceSpec"};
         auto const end          = fields.end();
         if (element_type == end || rank_fn == end || dim_fn == end || at_element == end || set_element == end) {
             os << "        // skipped index_protocol_std on " << concrete_type
                << ": missing one of {element_type, rank, dim, at_element, set_element}\n";
-        } else if (b.name == "pybind11") {
+        } else if (!b.is_nanobind()) {
             std::string const elem     = substitute_template_params(element_type->second, arg_bindings);
             std::string const rfn      = rank_fn->second;
             std::string const dfn      = dim_fn->second;
@@ -1014,9 +1781,9 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
                << "            if (_i < 0 || _i >= _d) throw py::index_error();\n"
                << "            if (_r == 1) return py::cast(self." << at_fn << "(std::vector<std::int64_t>{_i}));\n";
             if (has_view) {
-                os << "            std::vector<einsums::SliceSpec> _spec(_r);\n"
-                   << "            _spec[0].kind = einsums::SliceSpec::Kind::Index; _spec[0].index = _i;\n"
-                   << "            for (std::size_t _k = 1; _k < _r; ++_k) _spec[_k].kind = einsums::SliceSpec::Kind::Full;\n"
+                os << "            std::vector<" << ss << "> _spec(_r);\n"
+                   << "            _spec[0].kind = " << ss << "::Kind::Index; _spec[0].index = _i;\n"
+                   << "            for (std::size_t _k = 1; _k < _r; ++_k) _spec[_k].kind = " << ss << "::Kind::Full;\n"
                    << "            return py::cast(self." << av_fn << "(_spec));\n";
             } else {
                 os << "            throw py::type_error(\"partial indexing requires at_view; not bound\");\n";
@@ -1027,8 +1794,8 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
             if (has_view) {
                 os << "        .def(\"__getitem__\", [](" << concrete_type << " &self, py::ellipsis) -> " << vty << " {\n"
                    << "            std::size_t const _r = self." << rfn << "();\n"
-                   << "            std::vector<einsums::SliceSpec> _spec(_r);\n"
-                   << "            for (std::size_t _k = 0; _k < _r; ++_k) _spec[_k].kind = einsums::SliceSpec::Kind::Full;\n"
+                   << "            std::vector<" << ss << "> _spec(_r);\n"
+                   << "            for (std::size_t _k = 0; _k < _r; ++_k) _spec[_k].kind = " << ss << "::Kind::Full;\n"
                    << "            return self." << av_fn << "(_spec);\n"
                    << "        })\n";
             }
@@ -1041,10 +1808,10 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
                    << "            py::ssize_t _start = 0, _stop = 0, _step = 0, _len = 0;\n"
                    << "            if (!key.compute(static_cast<py::ssize_t>(self." << dfn << "(0)), &_start, &_stop, &_step, &_len))\n"
                    << "                throw py::error_already_set();\n"
-                   << "            std::vector<einsums::SliceSpec> _spec(_r);\n"
-                   << "            _spec[0].kind = einsums::SliceSpec::Kind::Range;\n"
+                   << "            std::vector<" << ss << "> _spec(_r);\n"
+                   << "            _spec[0].kind = " << ss << "::Kind::Range;\n"
                    << "            _spec[0].start = _start; _spec[0].stop = _stop; _spec[0].step = _step;\n"
-                   << "            for (std::size_t _k = 1; _k < _r; ++_k) _spec[_k].kind = einsums::SliceSpec::Kind::Full;\n"
+                   << "            for (std::size_t _k = 1; _k < _r; ++_k) _spec[_k].kind = " << ss << "::Kind::Full;\n"
                    << "            return self." << av_fn << "(_spec);\n"
                    << "        })\n";
             }
@@ -1069,21 +1836,21 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
                << "            }\n";
             if (has_view) {
                 // Mixed tuple: build SliceSpec vec, expand ellipsis, pad with Full.
-                os << "            std::vector<einsums::SliceSpec> _spec; _spec.reserve(_r);\n"
+                os << "            std::vector<" << ss << "> _spec; _spec.reserve(_r);\n"
                    << "            std::size_t _consumed = 0;\n"
                    << "            for (std::size_t _k = 0; _k < key.size(); ++_k) {\n"
                    << "                py::handle _it = key[_k];\n"
                    << "                if (py::isinstance<py::ellipsis>(_it)) {\n"
                    << "                    std::size_t _remaining_keys = key.size() - _k - 1;\n"
                    << "                    while (_spec.size() + _remaining_keys < _r) {\n"
-                   << "                        einsums::SliceSpec _f; _f.kind = einsums::SliceSpec::Kind::Full; _spec.push_back(_f);\n"
+                   << "                        " << ss << " _f; _f.kind = " << ss << "::Kind::Full; _spec.push_back(_f);\n"
                    << "                    }\n"
                    << "                } else if (py::isinstance<py::int_>(_it)) {\n"
                    << "                    std::int64_t _v = py::cast<std::int64_t>(_it);\n"
                    << "                    std::int64_t _d = static_cast<std::int64_t>(self." << dfn << "(_spec.size()));\n"
                    << "                    if (_v < 0) _v += _d;\n"
                    << "                    if (_v < 0 || _v >= _d) throw py::index_error();\n"
-                   << "                    einsums::SliceSpec _s; _s.kind = einsums::SliceSpec::Kind::Index; _s.index = _v; "
+                   << "                    " << ss << " _s; _s.kind = " << ss << "::Kind::Index; _s.index = _v; "
                       "_spec.push_back(_s);\n"
                    << "                } else if (py::isinstance<py::slice>(_it)) {\n"
                    << "                    py::slice _sl = py::cast<py::slice>(_it);\n"
@@ -1091,7 +1858,7 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
                    << "                    if (!_sl.compute(static_cast<py::ssize_t>(self." << dfn << "(_spec.size())),\n"
                    << "                                     &_start, &_stop, &_step, &_len))\n"
                    << "                        throw py::error_already_set();\n"
-                   << "                    einsums::SliceSpec _s; _s.kind = einsums::SliceSpec::Kind::Range;\n"
+                   << "                    " << ss << " _s; _s.kind = " << ss << "::Kind::Range;\n"
                    << "                    _s.start = _start; _s.stop = _stop; _s.step = _step; _spec.push_back(_s);\n"
                    << "                } else {\n"
                    << "                    throw py::type_error(\"unsupported index element\");\n"
@@ -1099,7 +1866,7 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
                    << "                ++_consumed;\n"
                    << "            }\n"
                    << "            (void)_consumed;\n"
-                   << "            while (_spec.size() < _r) { einsums::SliceSpec _f; _f.kind = einsums::SliceSpec::Kind::Full; "
+                   << "            while (_spec.size() < _r) { " << ss << " _f; _f.kind = " << ss << "::Kind::Full; "
                       "_spec.push_back(_f); }\n"
                    << "            return py::cast(self." << av_fn << "(_spec));\n";
             } else {
@@ -1137,7 +1904,11 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
                << "            self." << set_fn << "(_idx, value);\n"
                << "        })\n";
         } else {
-            os << "        // index_protocol_std: nanobind backend not yet implemented\n";
+            bool const has_view = at_view != end && view_type != end;
+            emit_index_protocol_nanobind(os, concrete_type, substitute_template_params(element_type->second, arg_bindings), rank_fn->second,
+                                         dim_fn->second, at_element->second, set_element->second,
+                                         has_view ? at_view->second : std::string{},
+                                         has_view ? substitute_template_params(view_type->second, arg_bindings) : std::string{}, ss);
         }
     }
 
@@ -1153,15 +1924,18 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
         auto const end_it = fields.end();
         if (beg == end_it || ed == end_it) {
             os << "        // skipped iterator_std on " << concrete_type << ": missing one of {begin, end}\n";
-        } else if (b.name == "pybind11") {
+        } else if (!b.is_nanobind()) {
             os << "        .def(\"__iter__\", [](" << concrete_type << " &self) {\n"
                << "            return py::make_iterator(self." << beg->second << "(), self." << ed->second << "());\n"
                << "        }, py::keep_alive<0, 1>())\n";
         } else {
-            // Nanobind's nb::make_iterator API is shaped slightly
-            // differently (taking a scope arg first); a parallel branch
-            // would land here when nanobind support is wired up.
-            os << "        // iterator_std: nanobind backend not yet implemented\n";
+            // nb::make_iterator registers its iterator type on first use, so it
+            // takes the scope and name to register it under: here the bound
+            // class, making it ``<Class>.iterator`` in Python.
+            os << "        .def(\"__iter__\", [](" << concrete_type << " &self) {\n"
+               << "            return nb::make_iterator(nb::type<" << concrete_type << ">(), \"iterator\", self." << beg->second
+               << "(), self." << ed->second << "());\n"
+               << "        }, nb::keep_alive<0, 1>())\n";
         }
     }
 
@@ -1177,16 +1951,17 @@ void emit_class_body(llvm::raw_string_ostream &os, BoundClass const &cls, std::s
     }
 }
 
-// Bind a class as a Python exception type via py::register_exception<>.
-// Pybind11-only — nanobind's exception API is shaped differently and is
-// out of scope for the @exception directive today.
+// Bind a class as a Python exception type. Both libraries create a new
+// Python exception class deriving from Exception and register a translator
+// that raises it, with the C++ what() as the message, whenever the C++ type
+// escapes a bound call. pybind11 spells that register_exception<T>(); in
+// nanobind, constructing nb::exception<T> does both.
 void emit_exception(llvm::raw_string_ostream &os, BoundClass const &cls, Backend const &b, std::string const &mod_var) {
-    if (b.name != "pybind11") {
-        os << "    // skipped exception binding for " << cls.qualified_name
-           << ": @exception directive requires pybind11 target (--target pybind11)\n";
+    std::string const py = py_name_for(cls);
+    if (b.is_nanobind()) {
+        os << "    " << b.ns << "::exception<" << cls.qualified_name << ">(" << mod_var << ", \"" << py << "\");\n";
         return;
     }
-    std::string const py = py_name_for(cls);
     os << "    " << b.ns << "::register_exception<" << cls.qualified_name << ">(" << mod_var << ", \"" << py << "\");\n";
 }
 
@@ -1322,14 +2097,20 @@ void emit_function_overload(llvm::raw_string_ostream &os, BoundFunction const &f
     }
     check_pack_in_cast(f, resolved_types);
 
-    os << "    " << mod_var << ".def(\"" << inst.py_name << "\", static_cast<" << ret_resolved << " (*)(";
-    for (std::size_t i = 0; i < resolved_types.size(); ++i) {
-        if (i != 0) {
-            os << ", ";
+    bool const  per_element = needs_per_element_policy(f, ret_resolved, f.return_type_canonical, false, b);
+    std::string callable;
+    if (per_element) {
+        callable = per_element_policy_lambda({}, resolved_types,
+                                             forwarding_call(f.qualified_name + "<" + inst.type_args + ">", resolved_types),
+                                             rvp_directive(f), b);
+    } else {
+        callable = "static_cast<" + ret_resolved + " (*)(";
+        for (std::size_t i = 0; i < resolved_types.size(); ++i) {
+            callable += (i != 0 ? ", " : "") + resolved_types[i];
         }
-        os << resolved_types[i];
+        callable += ")>(&" + f.qualified_name + "<" + inst.type_args + ">)";
     }
-    os << ")>(&" << f.qualified_name << "<" << inst.type_args << ">)";
+    os << "    " << mod_var << ".def(\"" << inst.py_name << "\", " << adapted(callable, any_needs_truthiness(resolved_types), b);
 
     // Substitute template parameters in default values too, e.g. a default
     // ``typename AType::ValueType{0}`` becomes ``float{0}`` for a float
@@ -1350,7 +2131,7 @@ void emit_function_overload(llvm::raw_string_ostream &os, BoundFunction const &f
         resolved_params.push_back(std::move(p));
     }
     emit_param_args(os, resolved_params, b);
-    emit_function_arg_modifiers(os, f, b);
+    emit_function_arg_modifiers(os, f, b, per_element);
     emit_doc_arg(os, f);
     os << ");\n";
 }
@@ -1374,10 +2155,13 @@ void emit_template_kwargs_dispatcher(llvm::raw_string_ostream &os, BoundFunction
     std::size_t const n            = f.template_kwargs.size();
     std::string const ret_resolved = substitute_template_params(f.return_type, bindings);
     bool const        is_void      = ret_resolved == "void";
+    // The switches are bools by construction, so under nanobind the lambda is
+    // always adapted (see kNanobindTruthiness).
+    bool const adapt = b.is_nanobind();
 
     os << "    " << mod_var << ".def(\n";
     os << "        \"" << first.py_name << "\",\n";
-    os << "        []("; // dispatcher lambda
+    os << "        " << (adapt ? "apiary_nb::adapt(" : "") << "[]("; // dispatcher lambda
     for (std::size_t i = 0; i < f.params.size(); ++i) {
         if (i != 0) {
             os << ", ";
@@ -1437,7 +2221,7 @@ void emit_template_kwargs_dispatcher(llvm::raw_string_ostream &os, BoundFunction
         os << "            }\n";
     }
     os << "            throw " << b.ns << "::value_error(\"unreachable: invalid bool combination\");\n";
-    os << "        }";
+    os << "        }" << (adapt ? ")" : "");
 
     // Resolve default-value template params to concrete types so the
     // emitted py::arg("x") = ... compiles in the binding TU. Mirrors the
@@ -1452,7 +2236,9 @@ void emit_template_kwargs_dispatcher(llvm::raw_string_ostream &os, BoundFunction
     // kw_only() applies to every arg that follows, so emit once.
     os << ", " << b.ns << "::kw_only()";
     for (std::size_t k = 0; k < n; ++k) {
-        os << ", " << b.ns << "::arg(\"" << f.template_kwargs[k] << "\") = " << (f.template_kwarg_defaults[k] ? "true" : "false");
+        // `.none()` under nanobind for the reason emit_param_args gives a bool.
+        os << ", " << b.ns << "::arg(\"" << f.template_kwargs[k] << "\")" << (adapt ? ".none()" : "") << " = "
+           << (f.template_kwarg_defaults[k] ? "true" : "false");
     }
     emit_function_arg_modifiers(os, f, b);
     emit_doc_arg(os, f);
@@ -1472,21 +2258,28 @@ void emit_dtype_dispatcher(llvm::raw_string_ostream &os, BoundFunction const &f,
     }
     std::string const default_dtype = pick_default_dtype(dtype_values);
 
+    // Use first instantiation's resolved param types — they're all
+    // identical across the group by construction.
+    TemplateArgBindings            b0;
+    std::vector<std::string> const s0 = split_instantiation_args(first.type_args);
+    for (std::size_t k = 0; k < f.template_param_names.size() && k < s0.size(); ++k) {
+        b0[f.template_param_names[k]] = s0[k];
+    }
+    std::vector<std::string> param_types;
+    param_types.reserve(f.params.size());
+    for (auto const &p : f.params) {
+        param_types.push_back(substitute_template_params(p.type, b0));
+    }
+    bool const adapt = b.is_nanobind() && any_needs_truthiness(param_types);
+
     os << "    " << mod_var << ".def(\n";
     os << "        \"" << first.py_name << "\",\n";
-    os << "        []("; // dispatcher lambda
+    os << "        " << (adapt ? "apiary_nb::adapt(" : "") << "[]("; // dispatcher lambda
     for (std::size_t i = 0; i < f.params.size(); ++i) {
         if (i != 0) {
             os << ", ";
         }
-        // Use first instantiation's resolved param types — they're all
-        // identical across the group by construction.
-        TemplateArgBindings            b0;
-        std::vector<std::string> const s0 = split_instantiation_args(first.type_args);
-        for (std::size_t k = 0; k < f.template_param_names.size() && k < s0.size(); ++k) {
-            b0[f.template_param_names[k]] = s0[k];
-        }
-        os << substitute_template_params(f.params[i].type, b0) << " " << (f.params[i].name.empty() ? std::string{"arg"} : f.params[i].name);
+        os << param_types[i] << " " << (f.params[i].name.empty() ? std::string{"arg"} : f.params[i].name);
     }
     if (!f.params.empty()) {
         os << ", ";
@@ -1514,8 +2307,8 @@ void emit_dtype_dispatcher(llvm::raw_string_ostream &os, BoundFunction const &f,
         os << "));\n";
         os << "            }\n";
     }
-    os << "            throw " << b.ns << "::value_error(\"unsupported dtype: \" + dtype);\n";
-    os << "        }";
+    os << "            " << throw_value_error_concat(b, "unsupported dtype: ", "dtype") << "\n";
+    os << "        }" << (adapt ? ")" : "");
     emit_param_args(os, f.params, b);
     os << ", " << b.ns << "::arg(\"dtype\") = \"" << default_dtype << "\"";
     emit_function_arg_modifiers(os, f, b);
@@ -1556,16 +2349,25 @@ void emit_function(llvm::raw_string_ostream &os, BoundFunction const &f, Backend
             // that share a Python name (e.g. `cg::custom` overloaded by
             // tensor-vs-no-tensor signature) disambiguate cleanly. When
             // there is no overload the cast is a no-op for the compiler.
-            os << "    " << mod_var << ".def(\"" << py << "\", static_cast<" << f.return_type << "(*)(";
-            for (std::size_t i = 0; i < f.params.size(); ++i) {
-                if (i > 0) {
-                    os << ", ";
-                }
-                os << f.params[i].type;
+            bool const               per_element = needs_per_element_policy(f, f.return_type, f.return_type_canonical, false, b);
+            std::vector<std::string> types;
+            types.reserve(f.params.size());
+            for (auto const &p : f.params) {
+                types.push_back(p.type);
             }
-            os << ")>(&" << f.qualified_name << ")";
+            std::string callable;
+            if (per_element) {
+                callable = per_element_policy_lambda({}, types, forwarding_call(f.qualified_name, types), rvp_directive(f), b);
+            } else {
+                callable = "static_cast<" + f.return_type + "(*)(";
+                for (std::size_t i = 0; i < types.size(); ++i) {
+                    callable += (i > 0 ? ", " : "") + types[i];
+                }
+                callable += ")>(&" + f.qualified_name + ")";
+            }
+            os << "    " << mod_var << ".def(\"" << py << "\", " << adapted(callable, any_needs_truthiness(f.params), b);
             emit_param_args(os, f.params, b);
-            emit_function_arg_modifiers(os, f, b);
+            emit_function_arg_modifiers(os, f, b, per_element);
             emit_doc_arg(os, f);
             os << ");\n";
             break;
@@ -1653,6 +2455,9 @@ void emit_includes_and_ns(llvm::raw_string_ostream &os, EmitOptions const &opts,
         os << "#include " << h << "\n";
     }
     os << "\nnamespace " << b.ns << " = " << b.ns_full << ";\n\n";
+    if (b.is_nanobind()) {
+        os << kNanobindTruthiness;
+    }
 }
 
 // The ``auto _sub_x = m.def_submodule("x");`` preamble for a set of submodule
@@ -1831,9 +2636,10 @@ struct BodyUnit {
 };
 
 // Count binding statements in a unit's emitted text. ``.def`` covers
-// ``.def``/``.def_static``/``.def_property``/``.def_readwrite``/``.def_buffer``;
-// ``.value(`` covers enum values; ``register_exception`` covers @exception
-// classes. (``.def_submodule`` lives in the preamble, never in unit text.)
+// ``.def``/``.def_static``/``.def_property``/``.def_readwrite``/``.def_buffer``
+// and nanobind's ``.def_prop_rw``/``.def_rw``; ``.value(`` covers enum values;
+// ``register_exception`` / ``::exception<`` cover @exception classes.
+// (``.def_submodule`` lives in the preamble, never in unit text.)
 int count_defs(std::string const &s) {
     int  n = 0;
     auto tally = [&](char const *needle, std::size_t len) {
@@ -1846,6 +2652,7 @@ int count_defs(std::string const &s) {
     tally(".def", 4);
     tally(".value(", 7);
     tally("register_exception", 18);
+    tally("::exception<", 12); // nanobind's spelling of the same registration
     return n;
 }
 

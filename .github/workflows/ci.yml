@@ -27,7 +27,9 @@ jobs:
       # The conda-forge clangdev/llvmdev packages provide the CMake config
       # packages find_package(Clang/LLVM CONFIG) needs. pybind11 is what the
       # apiary_examples suite builds the generated extensions against; without
-      # it that suite skips itself. docutils backs the malformed-rest check, so
+      # it that suite skips itself. nanobind is the same for the
+      # apiary_nanobind_* suites, which hold the other backend to the same
+      # examples and fixtures; 3.0 is the oldest release apiary supports. docutils backs the malformed-rest check, so
       # without it apiary_doc_markup skips too - and that suite is the gate that
       # catches a doc comment converting to invalid reST. sphinx is the same
       # story one level up: apiary_sphinx_check only registers when sphinx-build
@@ -49,6 +51,7 @@ jobs:
             zlib
             python
             pybind11
+            nanobind>=3
             docutils
             sphinx
 
@@ -105,6 +108,7 @@ jobs:
             zlib
             python
             pybind11
+            nanobind>=3
             docutils
             sphinx
 
@@ -166,6 +170,7 @@ jobs:
             zstd
             python
             pybind11
+            nanobind>=3
             docutils
             sphinx
 
@@ -231,6 +236,7 @@ jobs:
             zlib
             python
             pybind11
+            nanobind>=3
             docutils
             sphinx
 
