@@ -68,9 +68,10 @@ find_package(LLVM REQUIRED CONFIG)
 # against an older major produces silently wrong bindings rather than a build
 # error. Fail at configure time instead.
 #
-# The floor is the major conda/recipe.yaml pins and CI tests. Majors between
-# this and the known-bad 19 are simply unverified - raise or lower it only
-# alongside a golden run on that version.
+# The floor is the oldest major CI tests; the conda-forge feedstock's recipe
+# pins the major its packages build against. Majors between this and the
+# known-bad 19 are simply unverified - raise or lower it only alongside a golden
+# run on that version.
 set(APIARY_LLVM_VERSION_MIN 22)
 if(LLVM_VERSION_MAJOR VERSION_LESS APIARY_LLVM_VERSION_MIN)
     message(FATAL_ERROR
