@@ -24,8 +24,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Apiary REQUIRED COMPONENTS tool) # apiary::apiary, apiary::annotations, apiary_* helpers
-find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
-find_package(pybind11 CONFIG REQUIRED)
+
+# The binding library: APIARY_BACKEND, pybind11 by default or nanobind, found
+# here with the Python it builds for. Everything below follows from it, and
+# src/module.cpp is written for either. -DAPIARY_STABLE_ABI=ON makes a nanobind
+# build one stable-ABI module for every Python from 3.12 on.
+apiary_find_backend()
 
 # --- The C++ core being bound (header-only here) --------------------------
 add_library(mathx_core INTERFACE)

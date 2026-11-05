@@ -20,8 +20,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Apiary REQUIRED COMPONENTS tool) # apiary::apiary, apiary::annotations, apiary_* helpers
-find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
-find_package(pybind11 CONFIG REQUIRED)
+
+# The binding library: APIARY_BACKEND, pybind11 by default or nanobind, found
+# here with the Python it builds for. Everything below follows from it, and
+# src/module.cpp is written for either. -DAPIARY_STABLE_ABI=ON makes a nanobind
+# build one stable-ABI module for every Python from 3.12 on.
+apiary_find_backend()
 
 # --- The C++ library being bound (header-only here) -----------------------
 add_library(greeter INTERFACE)
@@ -53,8 +57,8 @@ apiary_add_bindings(
     OUT_BINDING _tu  OUT_STUB _stub  OUT_DOCS_JSON _docs
 )
 
-# Assemble the module(s) into one extension. MAIN supplies the
-# PYBIND11_MODULE body and includes the generated register header.
+# Assemble the module(s) into one extension. MAIN supplies the module body
+# and includes the generated register header.
 apiary_aggregate_extension(
     NAME greeter_ext
     MAIN     "${CMAKE_CURRENT_SOURCE_DIR}/src/module.cpp"
@@ -77,6 +81,15 @@ set_target_properties(greeter_ext PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${_pkg}"
 )
 target_link_libraries(greeter_ext PRIVATE greeter)
+
+# A hand-written module beside the generated one, ``greeter._extras``.
+# apiary_add_extension_module builds it with the same library and defines which
+# that is, so src/extras.cpp, written against <apiary/Python.hpp>, names neither.
+apiary_add_extension_module(greeter_extras src/extras.cpp)
+set_target_properties(greeter_extras PROPERTIES
+    OUTPUT_NAME _extras
+    LIBRARY_OUTPUT_DIRECTORY "${_pkg}"
+)
 
 # Stage the package's Python side beside the extension.
 add_custom_target(greeter_python ALL

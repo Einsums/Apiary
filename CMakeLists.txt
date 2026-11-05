@@ -267,6 +267,9 @@ write_basic_package_version_file(
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/ApiaryConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/ApiaryConfigVersion.cmake"
+    # The binding-library helpers ApiaryConfig includes unconditionally; with
+    # the annotations because <apiary/Python.hpp>, which they serve, is too.
+    cmake/ApiaryBackend.cmake
     DESTINATION ${_apiary_cmakedir}
     COMPONENT ApiaryAnnotations
 )
@@ -569,6 +572,51 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                 set_tests_properties(apiary_module_removal PROPERTIES TIMEOUT 900)
             else()
                 message(STATUS "apiary: pybind11 not importable - skipping apiary_examples and apiary_module_removal tests")
+            endif()
+
+            # The same examples and the same test scripts, built against
+            # nanobind: the end-to-end proof that both backends bind one header
+            # to one Python behavior.
+            execute_process(
+                COMMAND "${Python_EXECUTABLE}" -c "import nanobind"
+                RESULT_VARIABLE _apiary_no_nanobind
+                OUTPUT_QUIET ERROR_QUIET
+            )
+            if(_apiary_no_nanobind EQUAL 0)
+                add_test(NAME apiary_nanobind_examples
+                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_examples.sh"
+                            "${CMAKE_CURRENT_SOURCE_DIR}"
+                            "${CMAKE_CURRENT_BINARY_DIR}"
+                            "${CMAKE_COMMAND}"
+                            "${Python_EXECUTABLE}"
+                            "${CMAKE_GENERATOR}"
+                            "$<IF:$<BOOL:${CMAKE_BUILD_TYPE}>,${CMAKE_BUILD_TYPE},Release>"
+                            "${CMAKE_C_COMPILER}"
+                            "${CMAKE_CXX_COMPILER}"
+                            nanobind
+                )
+                set_tests_properties(apiary_nanobind_examples PROPERTIES TIMEOUT 900)
+                # The same examples as one stable-ABI (abi3) extension each, the
+                # build that serves every Python from 3.12 on. The emitted code
+                # then compiles under Py_LIMITED_API, which forbids reaching into
+                # PyTypeObject; below 3.12 nanobind builds an ordinary extension
+                # and the runner says so rather than checking for abi3.
+                add_test(NAME apiary_nanobind_stable_abi_examples
+                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_examples.sh"
+                            "${CMAKE_CURRENT_SOURCE_DIR}"
+                            "${CMAKE_CURRENT_BINARY_DIR}"
+                            "${CMAKE_COMMAND}"
+                            "${Python_EXECUTABLE}"
+                            "${CMAKE_GENERATOR}"
+                            "$<IF:$<BOOL:${CMAKE_BUILD_TYPE}>,${CMAKE_BUILD_TYPE},Release>"
+                            "${CMAKE_C_COMPILER}"
+                            "${CMAKE_CXX_COMPILER}"
+                            nanobind
+                            STABLE_ABI
+                )
+                set_tests_properties(apiary_nanobind_stable_abi_examples PROPERTIES TIMEOUT 900)
+            else()
+                message(STATUS "apiary: nanobind not importable - skipping apiary_nanobind_examples test")
             endif()
         endif()
     endif()

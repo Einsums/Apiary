@@ -32,6 +32,11 @@ include_guard(GLOBAL)
 set(APIARY_HELPERS_DIR "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL
     "Directory containing ApiaryHelpers.cmake and ApiaryRun.cmake")
 
+# The binding-library choice (APIARY_BACKEND, APIARY_STABLE_ABI), finding it
+# (apiary_find_backend) and creating modules with it. A file of its own because
+# it ships with the annotations, for consumers that have no tool.
+include("${CMAKE_CURRENT_LIST_DIR}/ApiaryBackend.cmake")
+
 # Find the include paths libtooling needs and cache them as:
 #   APIARY_RESOURCE_DIR        - clang -resource-dir (builtin headers): apiary's
 #                                own, else a borrowed Clang's (with a warning
@@ -352,11 +357,20 @@ endfunction()
 #       NUM_TU <n>                           # split binding into exactly n shard TUs
 #       EXTRA_FLAGS     <flag...>            # extra -I/-D/... after --
 #       EXTRA_DEPENDS   <file...>            # extra DEPENDS (e.g. Defines.hpp)
-#       BINDING                              # emit the pybind TU (+ stub)
+#       BACKEND         pybind11|nanobind    # binding library the TU targets
+#                                            # (apiary --target); default APIARY_BACKEND
+#       BINDING                              # emit the binding TU (+ stub)
 #       DOCS_JSON                            # emit the docs-json (Python surface)
 #       CPP_DOCS_JSON                        # emit the docs-json (C++ surface)
 #       OUT_BINDING <v>  OUT_STUB <v>  OUT_DOCS_JSON <v>  OUT_CPP_DOCS_JSON <v>
 #   )
+#
+# The binding TU is ``<OUTPUT_NAME>_pybind.cpp`` under pybind11 and
+# ``<OUTPUT_NAME>_nanobind.cpp`` under nanobind. Leaving BACKEND to the
+# build-wide APIARY_BACKEND (see ApiaryBackend.cmake) keeps it and the
+# apiary_aggregate_extension() that compiles the TU in step; a mismatch is
+# refused there, since it would otherwise surface as an undefined register
+# symbol at link time.
 #
 # MAX_DEFS_PER_TU and NUM_TU both split the generated binding into several
 # smaller TUs (``<name>_pybind.shard<k>.cpp``) so a heavily instantiated module
@@ -387,12 +401,13 @@ function(apiary_add_bindings)
     # disabled configuration - reach for it after confirming that, not to
     # silence a failure.
     cmake_parse_arguments(_A "BINDING;DOCS_JSON;CPP_DOCS_JSON;ALLOW_EMPTY"
-        "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;MAX_DEFS_PER_TU;NUM_TU;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON;OUT_CPP_DOCS_JSON"
+        "REGISTER_FUNCTION;MODULE;OUTPUT_DIR;OUTPUT_NAME;CXX_STANDARD;MAX_DEFS_PER_TU;NUM_TU;BACKEND;OUT_BINDING;OUT_STUB;OUT_DOCS_JSON;OUT_CPP_DOCS_JSON"
         "HEADERS;SOURCE_INCLUDES;DEPENDS_TARGETS;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
 
     if(NOT _A_HEADERS)
         message(FATAL_ERROR "apiary_add_bindings: HEADERS is required")
     endif()
+    _apiary_resolve_backend(apiary_add_bindings "${_A_BACKEND}" _A_BACKEND)
     if(NOT _A_OUTPUT_DIR)
         set(_A_OUTPUT_DIR "${CMAKE_BINARY_DIR}/generated/apiary")
     endif()
@@ -449,7 +464,11 @@ function(apiary_add_bindings)
         # The base path apiary writes to. In shard mode it derives the actual
         # outputs as ``<stem>.shard<k>.cpp`` next to this; otherwise it writes
         # this exact file.
-        set(_binding "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}_pybind.cpp")
+        if(_A_BACKEND STREQUAL "nanobind")
+            set(_binding "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}_nanobind.cpp")
+        else()
+            set(_binding "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}_pybind.cpp")
+        endif()
         set(_stub    "${_A_OUTPUT_DIR}/${_A_OUTPUT_NAME}.pyi")
 
         # Default: a single TU. Either split mode replaces _binding_outputs
@@ -500,6 +519,7 @@ function(apiary_add_bindings)
                 execute_process(
                     COMMAND "${_apiary_exe}"
                             --plan --max-defs-per-tu ${_A_MAX_DEFS_PER_TU}
+                            --target ${_A_BACKEND}
                             --register-function ${_A_REGISTER_FUNCTION}
                             --output "${_binding}"
                             ${_source_includes}
@@ -539,6 +559,7 @@ function(apiary_add_bindings)
         set(_apiary_argv
             ${_shard_flags}
             ${_allow_empty_flag}
+            --target ${_A_BACKEND}
             --module ${_A_MODULE}
             --register-function ${_A_REGISTER_FUNCTION}
             --output ${_binding}
@@ -561,6 +582,12 @@ function(apiary_add_bindings)
             VERBATIM
             COMMENT "apiary: generating ${_A_OUTPUT_NAME} bindings + .pyi"
         )
+        # Remembered per generated file, globally rather than as a source-file
+        # property (those are per directory), so apiary_aggregate_extension can
+        # refuse a TU generated for the other backend wherever it is called.
+        foreach(_out IN LISTS _binding_outputs)
+            set_property(GLOBAL PROPERTY "_APIARY_BINDING_BACKEND:${_out}" "${_A_BACKEND}")
+        endforeach()
         if(_A_OUT_BINDING)
             set(${_A_OUT_BINDING} "${_binding_outputs}" PARENT_SCOPE)
         endif()
@@ -675,6 +702,7 @@ function(apiary_add_python_docs)
     endif()
 endfunction()
 
+
 # Internal: write CONTENT to PATH only when it differs from what is there.
 # A file generated at configure time is an input to the build, and a fresh
 # mtime on identical content makes everything that depends on it rebuild on
@@ -692,8 +720,12 @@ endfunction()
 # Assemble per-module bindings into one Python extension.
 #
 #   apiary_aggregate_extension(
-#       NAME <target>                # pybind11 module target to create
-#       MAIN <main.cpp>              # consumer's PYBIND11_MODULE source
+#       NAME <target>                # extension module target to create
+#       MAIN <main.cpp>              # consumer's module-definition source
+#       BACKEND pybind11|nanobind    # default APIARY_BACKEND; must match apiary_add_bindings
+#       NOMINSIZE                    # keep the build type's optimization level (nanobind
+#                                    # otherwise builds for size)
+#       ADD_MODULE_OPTIONS <opt...>  # forwarded to pybind11_add_module / nanobind_add_module
 #       BINDINGS <generated tu...>   # per-module binding TUs (from apiary_add_bindings)
 #       MODULES <name...>            # modules to register
 #       REGISTER_PREFIX <p>          # default apiary_register_
@@ -717,14 +749,28 @@ endfunction()
 # canonical docs.json (apiary_merge_docs_json.py) before rendering, so C++- and
 # Python-origin symbols land on the same submodule pages.
 #
-# Generates the register header, creates the pybind11 module (the consumer
+# The generated MODULES_HEADER declares the register functions, the inline
+# <prefix>all() aggregator, and APIARY_EXTENSION_MODULE(name, m): the backend's
+# own module macro (PYBIND11_MODULE or NB_MODULE). A MAIN written against that
+# macro builds unchanged under either BACKEND:
+#
+#   #include <mylib/Modules.hpp>
+#   APIARY_EXTENSION_MODULE(_core, m) { apiary_register_all(m); }
+#
+# The consumer calls apiary_find_backend() before this (see ApiaryBackend.cmake),
+# which finds the library APIARY_BACKEND names. The module is created as
+# apiary_add_extension_module creates one: APIARY_STABLE_ABI applies, and
+# APIARY_BACKEND_PYBIND11 or APIARY_BACKEND_NANOBIND is defined for MAIN and
+# anything it includes, <apiary/Python.hpp> among them.
+#
+# Generates the register header, creates the extension module (the consumer
 # configures output name / linkage / packaging afterward), and — when the
 # optional groups are given — wires the stub-aggregation (ALL) and docs-render
 # (on-demand) targets using Apiary's bundled scripts (APIARY_SCRIPTS_DIR).
 function(apiary_aggregate_extension)
-    cmake_parse_arguments(_A ""
-        "NAME;MAIN;REGISTER_PREFIX;MODULES_HEADER;MODULES_INCLUDE_DIR;STUBS_TARGET;FRAG_DIR;PKG_DIR;PY_HELPERS_DIR;STUB_OVERLAY;STUB_OVERLAY_CLASS_REGEX;DOCS_TARGET;DOCS_OUTDIR;DOCS_CONTENT_DIR"
-        "MODULES;BINDINGS;STUBS;PY_HELPER_DEPENDS;DOCS_JSON;PY_DOCS_JSON" ${ARGN})
+    cmake_parse_arguments(_A "NOMINSIZE"
+        "NAME;MAIN;BACKEND;REGISTER_PREFIX;MODULES_HEADER;MODULES_INCLUDE_DIR;STUBS_TARGET;FRAG_DIR;PKG_DIR;PY_HELPERS_DIR;STUB_OVERLAY;STUB_OVERLAY_CLASS_REGEX;DOCS_TARGET;DOCS_OUTDIR;DOCS_CONTENT_DIR"
+        "MODULES;BINDINGS;STUBS;PY_HELPER_DEPENDS;DOCS_JSON;PY_DOCS_JSON;ADD_MODULE_OPTIONS" ${ARGN})
 
     foreach(_req NAME MAIN MODULES_HEADER)
         if(NOT _A_${_req})
@@ -734,13 +780,36 @@ function(apiary_aggregate_extension)
     if(NOT _A_REGISTER_PREFIX)
         set(_A_REGISTER_PREFIX "apiary_register_")
     endif()
+    _apiary_resolve_backend(apiary_aggregate_extension "${_A_BACKEND}" _A_BACKEND)
+
+    # A TU generated for the other library declares its register function over
+    # the other library's module_ type. That compiles, and fails only at link
+    # time as an undefined symbol naming neither BACKEND, so refuse it here.
+    # Files apiary_add_bindings did not generate are the caller's own business.
+    foreach(_tu IN LISTS _A_BINDINGS)
+        get_property(_tu_backend GLOBAL PROPERTY "_APIARY_BINDING_BACKEND:${_tu}")
+        if(_tu_backend AND NOT _tu_backend STREQUAL _A_BACKEND)
+            message(FATAL_ERROR "apiary_aggregate_extension(${_A_NAME}): BACKEND is ${_A_BACKEND}, but ${_tu} was "
+                "generated by apiary_add_bindings(... BACKEND ${_tu_backend}). Pass the same BACKEND to both.")
+        endif()
+    endforeach()
+
+    if(_A_BACKEND STREQUAL "nanobind")
+        set(_backend_header "<nanobind/nanobind.h>")
+        set(_module_type "::nanobind::module_")
+        set(_module_macro "NB_MODULE")
+    else()
+        set(_backend_header "<pybind11/pybind11.h>")
+        set(_module_type "::pybind11::module_")
+        set(_module_macro "PYBIND11_MODULE")
+    endif()
 
     # 1. The per-module register declarations + inline <prefix>all() aggregator
     #    the MAIN includes. The only piece that varies with the module set.
     set(_protos "")
     set(_calls "")
     foreach(_m IN LISTS _A_MODULES)
-        string(APPEND _protos "void ${_A_REGISTER_PREFIX}${_m}(::pybind11::module_ &m);\n")
+        string(APPEND _protos "void ${_A_REGISTER_PREFIX}${_m}(${_module_type} &m);\n")
         string(APPEND _calls  "    ${_A_REGISTER_PREFIX}${_m}(m);\n")
     endforeach()
     get_filename_component(_hdr_dir "${_A_MODULES_HEADER}" DIRECTORY)
@@ -749,15 +818,21 @@ function(apiary_aggregate_extension)
         "// Generated by apiary_aggregate_extension. Do not edit.\n"
         "//\n"
         "// Per-module register-function declarations and the inline aggregator\n"
-        "// called from the extension's PYBIND11_MODULE body.\n"
+        "// called from the extension's ${_module_macro} body.\n"
         "\n"
         "#pragma once\n"
         "\n"
-        "#include <pybind11/pybind11.h>\n"
+        "#include ${_backend_header}\n"
+        "\n"
+        "// The binding library's module-definition macro, so the extension's main\n"
+        "// source can be written once for either backend.\n"
+        "#ifndef APIARY_EXTENSION_MODULE\n"
+        "#define APIARY_EXTENSION_MODULE(name, variable) ${_module_macro}(name, variable)\n"
+        "#endif\n"
         "\n"
         "${_protos}"
         "\n"
-        "inline void ${_A_REGISTER_PREFIX}all(::pybind11::module_ &m) {\n"
+        "inline void ${_A_REGISTER_PREFIX}all(${_module_type} &m) {\n"
         "${_calls}"
         "}\n"
     )
@@ -765,7 +840,15 @@ function(apiary_aggregate_extension)
 
     # 2. The extension target. Consumer configures OUTPUT_NAME / output dir /
     #    linkage / packaging after this call.
-    pybind11_add_module(${_A_NAME} "${_A_MAIN}" ${_A_BINDINGS})
+    set(_nominsize "")
+    if(_A_NOMINSIZE)
+        set(_nominsize NOMINSIZE)
+    endif()
+    _apiary_add_module(
+        apiary_aggregate_extension ${_A_NAME} ${_A_BACKEND} ${_nominsize}
+        OPTIONS ${_A_ADD_MODULE_OPTIONS}
+        SOURCES "${_A_MAIN}" ${_A_BINDINGS}
+    )
     if(_A_MODULES_INCLUDE_DIR)
         target_include_directories(${_A_NAME} PRIVATE "${_A_MODULES_INCLUDE_DIR}")
     endif()

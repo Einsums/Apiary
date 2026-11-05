@@ -47,6 +47,8 @@ readonly EXPECTED=(
     apiary_sphinx_check
     apiary_cpp_site
     apiary_examples
+    apiary_nanobind_examples
+    apiary_nanobind_stable_abi_examples
     apiary_doc_lint
     apiary_py_extract
 )

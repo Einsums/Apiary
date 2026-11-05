@@ -63,8 +63,8 @@ apiary_add_bindings(
 )
 
 # Assemble one or more modules into a single Python extension. You supply MAIN
-# (the PYBIND11_MODULE body); the helper generates the register header it
-# includes and creates the pybind11 target.
+# (the module body); the helper generates the register header it includes and
+# creates the pybind11 target (or nanobind's: see "Backend target").
 apiary_aggregate_extension(
     NAME _core
     MAIN     ${CMAKE_SOURCE_DIR}/mylib/src/main.cpp
@@ -82,7 +82,7 @@ target_link_libraries(_core PRIVATE mylib)
 
 ```cpp
 #include <mylib/Modules.hpp>           // generated: declares apiary_register_all()
-PYBIND11_MODULE(_core, m) { apiary_register_all(m); }
+APIARY_EXTENSION_MODULE(_core, m) { apiary_register_all(m); }   // PYBIND11_MODULE or NB_MODULE
 ```
 
 Build and import — the codegen runs as a build edge (re-fires on header changes):
@@ -399,14 +399,16 @@ Only when apiary has none does it borrow the build compiler's (or a conda `clang
 
 1. **Configure** — `apiary_add_bindings()` emits an `add_custom_command` per
    set of headers, and `apiary_aggregate_extension()` writes the register
-   header (`<prefix>all()`) and creates the `pybind11_add_module` target. (In
+   header (`<prefix>all()`) and creates the `pybind11_add_module` (or
+   `nanobind_add_module`) target. (In
    Einsums, `einsums_finalize_pybind()` calls these once per opted-in module.)
 
 2. **Build** — ninja resolves the dependency chain:
    - the `apiary` tool builds first;
    - your C++ library/targets build;
    - for each unit, `apiary` runs over its headers and emits
-     `<name>_pybind.cpp`, containing a `void <register-function>(py::module_ &m)`;
+     `<name>_pybind.cpp` (`<name>_nanobind.cpp` under nanobind), containing a
+     `void <register-function>(py::module_ &m)`;
    - the consumer's `MAIN` and every generated TU compile;
    - the extension links them into one Python module.
 
@@ -436,32 +438,91 @@ Touching an annotated header re-fires only that unit's codegen edge (via the
 
 ## Backend target
 
-apiary can emit code against either pybind11 (default) or
-nanobind. Pass `--target {pybind11,nanobind}` on the command line:
+Apiary emits bindings for pybind11 (the default) or nanobind.
+The same annotated headers bind to the same Python behavior under either, and the test suite holds both to that: every fixture has a golden and a compile check per backend, and every example is built and run against both.
+
+On the command line, pass `--target`:
 
 ```bash
 apiary --target nanobind --module myext header.hpp -- ...
 ```
 
-The output differs in:
+With the CMake helpers the library is a build-wide choice, `APIARY_BACKEND` (`pybind11` by default, or `nanobind`), and a consumer writes nothing specific to either:
 
-- **Headers** — `<pybind11/...>` vs `<nanobind/...>`, with nanobind's
-  STL bindings split per-type (`<nanobind/stl/string.h>`,
-  `<nanobind/stl/vector.h>`, etc.)
-- **Module macro** — `PYBIND11_MODULE` vs `NB_MODULE`
-- **Namespace** — `py::` vs `nb::`
-- **Return value policy** — `py::return_value_policy::reference_internal`
-  vs `nb::rv_policy::reference_internal`
-- **Buffer protocol** — pybind11 emits `.def_buffer()` lambdas; nanobind
-  doesn't have an equivalent directive (use `nb::ndarray<>` for tensor
-  protocol instead). `APIARY_BUFFER_FROM` directives are
-  silently dropped under the nanobind target.
+```cmake
+find_package(Apiary 1.4 REQUIRED COMPONENTS tool)
+apiary_find_backend()        # Python, and the library APIARY_BACKEND names
+apiary_add_bindings(BINDING ...)
+apiary_aggregate_extension(NAME _core MAIN src/main.cpp ...)
+```
 
-The `apiary_aggregate_extension` helper uses pybind11 today.
-Switching the pipeline to nanobind requires also swapping
-`pybind11_add_module` for `nanobind_add_module` and the matching
-`find_package(nanobind)`. The `--target` flag is what makes the rest of
-that switch a one-line change in the cmake hook.
+```cpp
+#include <mylib/Modules.hpp>
+APIARY_EXTENSION_MODULE(_core, m) { apiary_register_all(m); }
+```
+
+Configure with `-DAPIARY_BACKEND=nanobind` to switch.
+A project that builds another Apiary consumer inside its own (Einsums builds Waggle) switches both at once: `apiary_find_backend()` makes its choice the default for the directories below.
+A binding TU generated for one library and handed to an extension of the other is refused at configure time, rather than failing to link.
+
+The pieces, all in `cmake/ApiaryBackend.cmake`:
+
+- **`apiary_find_backend([BACKEND <lib>] [VERSION <v> [EXACT]])`** finds Python and the library, enforces its floor, and sets `APIARY_BACKEND` and `APIARY_BACKEND_VERSION` for the calling directory.
+  `VERSION` is a minimum, or with `EXACT` the one release to accept, which is how an installed package pins its consumers to the release it was built with.
+- **`apiary_add_extension_module(<name> [BACKEND <lib>] [NOMINSIZE] [OPTIONS <opt>...] <source>...)`** builds a hand-written module with the same library, as `apiary_aggregate_extension` builds the generated one.
+- **`NOMINSIZE`**, on either of those, keeps the build type's optimization level; nanobind otherwise builds for size, and pybind11 never does.
+  `ADD_MODULE_OPTIONS` / `OPTIONS` pass anything else to the library's own add-module command.
+- **`APIARY_STABLE_ABI`** builds nanobind modules against the stable ABI (see below).
+
+Both helpers define `APIARY_BACKEND_PYBIND11` or `APIARY_BACKEND_NANOBIND` on the module they create, which is what `<apiary/Python.hpp>` reads.
+That header is for C++ written by hand - a module body, a library header that calls back into Python, a separate module - and names what the two libraries spell differently: `apiary::python::py` (the library's namespace, for the API both spell alike), `apiary::python::PythonError`, `apiary::python::import_module()`, `apiary::python::backend_name` and `APIARY_EXTENSION_MODULE`.
+It and `ApiaryBackend.cmake` install with the annotations, so a package building modules against an installed library needs neither the tool nor Clang/LLVM.
+The `greeter` example's `_extras` module is written this way.
+
+Most of the output differs only in spelling (`py::` / `nb::`, `def_readwrite` / `def_rw`, `def_property` / `def_prop_rw`, `PYBIND11_MODULE` / `NB_MODULE`, `return_value_policy` / `rv_policy`).
+Where nanobind differs in shape, Apiary writes the nanobind form:
+
+- **Ref-qualified methods.**
+  nanobind accepts no ref-qualified member pointer, so `&` and `const &` methods bind through a lambda, as `&&` methods already do under both.
+- **Buffer protocol.**
+  `APIARY_BUFFER_PROTOCOL_STD` becomes a `bf_getbuffer` type slot (`nb::type_slots`), so `memoryview`, `numpy.asarray` and `numpy.array` see the object zero copy, exactly as with pybind11's `.def_buffer`.
+- **Index and iterator protocols.**
+  `APIARY_INDEX_PROTOCOL_STD` and `APIARY_ITERATOR_STD` emit nanobind's slice, tuple and `make_iterator` APIs.
+- **Exceptions.**
+  `APIARY_EXCEPTION` becomes `nb::exception<T>`.
+- **Holders.**
+  `APIARY_HOLDER(std::shared_ptr)` and `APIARY_HOLDER(std::unique_ptr)` need no holder under nanobind, whose smart-pointer casters work for any bound class.
+- **Standard-library casters.**
+  nanobind has one caster header per type; Apiary includes the same set pybind11's `stl.h`, `functional.h`, `complex.h` and `stl/filesystem.h` cover, plus the smart pointers.
+
+The Python API is meant to be the same under both libraries, so Apiary also smooths over the places where nanobind's defaults behave differently at call time:
+
+- **Tuples of references.**
+  nanobind turns `reference` or `reference_internal` on a `std::tuple` / `std::pair` return into `move`, which would move each element out of the object it refers to.
+  Such a function binds through a lambda that casts each element with the policy, and with `self` as its parent for `reference_internal`, as pybind11 does.
+- **None.**
+  nanobind refuses `None` for an annotated argument unless told otherwise.
+  Pointer, `std::optional`, `std::shared_ptr`, `std::function` and `bool` parameters are marked `.none()`, so `None` reaches them as it does under pybind11.
+- **bool.**
+  nanobind's `bool` accepts only `True` and `False`; pybind11's also accepts `numpy.bool_`, and when converting, anything with `__bool__`.
+  `bool` and `std::function<bool(...)>` parameters bind through a caster that follows pybind11's rules, so a predicate returning `np.linalg.norm(r) > tol` works under both.
+- **Errors from a buffer export.**
+  An exception thrown while exporting a buffer reaches Python as a `BufferError` whose `__cause__` is the translated exception, as with pybind11.
+
+Three things pybind11 can express and nanobind cannot are refused under `--target nanobind` with the `unsupported-on-target` diagnostic (an error by default):
+
+- a class with more than one bound base (nanobind has single inheritance only);
+- a holder other than `std::shared_ptr` / `std::unique_ptr`;
+- `APIARY_BUFFER_FROM`, whose helper returns `pybind11::buffer_info` (use `APIARY_BUFFER_PROTOCOL_STD`, which works under both).
+
+nanobind 3.0 or newer is required, and `apiary_find_backend` and the module helpers refuse an older one.
+The 2.x headers call `alloca` from `nb_call.h` without declaring it under `Py_LIMITED_API` (2.8 fails to compile; 2.9 through 2.15 carry the same call), so 2.x cannot give a stable-ABI build, and a 2.x extension cannot share types with a 3.x one in any case.
+The generated code is tested against 3.0.1 and 3.1.
+
+`-DAPIARY_STABLE_ABI=ON` builds every nanobind module as one stable-ABI (abi3) extension that loads on every Python from 3.12 on; pybind11 has no stable-ABI build, so it is refused there.
+`apiary_find_backend()` asks for the `Development.SABIModule` it links against.
+Without that target nanobind quietly builds an ordinary per-version extension, so the helpers refuse the combination on Python 3.12 and newer.
+The generated code compiles under `Py_LIMITED_API`; the examples are built and run that way.
 
 ## Stub generation (`.pyi`)
 
