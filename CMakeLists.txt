@@ -619,6 +619,44 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
             else()
                 message(STATUS "apiary: nanobind not importable - skipping apiary_nanobind_examples test")
             endif()
+
+            # The examples again with MSVC's cl.exe, on Windows. The suites above
+            # compile with the compiler apiary was built with, which on Windows is
+            # clang-cl, and generated code that clang accepts is not code cl.exe
+            # accepts: nanobind's adapters once deduced a noexcept after a pack,
+            # which cl.exe refuses (C3547). conda-forge's compilers, and so a
+            # consumer's build there, are cl.exe. Registers when cl.exe is on PATH,
+            # as it is in the CI job's MSVC developer environment, which also gives
+            # apiary's libclang the INCLUDE paths a cl.exe build cannot be probed for.
+            if(WIN32)
+                find_program(APIARY_MSVC_CL cl)
+                if(APIARY_MSVC_CL)
+                    foreach(_apiary_msvc_backend pybind11 nanobind)
+                        if(_apiary_msvc_backend STREQUAL "pybind11")
+                            set(_apiary_msvc_ok ${_apiary_no_pybind11})
+                        else()
+                            set(_apiary_msvc_ok ${_apiary_no_nanobind})
+                        endif()
+                        if(_apiary_msvc_ok EQUAL 0)
+                            add_test(NAME apiary_msvc_${_apiary_msvc_backend}_examples
+                                COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_examples.sh"
+                                        "${CMAKE_CURRENT_SOURCE_DIR}"
+                                        "${CMAKE_CURRENT_BINARY_DIR}"
+                                        "${CMAKE_COMMAND}"
+                                        "${Python_EXECUTABLE}"
+                                        "${CMAKE_GENERATOR}"
+                                        "$<IF:$<BOOL:${CMAKE_BUILD_TYPE}>,${CMAKE_BUILD_TYPE},Release>"
+                                        "${APIARY_MSVC_CL}"
+                                        "${APIARY_MSVC_CL}"
+                                        ${_apiary_msvc_backend}
+                            )
+                            set_tests_properties(apiary_msvc_${_apiary_msvc_backend}_examples PROPERTIES TIMEOUT 900)
+                        endif()
+                    endforeach()
+                else()
+                    message(STATUS "apiary: cl.exe not on PATH - skipping apiary_msvc_*_examples tests")
+                endif()
+            endif()
         endif()
     endif()
     # apiary_doc_lint.py: doc-quality validator over the docs-JSON IR. Pure Python,

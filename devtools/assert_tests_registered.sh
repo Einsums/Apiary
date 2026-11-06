@@ -53,10 +53,19 @@ readonly EXPECTED=(
     apiary_py_extract
 )
 
+# Windows only: the examples built with cl.exe, which the CI job's MSVC developer
+# environment puts on PATH.
+expected=("${EXPECTED[@]}")
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+        expected+=(apiary_msvc_pybind11_examples apiary_msvc_nanobind_examples)
+        ;;
+esac
+
 listing="$(ctest --test-dir "${BUILD}" -N 2>/dev/null)"
 
 missing=()
-for name in "${EXPECTED[@]}"; do
+for name in "${expected[@]}"; do
     if ! grep -q "[[:space:]]${name}\$" <<<"${listing}"; then
         missing+=("${name}")
     fi
@@ -76,4 +85,4 @@ if (( ${#missing[@]} != 0 )); then
     exit 1
 fi
 
-echo "assert_tests_registered: all ${#EXPECTED[@]} suites registered"
+echo "assert_tests_registered: all ${#expected[@]} suites registered"
