@@ -246,25 +246,49 @@ template <typename T, typename R, typename... A> struct param<T, std::function<R
     }
 };
 
-template <typename R, typename... A, bool NE> auto adapt(R (*f)(A...) noexcept(NE)) {
-    return [f](typename param<A>::type... a) -> R { return f(param<A>::unwrap(a)...); };
-}
+// How adapt() wraps each kind of callable, by its type. noexcept is matched by a specialization of
+// its own rather than deduced as noexcept(NE): MSVC refuses a template parameter that follows a
+// pack (C3547), and after the pack is the only place NE could go.
+template <typename T> struct adapter;
 
-template <typename R, typename C, typename... A, bool NE> auto adapt(R (C::*f)(A...) noexcept(NE)) {
-    return [f](C &self, typename param<A>::type... a) -> R { return (self.*f)(param<A>::unwrap(a)...); };
-}
+template <typename R, typename... A> struct adapter<R (*)(A...)> {
+    template <typename F> static auto wrap(F f) {
+        return [f](typename param<A>::type... a) -> R { return f(param<A>::unwrap(a)...); };
+    }
+};
+template <typename R, typename... A> struct adapter<R (*)(A...) noexcept> : adapter<R (*)(A...)> {};
 
-template <typename R, typename C, typename... A, bool NE> auto adapt(R (C::*f)(A...) const noexcept(NE)) {
-    return [f](C const &self, typename param<A>::type... a) -> R { return (self.*f)(param<A>::unwrap(a)...); };
-}
+template <typename R, typename C, typename... A> struct adapter<R (C::*)(A...)> {
+    template <typename F> static auto wrap(F f) {
+        return [f](C &self, typename param<A>::type... a) -> R { return (self.*f)(param<A>::unwrap(a)...); };
+    }
+};
+template <typename R, typename C, typename... A> struct adapter<R (C::*)(A...) noexcept> : adapter<R (C::*)(A...)> {};
 
-template <typename F, typename R, typename... A> auto adapt_closure(F f, R (F::*)(A...) const) {
-    return [f](typename param<A>::type... a) -> R { return f(param<A>::unwrap(a)...); };
-}
+template <typename R, typename C, typename... A> struct adapter<R (C::*)(A...) const> {
+    template <typename F> static auto wrap(F f) {
+        return [f](C const &self, typename param<A>::type... a) -> R { return (self.*f)(param<A>::unwrap(a)...); };
+    }
+};
+template <typename R, typename C, typename... A>
+struct adapter<R (C::*)(A...) const noexcept> : adapter<R (C::*)(A...) const> {};
 
-// A lambda the emitter already wrote (a dispatcher, a ref-qualified method).
-template <typename F> auto adapt(F f) -> decltype(adapt_closure(f, &F::operator())) {
-    return adapt_closure(f, &F::operator());
+// A lambda the emitter already wrote (a dispatcher, a ref-qualified method): what its call
+// operator takes, without the closure itself.
+template <typename T> struct closure_adapter;
+
+template <typename R, typename L, typename... A> struct closure_adapter<R (L::*)(A...) const> {
+    template <typename F> static auto wrap(F f) {
+        return [f](typename param<A>::type... a) -> R { return f(param<A>::unwrap(a)...); };
+    }
+};
+
+template <typename F> auto adapt(F f) {
+    if constexpr (std::is_class_v<F>) {
+        return closure_adapter<decltype(&F::operator())>::wrap(f);
+    } else {
+        return adapter<F>::wrap(f);
+    }
 }
 
 template <typename T, typename... A> auto init() {
