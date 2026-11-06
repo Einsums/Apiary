@@ -168,9 +168,19 @@ for case in "${CASES[@]}"; do
     grep -qE "\.def|${CLASS_SPELLING}" "${tu}" \
         || { dump_tree "${bin}"; fail "${name}: generated TU binds nothing (empty module)"; }
 
+    # That the stable-ABI build is one. What makes it one is compiling under
+    # Py_LIMITED_API, which nanobind's STABLE_ABI defines, so every platform
+    # checks the build rules for it. Linux and macOS also name the module for
+    # it (_core.abi3.so); Windows does not, since a stable-ABI module there is
+    # an ordinary _core.pyd that links python3.dll.
     if (( EXPECT_ABI3 )); then
+        grep -qs "Py_LIMITED_API" "${bin}/build.ninja" "${bin}"/*.vcxproj "${bin}"/Makefile "${bin}"/CMakeFiles/*/flags.make \
+            || fail "${name}: STABLE_ABI requested, but nothing in the build compiles under Py_LIMITED_API"
         core="$(find "${bin}/${name}" -maxdepth 1 -name '_core.*' ! -name '*.pyi' | head -1)"
-        [[ "${core}" == *.abi3.* ]] || fail "${name}: STABLE_ABI requested, but the extension is ${core:-missing}"
+        [[ -n "${core}" ]] || fail "${name}: no extension module was built"
+        if ! command -v cygpath >/dev/null 2>&1; then
+            [[ "${core}" == *.abi3.* ]] || fail "${name}: STABLE_ABI requested, but the extension is ${core}"
+        fi
     fi
 
     # A built extension that cannot be imported is still a broken example.
