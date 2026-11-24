@@ -418,15 +418,7 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                 # One clang invocation per fixture, each pulling in the whole of
                 # pybind11 - slower than the text-diffing suites by a lot.
                 set_tests_properties(apiary_compile_check PROPERTIES TIMEOUT 600)
-                add_test(NAME apiary_fast_dispatch
-                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_fast_dispatch.sh"
-                            "$<TARGET_FILE:apiary>"
-                            "${CMAKE_CURRENT_SOURCE_DIR}/include"
-                            "${_apiary_test_py}"
-                            "${CMAKE_CXX_COMPILER}"
-                            "${_apiary_python_include}"
-                            "${_apiary_pybind_include}"
-                )
+
             else()
                 message(STATUS "apiary: pybind11 not importable - skipping apiary_compile_check test")
             endif()
@@ -565,6 +557,20 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                 # Builds two extensions from scratch; well past the 1500s default
                 # on a cold CI runner is unlikely, but the codegen is not fast.
                 set_tests_properties(apiary_examples PROPERTIES TIMEOUT 900)
+                # Single-entry dispatch, run: binds the fast_dispatch fixture, builds it
+                # with pybind11_add_module, and checks each dispatched name against its
+                # ordered-search twin from Python.
+                add_test(NAME apiary_fast_dispatch
+                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_fast_dispatch.sh"
+                            "$<TARGET_FILE:apiary>"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                            "${Python_EXECUTABLE}"
+                            "${CMAKE_COMMAND}"
+                            "${CMAKE_GENERATOR}"
+                            "$<IF:$<BOOL:${CMAKE_BUILD_TYPE}>,${CMAKE_BUILD_TYPE},Release>"
+                            "${CMAKE_C_COMPILER}"
+                            "${CMAKE_CXX_COMPILER}"
+                )
                 # Drops modules from a built consumer and rebuilds the same
                 # tree; its stubs and docs must lose the removed modules. Same
                 # installed-Apiary setup, and the same requirements, as above.

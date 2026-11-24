@@ -13,23 +13,34 @@
 # neither says the dispatcher picks the overload the ordered search would, which is its whole
 # contract.
 #
-# usage: run_fast_dispatch.sh <apiary> <include-dir> <python> <cxx> <python-include> <pybind11-include>
+# The extension is built through CMake with pybind11_add_module, with the generator and compilers
+# the suite was configured with, so each platform links it the way a real project would. Warnings
+# are errors under GCC and Clang: the helpers apiary writes into every pybind11 TU must compile
+# clean there.
+#
+# usage: run_fast_dispatch.sh <apiary> <include-dir> <python> <cmake> <generator> <build-type> <c> <cxx>
 
 set -euo pipefail
 
-if [[ $# -ne 6 ]]; then
-    echo "usage: $0 <apiary> <include-dir> <python> <cxx> <python-include> <pybind11-include>" >&2
+if [[ $# -ne 8 ]]; then
+    echo "usage: $0 <apiary> <include-dir> <python> <cmake> <generator> <build-type> <c> <cxx>" >&2
     exit 64
 fi
 
 readonly TOOL="$1"
 readonly INCLUDE_DIR="$2"
 readonly PY="$3"
-readonly CXX_="$4"
-readonly PY_INCLUDE="$5"
-readonly PYBIND_INCLUDE="$6"
+readonly CMAKE="$4"
+readonly GENERATOR="$5"
+readonly BUILD_TYPE="${6:-Release}"
+readonly CC_="$7"
+readonly CXX_="$8"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly FIXTURE_DIR="${SCRIPT_DIR}/fixtures"
+
+native() {
+    if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
@@ -42,13 +53,27 @@ cd "${SCRIPT_DIR}"
         -- -std=c++20 -nostdinc++ "-I${INCLUDE_DIR}"
 } > "${WORK}/module.cpp"
 
-suffix="$("${PY}" -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")"
-link=(-shared)
-if [[ "$(uname -s)" == Darwin ]]; then
-    link+=(-undefined dynamic_lookup)
-fi
-"${CXX_}" -std=c++20 -O1 -fPIC "${link[@]}" -Werror -Wall -Wextra \
-    "-I${FIXTURE_DIR}" "-I${INCLUDE_DIR}" "-I${PY_INCLUDE}" "-I${PYBIND_INCLUDE}" \
-    "${WORK}/module.cpp" -o "${WORK}/fixture_fast_dispatch${suffix}"
+cat > "${WORK}/CMakeLists.txt" <<CMAKE
+cmake_minimum_required(VERSION 3.20)
+project(apiary_fast_dispatch_check LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(pybind11 CONFIG REQUIRED)
+pybind11_add_module(fixture_fast_dispatch module.cpp)
+target_include_directories(fixture_fast_dispatch PRIVATE "$(native "${FIXTURE_DIR}")" "$(native "${INCLUDE_DIR}")")
+if(NOT MSVC AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+    target_compile_options(fixture_fast_dispatch PRIVATE -Wall -Wextra -Werror)
+endif()
+# One directory whatever the generator, so the check knows where to import from.
+set_target_properties(fixture_fast_dispatch PROPERTIES LIBRARY_OUTPUT_DIRECTORY "\$<1:\${CMAKE_BINARY_DIR}/out>")
+CMAKE
 
-"${PY}" "${SCRIPT_DIR}/fast_dispatch_check.py" "${WORK}"
+backend_dir="$("${PY}" -c 'import pybind11; print(pybind11.get_cmake_dir())')"
+"${CMAKE}" -S "$(native "${WORK}")" -B "$(native "${WORK}/build")" -G "${GENERATOR}" \
+    -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DCMAKE_C_COMPILER="${CC_}" -DCMAKE_CXX_COMPILER="${CXX_}" \
+    -DCMAKE_PREFIX_PATH="${backend_dir}" -DPython_EXECUTABLE="${PY}" > "${WORK}/configure.log" 2>&1 \
+    || { cat "${WORK}/configure.log" >&2; exit 1; }
+"${CMAKE}" --build "$(native "${WORK}/build")" --config "${BUILD_TYPE}"
+
+"${PY}" "$(native "${SCRIPT_DIR}/fast_dispatch_check.py")" "$(native "${WORK}/build/out")"

@@ -19,6 +19,13 @@ namespace py = pybind11;
 #include <type_traits>
 #include <utility>
 
+// pybind11 gives its namespace hidden visibility under GCC and Clang; a helper holding one of its
+// casters must match, or GCC warns that the helper is more visible than its own field. The test is
+// pybind11's own (detail/pybind11_namespace_macros.h).
+#if defined(__GNUG__) && !defined(_WIN32)
+#    pragma GCC visibility push(hidden)
+#endif
+
 namespace apiary_fast {
 
 // A conversion that did not take: the dispatcher hands the call to the ordered search instead.
@@ -169,6 +176,10 @@ struct arg {
 };
 
 } // namespace apiary_fast
+
+#if defined(__GNUG__) && !defined(_WIN32)
+#    pragma GCC visibility pop
+#endif
 
 PYBIND11_MODULE(fixture_enums, m) {
     py::enum_<einsums::fixture::Layout>(m, "Layout")
