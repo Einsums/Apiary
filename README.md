@@ -140,6 +140,7 @@ production builds carry no overhead.
 | `APIARY_RVP(reference_internal)` | Set `return_value_policy`. Argument is the unqualified policy name. |
 | `APIARY_KEEP_ALIVE(0, 1)` | Emit `py::keep_alive<nurse, patient>()`. |
 | `APIARY_RELEASE_GIL` | Wrap the call in `py::call_guard<py::gil_scoped_release>()`. |
+| `APIARY_NO_FAST_DISPATCH` | Keep pybind11's ordered overload search for this function's Python name (see [Large overload sets](#large-overload-sets--single-entry-dispatch-pybind11)). |
 | `APIARY_OPERATOR("__add__")` | Bind the method as a Python operator instead of a named function. |
 
 ### Properties
@@ -241,6 +242,34 @@ Recognized dtype aliases (numpy convention): `float32`/`f4`/`f`/`single`
 (complex<float>), `complex128`/`complex`/`c16`/`D` (complex<double>).
 The default dtype is `float64` if `double` is in the group, otherwise
 the first instantiation's first alias.
+
+#### Large overload sets → single-entry dispatch (pybind11)
+
+pybind11 resolves an overloaded name by trying each overload in declaration order.
+A rejected overload is not cheap: its argument casters fail, then probe for a module-local type registered by another extension, at about 0.3 µs per overload on an Apple M-series machine.
+A name with one instantiation per dtype and per owning or view operand pays that for every instantiation ahead of the one that matches.
+
+Under `--target pybind11`, a Python name with four or more instantiations therefore binds as one entry.
+The entry reads the exact Python types of the class-typed parameters that differ between instantiations, finds the instantiation they name, converts each argument once, and calls it.
+Its cost does not grow with the overload count.
+
+The ordered overload set is still built, under the same name, and is the entry's fallback.
+Any call the table does not take goes to it unchanged: another type, a subclass, a foreign extension's class, an argument that does not convert, or an unknown keyword.
+Overload choice, conversions, error messages, and `help()` text are the ones the ordered search gives.
+
+The table also respects pybind11's first-match rule.
+When an earlier instantiation's casters could accept a row's key types (a registered base class, or a type with implicit conversions into it), that row is left to the ordered search.
+When only a later one could, the row is taken only if its arguments load without conversion, as pybind11's first pass would take it.
+
+The codegen keeps the ordered search for a name when:
+
+- it carries `APIARY_NO_FAST_DISPATCH`;
+- fewer than four instantiations share it, or another bound function defines the same Python name;
+- the instantiations cannot be told apart by their class-typed parameters (they differ only in scalar types);
+- it uses `APIARY_RVP`, `APIARY_KEEP_ALIVE` or `APIARY_RELEASE_GIL`, returns a pointer or reference, or expands a parameter pack.
+
+`.pyi` stubs are unaffected: each instantiation is still its own `@overload`.
+nanobind rejects an overload for about 20 ns, so `--target nanobind` binds the ordered set as before.
 
 #### Bool template parameters → kwargs
 

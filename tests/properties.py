@@ -51,6 +51,9 @@ from pathlib import Path
 # `m.def( "name", [](...` once flattened, and requiring `def("` missed exactly
 # the dtype- and bool-dispatcher entries - the most heavily generated ones.
 _DEF = re.compile(r'(\w+)\.def(?:_static)?\( ?"([^"]+)"')
+# A single-entry dispatcher (a large pybind11 overload set) is not a `.def`: it is
+# assigned to the module attribute, `m.attr("name") = py::cpp_function(...)`.
+_ATTR_DEF = re.compile(r'(\w+)\.attr\("([^"]+)"\) = py::cpp_function\(')
 # Template arguments nest (`py::class_<Tensor<double, std::allocator<double>>>`),
 # so match lazily up to the `>(` that opens the registration call.
 _CLASS = re.compile(r'py::class_<.*?>\( ?(\w+), "([^"]+)"')
@@ -101,7 +104,7 @@ def cpp_surface(cpp: str) -> set[str]:
     for pattern in (_CLASS, _ENUM, _EXCEPTION):
         for var, name in pattern.findall(cpp):
             out.add(f"{var_to_path.get(var, '')}:{name}")
-    for var, name in _DEF.findall(cpp):
+    for var, name in _DEF.findall(cpp) + _ATTR_DEF.findall(cpp):
         # Only module-level receivers count; a class member's `.def` captures no
         # receiver, and `py::init` / helper calls are not `.def("name"` at all.
         if var not in var_to_path and var != "m":
@@ -153,6 +156,13 @@ PYBIND11_MODULE(m, m) {
       "lambda_bodied",
       [](int seed, std::string const &dtype) -> py::object { return py::none(); },
       py::arg("seed"), py::arg("dtype") = "float64");
+  {
+    py::object apiary_fallback = py::none();
+    apiary_fallback = py::cpp_function(&ns::fill, py::name("fill"), py::scope(_sub_core), py::sibling(apiary_fallback));
+    _sub_core.attr("fill") = py::cpp_function(
+        [apiary_fallback](py::args args, py::kwargs kwargs) -> py::object { return apiary_fallback(*args, **kwargs); },
+        py::name("fill"), py::scope(_sub_core), py::doc(""));
+  }
 }
 """
 
@@ -163,6 +173,7 @@ _PARSER_EXPECTED = {
     ":plain",                  # ordinary module-level def
     "core.deep:wrapped_name",  # def wrapped by clang-format, nested submodule
     ":lambda_bodied",          # def whose body is a lambda (space after the paren)
+    "core:fill",               # single-entry dispatcher, assigned rather than def'd
     # and NOT "norm": a class member chains off py::class_ and has no receiver
 }
 

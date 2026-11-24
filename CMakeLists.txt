@@ -418,6 +418,15 @@ if(EINSUMS_WITH_TESTS OR CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
                 # One clang invocation per fixture, each pulling in the whole of
                 # pybind11 - slower than the text-diffing suites by a lot.
                 set_tests_properties(apiary_compile_check PROPERTIES TIMEOUT 600)
+                add_test(NAME apiary_fast_dispatch
+                    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_fast_dispatch.sh"
+                            "$<TARGET_FILE:apiary>"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                            "${_apiary_test_py}"
+                            "${CMAKE_CXX_COMPILER}"
+                            "${_apiary_python_include}"
+                            "${_apiary_pybind_include}"
+                )
             else()
                 message(STATUS "apiary: pybind11 not importable - skipping apiary_compile_check test")
             endif()

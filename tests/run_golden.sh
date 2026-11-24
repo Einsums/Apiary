@@ -66,6 +66,7 @@ readonly CASES=(
     "fixture_exceptions|exceptions.hpp|exceptions.cpp.golden"
     "fixture_variadic_pack|variadic_pack.hpp|variadic_pack.cpp.golden"
     "fixture_protocols|protocols.hpp|protocols.cpp.golden"
+    "fixture_fast_dispatch|fast_dispatch.hpp|fast_dispatch.cpp.golden"
 )
 
 # Run apiary over one fixture, writing the generated TU to $1.

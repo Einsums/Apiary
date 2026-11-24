@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_set>
@@ -2096,7 +2097,7 @@ std::string resolved_arg_signature(BoundFunction const &f, BoundInstantiation co
 
 // Emit a single overload of a templated free function via static_cast<>.
 void emit_function_overload(llvm::raw_string_ostream &os, BoundFunction const &f, BoundInstantiation const &inst, Backend const &b,
-                            std::string const &mod_var) {
+                            std::string const &mod_var, std::string const *chain_var = nullptr) {
     TemplateArgBindings            bindings;
     std::vector<std::string> const split = split_instantiation_args(inst.type_args);
     for (std::size_t i = 0; i < f.template_param_names.size() && i < split.size(); ++i) {
@@ -2134,7 +2135,14 @@ void emit_function_overload(llvm::raw_string_ostream &os, BoundFunction const &f
         }
         callable += ")>(&" + f.qualified_name + "<" + inst.type_args + ">)";
     }
-    os << "    " << mod_var << ".def(\"" << inst.py_name << "\", " << adapted(callable, any_needs_truthiness(resolved_types), b);
+    if (chain_var != nullptr) {
+        // One link of an overload chain built by hand, as m.def builds it, but held in a variable
+        // instead of the module attribute.
+        os << "        " << *chain_var << " = py::cpp_function(" << callable << ", py::name(\"" << inst.py_name << "\"), py::scope("
+           << mod_var << "), py::sibling(" << *chain_var << ")";
+    } else {
+        os << "    " << mod_var << ".def(\"" << inst.py_name << "\", " << adapted(callable, any_needs_truthiness(resolved_types), b);
+    }
 
     // Substitute template parameters in default values too, e.g. a default
     // ``typename AType::ValueType{0}`` becomes ``float{0}`` for a float
@@ -2158,6 +2166,224 @@ void emit_function_overload(llvm::raw_string_ostream &os, BoundFunction const &f
     emit_function_arg_modifiers(os, f, b, per_element);
     emit_doc_arg(os, f);
     os << ");\n";
+}
+
+// Whether a resolved parameter type may name a bound class, which is what a single-entry dispatcher
+// keys on: anything but a fundamental type, a fixed-width alias, or a std:: or binding-library type.
+// A guess that is wrong costs nothing but speed: a type pybind11 has not registered has no type
+// object, and its row is left to the ordered search.
+bool names_bound_class(std::string const &type) {
+    llvm::StringRef r       = llvm::StringRef(type).trim();
+    bool            changed = true;
+    while (changed) {
+        changed = false;
+        for (llvm::StringRef suffix : {"&", "*", "const"}) {
+            if (r.consume_back(suffix)) {
+                r       = r.rtrim();
+                changed = true;
+            }
+        }
+        if (r.consume_front("const ")) {
+            r       = r.ltrim();
+            changed = true;
+        }
+    }
+    r.consume_front("::");
+    // A dependent member type (`typename Tensor<float>::ValueType`) is how a scalar tied to an
+    // operand's element type is spelled; it is almost never a bound class.
+    if (r.empty() || r.starts_with("typename ") || r.starts_with("std::") || r.starts_with("py::") || r.starts_with("pybind11::") ||
+        r.ends_with("_t")) {
+        return false;
+    }
+    static constexpr llvm::StringRef kFundamental[] = {"bool",  "char",   "signed",  "unsigned", "short",    "int",      "long",
+                                                       "float", "double", "wchar_t", "char8_t",  "char16_t", "char32_t", "void"};
+    llvm::StringRef const            first          = r.split(' ').first;
+    for (llvm::StringRef const f : kFundamental) {
+        if (first == f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// One instantiation as the single-entry dispatcher calls it.
+struct ResolvedCall {
+    std::string              return_type;
+    std::vector<std::string> types;
+    std::vector<std::string> defaults; ///< Resolved default expression per parameter, or empty.
+    std::string              callable; ///< A function-pointer expression for this instantiation.
+};
+
+/// @brief The resolved signature of @p inst, or nothing when it is not one the dispatcher can call.
+std::optional<ResolvedCall> resolve_call(BoundFunction const &f, BoundInstantiation const &inst) {
+    TemplateArgBindings            bindings;
+    std::vector<std::string> const split = split_instantiation_args(inst.type_args);
+    for (std::size_t i = 0; i < f.template_param_names.size() && i < split.size(); ++i) {
+        bindings[f.template_param_names[i]] = split[i];
+    }
+    std::vector<ExpandedParam> declared;
+    declared.reserve(f.params.size());
+    for (std::size_t i = 0; i < f.params.size(); ++i) {
+        declared.push_back({f.params[i].type, param_name_or_slot(f.params[i], i)});
+    }
+    std::vector<ExpandedParam> const expanded = expand_parameter_pack(declared, f.template_param_names, split);
+    if (expanded.size() != f.params.size()) {
+        return std::nullopt; // a parameter pack: the names no longer line up with the declaration
+    }
+    ResolvedCall call;
+    call.return_type = substitute_template_params(f.return_type, bindings);
+    for (std::size_t i = 0; i < expanded.size(); ++i) {
+        call.types.push_back(substitute_template_params(expanded[i].type, bindings));
+        call.defaults.push_back(f.params[i].default_value ? substitute_template_params(*f.params[i].default_value, bindings)
+                                                          : std::string{});
+    }
+    call.callable = "static_cast<" + call.return_type + " (*)(";
+    for (std::size_t i = 0; i < call.types.size(); ++i) {
+        call.callable += (i != 0 ? ", " : "") + call.types[i];
+    }
+    call.callable += ")>(&" + f.qualified_name + "<" + inst.type_args + ">)";
+    return call;
+}
+
+/**
+ * @brief Bind an overload set as one entry that picks its instantiation by exact argument type.
+ *
+ * pybind11 resolves an overloaded name by trying the overloads in order, and each rejected one costs
+ * a failed conversion and a probe for a module-local type registered by another extension, about
+ * 0.3 us. A name with one instantiation per dtype and per owning or view operand paid that for every
+ * instantiation ahead of the match. This emits the overloads under a private name, exactly as before,
+ * and the public name as a dispatcher: it reads the exact types of the class-typed parameters whose
+ * types differ between instantiations, finds the instantiation they name in a table built on the
+ * first call, converts each argument once to its known type, and calls it. Anything else - another
+ * type, a subclass, a foreign extension's class, a conversion that does not take, an unknown keyword -
+ * goes to the private overload set, so conversions and error messages are exactly what they were.
+ *
+ * @return False, having emitted nothing, when the set is not one the dispatcher can take: a
+ *         parameter pack, a return by pointer or reference, a call modifier (return policy,
+ *         keep-alive, released GIL), or instantiations its class-typed parameters cannot tell apart.
+ */
+bool emit_fast_dispatch(llvm::raw_string_ostream &os, BoundFunction const &f, std::vector<BoundInstantiation const *> const &group,
+                        Backend const &b, std::string const &mod_var, std::set<std::string> const &shared_names) {
+    if (b.is_nanobind() || group.size() < 4 || has_directive(f, "no_fast_dispatch") || has_directive(f, "release_gil") ||
+        has_directive(f, "keep_alive") || has_directive(f, "rvp") ||
+        shared_names.count(submodule_path_for(f) + "/" + group.front()->py_name) != 0) {
+        return false;
+    }
+    std::vector<ResolvedCall> calls;
+    for (auto const *inst : group) {
+        auto call = resolve_call(f, *inst);
+        if (!call || call->types.size() != f.params.size()) {
+            return false;
+        }
+        llvm::StringRef ret = llvm::StringRef(call->return_type).trim();
+        if (ret.ends_with("&") || ret.ends_with("*") || needs_per_element_policy(f, call->return_type, f.return_type_canonical, false, b)) {
+            return false;
+        }
+        calls.push_back(std::move(*call));
+    }
+    std::size_t const        count = f.params.size();
+    std::vector<std::size_t> keys;
+    for (std::size_t j = 0; j < count; ++j) {
+        bool differs = false;
+        bool classes = true;
+        for (auto const &call : calls) {
+            differs = differs || call.types[j] != calls.front().types[j];
+            classes = classes && names_bound_class(call.types[j]);
+        }
+        if (differs && classes) {
+            keys.push_back(j);
+        }
+    }
+    if (keys.empty()) {
+        return false;
+    }
+    for (std::size_t x = 0; x < calls.size(); ++x) {
+        for (std::size_t y = x + 1; y < calls.size(); ++y) {
+            bool same = true;
+            for (std::size_t const j : keys) {
+                same = same && calls[x].types[j] == calls[y].types[j];
+            }
+            if (same) {
+                return false; // two instantiations the class-typed parameters cannot tell apart
+            }
+        }
+    }
+
+    std::string const name  = group.front()->py_name;
+    std::size_t const rows  = calls.size();
+    std::size_t const nkeys = keys.size();
+    os << "    // " << name << ": one entry keyed on the exact types of its class-typed arguments, falling back to the ordered\n"
+       << "    // overload set, which keeps the public name, so its errors and docstring are the ones it always had.\n";
+    os << "    {\n";
+    os << "        py::object apiary_fallback = py::none();\n";
+    std::string const chain = "apiary_fallback";
+    for (auto const *inst : group) {
+        emit_function_overload(os, f, *inst, b, mod_var, &chain);
+    }
+    os << "        std::string const apiary_doc = py::str(apiary_fallback.attr(\"__doc__\"));\n";
+    os << "        py::options       apiary_options;\n";
+    os << "        apiary_options.disable_function_signatures();\n";
+    os << "        " << mod_var << ".attr(\"" << name << "\") = py::cpp_function(\n";
+    os << "            [apiary_fallback](py::args args, py::kwargs kwargs) -> py::object {\n";
+    os << "                static char const *const names[] = {";
+    for (std::size_t j = 0; j < count; ++j) {
+        os << (j != 0 ? ", " : "") << "\"" << param_name_or_slot(f.params[j], j) << "\"";
+    }
+    os << "};\n";
+    os << "                std::size_t const positional = static_cast<std::size_t>(PyTuple_GET_SIZE(args.ptr()));\n";
+    os << "                if (positional <= " << count << " && apiary_fast::keywords_fit(kwargs, names, " << count << ", positional)) {\n";
+    os << "                    static apiary_fast::table<" << rows << ", " << nkeys << "> const table{{";
+    bool first = true;
+    for (auto const &call : calls) {
+        for (std::size_t const j : keys) {
+            os << (first ? "" : ", ") << "apiary_fast::type_of<" << call.types[j] << ">()";
+            first = false;
+        }
+    }
+    os << "}};\n";
+    os << "                    PyObject *const keys[] = {";
+    for (std::size_t k = 0; k < nkeys; ++k) {
+        os << (k != 0 ? ", " : "") << "apiary_fast::find(args, kwargs, " << keys[k] << ", names[" << keys[k] << "])";
+    }
+    os << "};\n";
+    os << "                    {\n";
+    os << "                        try {\n";
+    for (std::size_t i = 0; i < rows; ++i) {
+        auto const &call = calls[i];
+        os << "                            if (table.matches(" << i << ", keys)) {\n";
+        os << "                                bool const convert = !table.strict[" << i << "];\n";
+        for (std::size_t j = 0; j < count; ++j) {
+            os << "                                apiary_fast::arg<" << call.types[j] << "> a" << j << ";\n";
+            if (call.defaults[j].empty()) {
+                os << "                                a" << j << ".load(apiary_fast::find(args, kwargs, " << j << ", names[" << j
+                   << "]), convert);\n";
+            } else {
+                os << "                                a" << j << ".load_or(apiary_fast::find(args, kwargs, " << j << ", names[" << j
+                   << "]), convert, [] { return py::cast(" << call.defaults[j] << "); });\n";
+            }
+        }
+        os << "                                auto const fn = " << call.callable << ";\n";
+        std::string args_list;
+        for (std::size_t j = 0; j < count; ++j) {
+            args_list += (j != 0 ? ", " : "") + std::string("a") + std::to_string(j) + ".get()";
+        }
+        if (llvm::StringRef(call.return_type).trim() == "void") {
+            os << "                                fn(" << args_list << ");\n";
+            os << "                                return py::none();\n";
+        } else {
+            os << "                                return py::cast(fn(" << args_list << "));\n";
+        }
+        os << "                            }\n";
+    }
+    os << "                        } catch (apiary_fast::miss const &) {\n";
+    os << "                        }\n";
+    os << "                    }\n";
+    os << "                }\n";
+    os << "                return apiary_fallback(*args, **kwargs);\n";
+    os << "            },\n";
+    os << "            py::name(\"" << name << "\"), py::scope(" << mod_var << "), py::doc(apiary_doc.c_str()));\n";
+    os << "    }\n";
+    return true;
 }
 
 // Emit a Python-level dispatcher for a sub-group of instantiations that
@@ -2340,7 +2566,35 @@ void emit_dtype_dispatcher(llvm::raw_string_ostream &os, BoundFunction const &f,
     os << ");\n";
 }
 
-void emit_function(llvm::raw_string_ostream &os, BoundFunction const &f, Backend const &b, std::string const &mod_var) {
+/**
+ * @brief The Python names, as ``<submodule path>/<name>``, that more than one bound function defines.
+ *
+ * pybind11 chains a definition onto whatever already sits at its name, so a name two C++ functions
+ * share is one overload set built across both. A single-entry dispatcher replaces the attribute, and
+ * a later definition would chain behind it, never to be reached; such a name keeps the ordered search.
+ */
+std::set<std::string> shared_python_names(Module const &module_) {
+    std::map<std::string, std::size_t> owners;
+    for (auto const &f : module_.functions) {
+        std::set<std::string> mine;
+        for (auto const &ov : f.python_overloads) {
+            mine.insert(submodule_path_for(f) + "/" + (ov.kind == PythonOverload::Kind::NonTemplate ? py_name_for(f) : ov.py_name));
+        }
+        for (auto const &n : mine) {
+            ++owners[n];
+        }
+    }
+    std::set<std::string> shared;
+    for (auto const &[n, c] : owners) {
+        if (c > 1) {
+            shared.insert(n);
+        }
+    }
+    return shared;
+}
+
+void emit_function(llvm::raw_string_ostream &os, BoundFunction const &f, Backend const &b, std::string const &mod_var,
+                   std::set<std::string> const &shared_names) {
     if (is_hidden(f)) {
         return;
     }
@@ -2365,7 +2619,28 @@ void emit_function(llvm::raw_string_ostream &os, BoundFunction const &f, Backend
         return out;
     };
 
-    for (auto const &ov : f.python_overloads) {
+    for (std::size_t at = 0; at < f.python_overloads.size(); ++at) {
+        auto const &ov = f.python_overloads[at];
+        // An overload set is recorded one entry per instantiation; the run sharing a Python name is
+        // one set, and may bind as a single entry.
+        if (ov.kind == PythonOverload::Kind::OverloadSet) {
+            std::size_t              end = at;
+            std::vector<std::size_t> indices;
+            while (end < f.python_overloads.size() && f.python_overloads[end].kind == PythonOverload::Kind::OverloadSet &&
+                   f.python_overloads[end].py_name == ov.py_name) {
+                indices.insert(indices.end(), f.python_overloads[end].instantiation_indices.begin(),
+                               f.python_overloads[end].instantiation_indices.end());
+                ++end;
+            }
+            auto const group = resolve(indices);
+            if (!emit_fast_dispatch(os, f, group, b, mod_var, shared_names)) {
+                for (auto const *inst : group) {
+                    emit_function_overload(os, f, *inst, b, mod_var);
+                }
+            }
+            at = end - 1;
+            continue;
+        }
         switch (ov.kind) {
         case PythonOverload::Kind::NonTemplate: {
             std::string const py = py_name_for(f);
@@ -2468,6 +2743,174 @@ std::string format_cpp(std::string const &source, llvm::StringRef path_hint) {
 // The ``#include "..."`` source headers, the backend's own headers, and the
 // ``namespace py = pybind11;`` alias — everything between the leading banner
 // comment and the entry block.
+// Written into every pybind11 TU, after the includes: the helpers a single-entry dispatcher calls.
+//
+// pybind11 resolves an overloaded name by trying each overload in turn, and a rejected one is not
+// cheap: its type caster fails, then probes for a module-local type registered by another
+// extension. A name with dozens of instantiations (one per dtype and per owning/view operand)
+// paid that probe for every instantiation ahead of the one that matched, about 0.3 us each. A
+// dispatcher looks the instantiation up from the exact types of the class-typed arguments
+// instead, and converts each argument once, to a type known to match.
+constexpr char const *kPybindFastDispatch = R"apiary(#include <array>
+#include <cstddef>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+
+namespace apiary_fast {
+
+// A conversion that did not take: the dispatcher hands the call to the ordered search instead.
+struct miss {};
+
+// The Python type object pybind11 registered for the class behind parameter type P; null when none is.
+template <typename P>
+PyTypeObject *type_of() {
+    using T                     = std::remove_cv_t<std::remove_pointer_t<std::remove_reference_t<P>>>;
+    py::detail::type_info *info = py::detail::get_type_info(typeid(T));
+    return info != nullptr ? info->type : nullptr;
+}
+
+// Whether a caster for the class behind `param` could accept an object of type `given`: the same
+// type, a subclass, or any type at all when something is registered as implicitly converting to it.
+inline bool may_accept(PyTypeObject *given, PyTypeObject *param) {
+    if (given == nullptr || param == nullptr) {
+        return false;
+    }
+    if (given == param || PyType_IsSubtype(given, param) != 0) {
+        return true;
+    }
+    py::detail::type_info *info = py::detail::get_type_info(param);
+    return info != nullptr && !info->implicit_conversions.empty();
+}
+
+// The key types of each instantiation, in declaration order, and what the ordered search would do
+// with them. pybind11 takes the first overload whose casters accept, in a pass without conversions
+// and then a pass with them. A row another row's casters could also accept is not a unique match:
+// when that other row comes first the dispatcher leaves the row to the ordered search, and when it
+// comes later the row is taken only if its arguments load without conversion, as the first pass
+// would take it.
+template <std::size_t Rows, std::size_t Keys>
+struct table {
+    std::array<PyTypeObject *, Rows * Keys> types;
+    std::array<bool, Keys>                  active{};
+    std::array<bool, Rows>                  usable{};
+    std::array<bool, Rows>                  strict{};
+
+    // A column no row has a registered class for is a scalar the codegen took for a class; it
+    // keys nothing, and the instantiations are told apart by the others.
+    explicit table(std::array<PyTypeObject *, Rows * Keys> const &t) : types(t) {
+        for (std::size_t k = 0; k < Keys; ++k) {
+            for (std::size_t i = 0; i < Rows; ++i) {
+                active[k] = active[k] || types[i * Keys + k] != nullptr;
+            }
+        }
+        for (std::size_t i = 0; i < Rows; ++i) {
+            usable[i] = true;
+            for (std::size_t k = 0; k < Keys; ++k) {
+                usable[i] = usable[i] && (!active[k] || types[i * Keys + k] != nullptr);
+            }
+            for (std::size_t j = 0; j < i && usable[i]; ++j) {
+                bool same = true;
+                for (std::size_t k = 0; k < Keys; ++k) {
+                    same = same && (!active[k] || types[i * Keys + k] == types[j * Keys + k]);
+                }
+                usable[i] = !same; // the live columns cannot tell it from an earlier row
+            }
+        }
+        for (std::size_t i = 0; i < Rows; ++i) {
+            if (!usable[i]) {
+                continue;
+            }
+            for (std::size_t j = 0; j < Rows; ++j) {
+                if (j == i || !accepts(j, i)) {
+                    continue;
+                }
+                if (j < i) {
+                    usable[i] = false;
+                } else {
+                    strict[i] = true;
+                }
+            }
+        }
+    }
+    [[nodiscard]] bool accepts(std::size_t j, std::size_t i) const {
+        for (std::size_t k = 0; k < Keys; ++k) {
+            if (active[k] && !may_accept(types[i * Keys + k], types[j * Keys + k])) {
+                return false;
+            }
+        }
+        return true;
+    }
+    [[nodiscard]] bool matches(std::size_t i, PyObject *const *keys) const {
+        if (!usable[i]) {
+            return false;
+        }
+        for (std::size_t k = 0; k < Keys; ++k) {
+            if (active[k] && (keys[k] == nullptr || Py_TYPE(keys[k]) != types[i * Keys + k])) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+// The argument for parameter i, positional or by keyword, borrowed; null when absent.
+inline PyObject *find(py::args const &args, py::kwargs const &kwargs, std::size_t i, char const *name) {
+    if (i < static_cast<std::size_t>(PyTuple_GET_SIZE(args.ptr()))) {
+        return PyTuple_GET_ITEM(args.ptr(), static_cast<Py_ssize_t>(i));
+    }
+    return kwargs ? PyDict_GetItemString(kwargs.ptr(), name) : nullptr;
+}
+
+// Whether every keyword names a parameter not already given by position.
+inline bool keywords_fit(py::kwargs const &kwargs, char const *const *names, std::size_t count, std::size_t positional) {
+    if (!kwargs) {
+        return true;
+    }
+    for (auto item : kwargs) {
+        char const *key = PyUnicode_AsUTF8(item.first.ptr());
+        if (key == nullptr) {
+            PyErr_Clear();
+            return false;
+        }
+        bool known = false;
+        for (std::size_t i = positional; i < count && !known; ++i) {
+            known = std::string_view{key} == names[i];
+        }
+        if (!known) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// One parameter's conversion, held for the call so a reference into it stays valid.
+template <typename P>
+struct arg {
+    py::detail::make_caster<P> caster;
+    py::object                 keep;
+
+    void load(PyObject *given, bool convert) {
+        if (given == nullptr || !caster.load(py::handle(given), convert)) {
+            throw miss{};
+        }
+    }
+    template <typename Default>
+    void load_or(PyObject *given, bool convert, Default &&make_default) {
+        if (given == nullptr) {
+            keep  = make_default();
+            given = keep.ptr();
+        }
+        load(given, convert);
+    }
+    P get() { return py::detail::cast_op<P>(caster); }
+};
+
+} // namespace apiary_fast
+
+)apiary";
+
 void emit_includes_and_ns(llvm::raw_string_ostream &os, EmitOptions const &opts, Backend const &b) {
     for (auto const &inc : opts.source_includes) {
         os << "#include \"" << inc << "\"\n";
@@ -2481,6 +2924,8 @@ void emit_includes_and_ns(llvm::raw_string_ostream &os, EmitOptions const &opts,
     os << "\nnamespace " << b.ns << " = " << b.ns_full << ";\n\n";
     if (b.is_nanobind()) {
         os << kNanobindTruthiness;
+    } else {
+        os << kPybindFastDispatch;
     }
 }
 
@@ -2622,8 +3067,9 @@ std::string emit(Module const &module_, EmitOptions const &opts) {
         emit_class(os, *n, bound_class_names, b, submodule_var_name(submodule_path_for(*n)));
     }
 
+    std::set<std::string> const shared_names = shared_python_names(module_);
     for (auto const &f : module_.functions) {
-        emit_function(os, f, b, submodule_var_name(submodule_path_for(f)));
+        emit_function(os, f, b, submodule_var_name(submodule_path_for(f)), shared_names);
     }
 
     os << "}\n";
@@ -2794,11 +3240,12 @@ std::vector<BodyUnit> collect_body_units(Module const &module_, Backend const &b
         collect_class_units(*n, bound_class_names, b, units);
     }
 
+    std::set<std::string> const shared_names = shared_python_names(module_);
     for (auto const &f : module_.functions) {
         std::string const path = submodule_path_for(f);
         std::string buf;
         llvm::raw_string_ostream os(buf);
-        emit_function(os, f, b, submodule_var_name(path));
+        emit_function(os, f, b, submodule_var_name(path), shared_names);
         os.flush();
         push_unit(std::move(buf), path, units);
     }

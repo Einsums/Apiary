@@ -12,6 +12,164 @@
 
 namespace py = pybind11;
 
+#include <array>
+#include <cstddef>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+
+namespace apiary_fast {
+
+// A conversion that did not take: the dispatcher hands the call to the ordered search instead.
+struct miss {};
+
+// The Python type object pybind11 registered for the class behind parameter type P; null when none is.
+template <typename P>
+PyTypeObject *type_of() {
+    using T                     = std::remove_cv_t<std::remove_pointer_t<std::remove_reference_t<P>>>;
+    py::detail::type_info *info = py::detail::get_type_info(typeid(T));
+    return info != nullptr ? info->type : nullptr;
+}
+
+// Whether a caster for the class behind `param` could accept an object of type `given`: the same
+// type, a subclass, or any type at all when something is registered as implicitly converting to it.
+inline bool may_accept(PyTypeObject *given, PyTypeObject *param) {
+    if (given == nullptr || param == nullptr) {
+        return false;
+    }
+    if (given == param || PyType_IsSubtype(given, param) != 0) {
+        return true;
+    }
+    py::detail::type_info *info = py::detail::get_type_info(param);
+    return info != nullptr && !info->implicit_conversions.empty();
+}
+
+// The key types of each instantiation, in declaration order, and what the ordered search would do
+// with them. pybind11 takes the first overload whose casters accept, in a pass without conversions
+// and then a pass with them. A row another row's casters could also accept is not a unique match:
+// when that other row comes first the dispatcher leaves the row to the ordered search, and when it
+// comes later the row is taken only if its arguments load without conversion, as the first pass
+// would take it.
+template <std::size_t Rows, std::size_t Keys>
+struct table {
+    std::array<PyTypeObject *, Rows * Keys> types;
+    std::array<bool, Keys>                  active{};
+    std::array<bool, Rows>                  usable{};
+    std::array<bool, Rows>                  strict{};
+
+    // A column no row has a registered class for is a scalar the codegen took for a class; it
+    // keys nothing, and the instantiations are told apart by the others.
+    explicit table(std::array<PyTypeObject *, Rows * Keys> const &t) : types(t) {
+        for (std::size_t k = 0; k < Keys; ++k) {
+            for (std::size_t i = 0; i < Rows; ++i) {
+                active[k] = active[k] || types[i * Keys + k] != nullptr;
+            }
+        }
+        for (std::size_t i = 0; i < Rows; ++i) {
+            usable[i] = true;
+            for (std::size_t k = 0; k < Keys; ++k) {
+                usable[i] = usable[i] && (!active[k] || types[i * Keys + k] != nullptr);
+            }
+            for (std::size_t j = 0; j < i && usable[i]; ++j) {
+                bool same = true;
+                for (std::size_t k = 0; k < Keys; ++k) {
+                    same = same && (!active[k] || types[i * Keys + k] == types[j * Keys + k]);
+                }
+                usable[i] = !same; // the live columns cannot tell it from an earlier row
+            }
+        }
+        for (std::size_t i = 0; i < Rows; ++i) {
+            if (!usable[i]) {
+                continue;
+            }
+            for (std::size_t j = 0; j < Rows; ++j) {
+                if (j == i || !accepts(j, i)) {
+                    continue;
+                }
+                if (j < i) {
+                    usable[i] = false;
+                } else {
+                    strict[i] = true;
+                }
+            }
+        }
+    }
+    [[nodiscard]] bool accepts(std::size_t j, std::size_t i) const {
+        for (std::size_t k = 0; k < Keys; ++k) {
+            if (active[k] && !may_accept(types[i * Keys + k], types[j * Keys + k])) {
+                return false;
+            }
+        }
+        return true;
+    }
+    [[nodiscard]] bool matches(std::size_t i, PyObject *const *keys) const {
+        if (!usable[i]) {
+            return false;
+        }
+        for (std::size_t k = 0; k < Keys; ++k) {
+            if (active[k] && (keys[k] == nullptr || Py_TYPE(keys[k]) != types[i * Keys + k])) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+// The argument for parameter i, positional or by keyword, borrowed; null when absent.
+inline PyObject *find(py::args const &args, py::kwargs const &kwargs, std::size_t i, char const *name) {
+    if (i < static_cast<std::size_t>(PyTuple_GET_SIZE(args.ptr()))) {
+        return PyTuple_GET_ITEM(args.ptr(), static_cast<Py_ssize_t>(i));
+    }
+    return kwargs ? PyDict_GetItemString(kwargs.ptr(), name) : nullptr;
+}
+
+// Whether every keyword names a parameter not already given by position.
+inline bool keywords_fit(py::kwargs const &kwargs, char const *const *names, std::size_t count, std::size_t positional) {
+    if (!kwargs) {
+        return true;
+    }
+    for (auto item : kwargs) {
+        char const *key = PyUnicode_AsUTF8(item.first.ptr());
+        if (key == nullptr) {
+            PyErr_Clear();
+            return false;
+        }
+        bool known = false;
+        for (std::size_t i = positional; i < count && !known; ++i) {
+            known = std::string_view{key} == names[i];
+        }
+        if (!known) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// One parameter's conversion, held for the call so a reference into it stays valid.
+template <typename P>
+struct arg {
+    py::detail::make_caster<P> caster;
+    py::object                 keep;
+
+    void load(PyObject *given, bool convert) {
+        if (given == nullptr || !caster.load(py::handle(given), convert)) {
+            throw miss{};
+        }
+    }
+    template <typename Default>
+    void load_or(PyObject *given, bool convert, Default &&make_default) {
+        if (given == nullptr) {
+            keep  = make_default();
+            given = keep.ptr();
+        }
+        load(given, convert);
+    }
+    P get() { return py::detail::cast_op<P>(caster); }
+};
+
+} // namespace apiary_fast
+
 PYBIND11_MODULE(fixture_namespace_module, m) {
     // Submodules declared via @module directives.
     auto _sub_graph     = m.def_submodule("graph");

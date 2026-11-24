@@ -296,6 +296,13 @@
 /// @brief Wrap the call in py::call_guard<py::gil_scoped_release>().
 #define APIARY_RELEASE_GIL APIARY_DETAIL_ANNOTATE("release_gil")
 
+/// @brief Keep pybind11's ordered overload search for this function's Python name.
+///
+/// Under pybind11, a name with four or more instantiations is bound as one entry that picks the
+/// instantiation from the exact types of its class-typed arguments, falling back to the ordered
+/// search on a miss. This opts a function out.
+#define APIARY_NO_FAST_DISPATCH APIARY_DETAIL_ANNOTATE("no_fast_dispatch")
+
 /// @brief Variadic-pack expansion for templated method/ctor binding.
 ///
 /// Indicates that the (assumed-last) parameter is a parameter pack, and that the
